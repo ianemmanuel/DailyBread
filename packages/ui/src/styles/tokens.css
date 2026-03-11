@@ -1,222 +1,148 @@
-@import "tailwindcss";
-
-/* ========================================
-   BAKERY SUNSET THEME
-   Warm bread, white coffee, golden hour
-   Brand Identity: Fresh, warm, inviting
-   ======================================== */
-
-@theme {
-  /* Peach Sunset (Main Brand) - Soft, warm, appetizing */
-  --color-peach-50: #FFF8F3;
-  --color-peach-100: #FFEDE0;
-  --color-peach-200: #FFD9C0;
-  --color-peach-300: #FFC49F;
-  --color-peach-400: #FFAA7A;
-  --color-peach-500: #FF8F5C;  /* Main brand - warm peach */
-  --color-peach-600: #F56E3D;
-  --color-peach-700: #D9502A;
-  --color-peach-800: #B33B1D;
-  --color-peach-900: #8A2C15;
-
-  /* Cream (Latte foam, fresh bread crust) */
-  --color-cream-50: #FFFCF8;
-  --color-cream-100: #FFF8F0;
-  --color-cream-200: #FFF0E0;
-  --color-cream-300: #FFE4C8;
-  --color-cream-400: #FFD4A8;
-  --color-cream-500: #FFC488;
-  --color-cream-600: #E5A868;
-  --color-cream-700: #C48A4E;
-  --color-cream-800: #9E6D3A;
-  --color-cream-900: #7A5329;
-
-  /* Coffee (White coffee, cappuccino) */
-  --color-coffee-50: #FAF8F5;
-  --color-coffee-100: #F2EDE6;
-  --color-coffee-200: #E5D9CC;
-  --color-coffee-300: #D4C2AE;
-  --color-coffee-400: #BFA58A;
-  --color-coffee-500: #A8896B;  /* Cappuccino color */
-  --color-coffee-600: #8B6F52;
-  --color-coffee-700: #6E563F;
-  --color-coffee-800: #54402F;
-  --color-coffee-900: #3D2E21;
-
-  /* Mint Cream (Fresh herbs on pastries) */
-  --color-mint-50: #F5FBF8;
-  --color-mint-100: #E8F7F0;
-  --color-mint-200: #CEEEE0;
-  --color-mint-300: #ADE2C9;
-  --color-mint-400: #88D4AF;
-  --color-mint-500: #67C496;  /* Soft mint for accents */
-  --color-mint-600: #4BA57C;
-  --color-mint-700: #3A8563;
-  --color-mint-800: #2D664C;
-  --color-mint-900: #224D39;
-
-  /* Lavender (Edible flowers, premium touch) */
-  --color-lavender-50: #FAF9FC;
-  --color-lavender-100: #F3F0F8;
-  --color-lavender-200: #E7E0F0;
-  --color-lavender-300: #D5C9E5;
-  --color-lavender-400: #BFB0D6;
-  --color-lavender-500: #A898C7;
-  --color-lavender-600: #8B7AB0;
-  --color-lavender-700: #6E5F91;
-  --color-lavender-800: #544872;
-  --color-lavender-900: #3F3556;
-
-  /* Warm Gray (Stone oven, artisan) */
-  --color-stone-50: #FAF9F7;
-  --color-stone-100: #F4F2EE;
-  --color-stone-200: #E8E4DC;
-  --color-stone-300: #D6D0C4;
-  --color-stone-400: #BEB6A6;
-  --color-stone-500: #A39988;
-  --color-stone-600: #857C6D;
-  --color-stone-700: #686156;
-  --color-stone-800: #4E4943;
-  --color-stone-900: #383530;
-
-  /* Charcoal (Text, dark mode) */
-  --color-charcoal-50: #F7F7F7;
-  --color-charcoal-100: #E6E6E6;
-  --color-charcoal-200: #CCCCCC;
-  --color-charcoal-300: #ABABAB;
-  --color-charcoal-400: #757575;
-  --color-charcoal-500: #525252;
-  --color-charcoal-600: #3D3D3D;
-  --color-charcoal-700: #2B2B2B;
-  --color-charcoal-800: #1A1A1A;
-  --color-charcoal-900: #0D0D0D;
-
-  /* Radius */
-  --radius: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-md: 0.375rem;
-  --radius-sm: 0.25rem;
-  --radius-full: 9999px;
-}
-
-/* ========================================
-   SEMANTIC TOKENS - Light Mode
-   ======================================== */
+/* ============================================================
+   @repo/ui — tokens.css
+   Brand skeleton. Defines the contract. Apps override values,
+   never the token names.
+   ============================================================ */
 
 :root {
-  /* Base */
-  --background: #FFFFFF;
-  --foreground: #1A1A1A;
+  --radius: 0.9rem;
 
-  /* Cards */
-  --card: #FFFFFF;
-  --card-foreground: #1A1A1A;
+  /* ---------- Warm Neutral Base ---------- */
+  --background:         oklch(0.99 0.006 68);
+  --foreground:         oklch(0.18 0.018 45);
 
-  /* Primary - Warm peach (vendor dashboard brand) */
-  --primary: #FF8F5C;
-  --primary-foreground: #FFFFFF;
+  --card:               oklch(1 0.003 68);
+  --card-foreground:    oklch(0.18 0.018 45);
 
-  /* Accent - Mint for fresh/healthy */
-  --accent: #67C496;
-  --accent-foreground: #FFFFFF;
+  --popover:            oklch(1 0.003 68);
+  --popover-foreground: oklch(0.18 0.018 45);
 
-  /* Secondary */
-  --secondary: #F4F2EE;
-  --secondary-foreground: #2B2B2B;
+  /* ---------- Primary — Soft Terracotta ---------- */
+  --primary:            oklch(0.62 0.16 42);
+  --primary-foreground: oklch(0.99 0.006 68);
 
-  /* Muted */
-  --muted: #F4F2EE;
-  --muted-foreground: #686156;
+  /* ---------- Secondary ---------- */
+  --secondary:          oklch(0.94 0.018 68);
+  --secondary-foreground: oklch(0.28 0.018 45);
 
-  /* Borders */
-  --border: #E8E4DC;
-  --input: #E8E4DC;
-  --ring: #FF8F5C;
+  /* ---------- Muted ---------- */
+  --muted:              oklch(27.765% 0.0265 68.807);
+  --muted-foreground:   oklch(0.52 0.018 55);
 
-  /* Destructive */
-  --destructive: #DC2626;
-  --destructive-foreground: #FFFFFF;
+  /* ---------- Accent — Warm Gold ---------- */
+  --accent:             oklch(0.82 0.12 72);
+  --accent-foreground:  oklch(0.18 0.018 45);
 
-  /* Popover */
-  --popover: #FFFFFF;
-  --popover-foreground: #1A1A1A;
+  /* ---------- Deep / Dark surface ---------- */
+  --deep:               oklch(0.22 0.028 42);
+  --deep-foreground:    oklch(0.97 0.008 68);
 
-  /* Chart Colors */
-  --chart-1: #FF8F5C;   /* Peach - main */
-  --chart-2: #67C496;   /* Mint - secondary */
-  --chart-3: #FFC488;   /* Cream - tertiary */
-  --chart-4: #A898C7;   /* Lavender - accent */
-  --chart-5: #A39988;   /* Stone - neutral */
+  /* ---------- Destructive ---------- */
+  --destructive:        oklch(0.58 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
 
-  /* Financial Colors */
-  --color-profit: #67C496;    /* Mint green for profit */
-  --color-loss: #DC2626;      /* Red for loss */
-  --color-revenue: #FFC488;   /* Cream/gold for revenue */
+  /* ---------- Chrome ---------- */
+  --border:             oklch(0.88 0.014 68);
+  --input:              oklch(0.88 0.014 68);
+  --ring:               oklch(0.62 0.16 42);
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-card: 0 2px 8px 0 rgb(255 143 92 / 0.08);
-  --shadow-md: 0 4px 12px 0 rgb(255 143 92 / 0.12);
-  --shadow-lg: 0 8px 24px 0 rgb(255 143 92 / 0.16);
+  /* ---------- Shadows ---------- */
+  --shadow-primary:     oklch(0.62 0.16 42 / 35%);
+  --shadow-warm:        oklch(0.18 0.028 42 / 12%);
+
+  /* ---------- Chart palette (food-warm) ---------- */
+  --chart-1: oklch(0.82 0.13 72);
+  --chart-2: oklch(0.70 0.16 48);
+  --chart-3: oklch(0.60 0.18 38);
+  --chart-4: oklch(0.50 0.15 35);
+  --chart-5: oklch(0.40 0.12 32);
+
+  /* ---------- Sidebar ---------- */
+  --sidebar:            oklch(0.985 0.004 68);
+  --sidebar-foreground: oklch(0.18 0.018 45);
+  --sidebar-primary:    var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent:     oklch(0.92 0.02 68);
+  --sidebar-accent-foreground: oklch(0.28 0.018 45);
+  --sidebar-border:     oklch(0.88 0.014 68);
+  --sidebar-ring:       var(--ring);
 }
 
-/* ========================================
-   DARK MODE - Warm Evening Bakery
-   ======================================== */
-
+/* ------------------------------------------------ */
+/* DARK MODE                                        */
+/* ------------------------------------------------ */
 .dark {
-  /* Base - Warm dark, not cold */
-  --background: #1A1A1A;
-  --foreground: #FFFFFF;
+  --background:         oklch(0.16 0.018 42);
+  --foreground:         oklch(0.96 0.006 68);
 
-  /* Cards */
-  --card: #2B2B2B;
-  --card-foreground: #FFFFFF;
+  --card:               oklch(0.20 0.022 42);
+  --card-foreground:    oklch(0.96 0.006 68);
 
-  /* Primary - Lighter peach for dark */
-  --primary: #FFAA7A;
-  --primary-foreground: #1A1A1A;
+  --popover:            oklch(0.20 0.022 42);
+  --popover-foreground: oklch(0.96 0.006 68);
 
-  /* Accent */
-  --accent: #88D4AF;
-  --accent-foreground: #1A1A1A;
+  --primary:            oklch(0.68 0.17 44);
+  --primary-foreground: oklch(0.99 0.006 68);
 
-  /* Secondary */
-  --secondary: #3D3D3D;
-  --secondary-foreground: #FFFFFF;
+  --secondary:          oklch(0.26 0.018 45);
+  --secondary-foreground: oklch(0.94 0.008 68);
 
-  /* Muted */
-  --muted: #3D3D3D;
-  --muted-foreground: #ABABAB;
+  --muted:              oklch(0.26 0.018 45);
+  --muted-foreground:   oklch(0.66 0.018 60);
 
-  /* Borders */
-  --border: #3D3D3D;
-  --input: #3D3D3D;
-  --ring: #FFAA7A;
+  --accent:             oklch(0.30 0.025 65);
+  --accent-foreground:  oklch(0.96 0.006 68);
 
-  /* Destructive */
-  --destructive: #EF4444;
-  --destructive-foreground: #FFFFFF;
+  --deep:               oklch(0.12 0.022 42);
+  --deep-foreground:    oklch(0.97 0.008 68);
 
-  /* Popover */
-  --popover: #2B2B2B;
-  --popover-foreground: #FFFFFF;
+  --destructive:        oklch(0.62 0.19 25);
+  --destructive-foreground: oklch(0.99 0 0);
 
-  /* Chart Colors - Brighter for dark */
-  --chart-1: #FFAA7A;
-  --chart-2: #88D4AF;
-  --chart-3: #FFD4A8;
-  --chart-4: #BFB0D6;
-  --chart-5: #BEB6A6;
+  --border:             oklch(1 0 0 / 10%);
+  --input:              oklch(1 0 0 / 14%);
+  --ring:               oklch(0.70 0.17 44);
 
-  /* Financial Colors */
-  --color-profit: #88D4AF;
-  --color-loss: #EF4444;
-  --color-revenue: #FFD4A8;
+  --shadow-primary:     oklch(0.68 0.17 44 / 40%);
+  --shadow-warm:        oklch(0 0 0 / 30%);
 
-  /* Shadows - Deeper in dark */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
-  --shadow-card: 0 2px 8px 0 rgb(0 0 0 / 0.5);
-  --shadow-md: 0 4px 12px 0 rgb(0 0 0 / 0.6);
-  --shadow-lg: 0 8px 24px 0 rgb(0 0 0 / 0.7);
+  --sidebar:            oklch(0.20 0.022 42);
+  --sidebar-foreground: oklch(0.96 0.006 68);
+  --sidebar-accent:     oklch(0.28 0.025 65);
+  --sidebar-accent-foreground: oklch(0.96 0.006 68);
+  --sidebar-border:     oklch(1 0 0 / 10%);
+}
+
+/* ------------------------------------------------ */
+/* BASE RESETS                                      */
+/* ------------------------------------------------ */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--muted);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--primary); }
 }
