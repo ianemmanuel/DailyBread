@@ -1,7 +1,8 @@
 import { ReactNode } from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
-import { OnboardingStepIndicator } from "@/components/onboarding"
+import { OnboardingNavbar } from "@/components/onboarding/layout"
+import { OnboardingFooter } from "@/components/onboarding/layout"
 
 interface Props {
   children: ReactNode
@@ -11,52 +12,36 @@ export const dynamic = "force-dynamic"
 
 export default async function OnboardingLayout({ children }: Props) {
   const { getToken, userId } = await auth()
-
   if (!userId) redirect("/sign-in")
-
   const token = await getToken()
   if (!token) redirect("/sign-in")
 
-  const res = await fetch(`${process.env.BACKEND_API_URL}/vendor/v1/application`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    cache: "no-store",
-  })
+  const res = await fetch(
+    `${process.env.BACKEND_API_URL}/vendor/v1/application`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+    }
+  )
 
   if (res.status === 401) redirect("/sign-in")
 
-  // Parse the response body once
   const json = await res.json()
-
-  // No application yet — valid, user is on step 1
-  // Extract application.data if success, otherwise null
   const application = res.ok && json.status === "success" ? json.data : null
 
   return (
-    <div className="min-h-screen bg-stone-50 font-sans">
-      <header className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-3xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-md bg-orange-500 flex items-center justify-center">
-              <span className="text-white text-xs font-bold">M</span>
-            </div>
-            <span className="text-sm font-semibold text-stone-800 tracking-tight">
-              Vendor Onboarding
-            </span>
-          </div>
-          <span className="text-xs text-stone-400 font-medium tracking-wide uppercase">
-            Application Portal
-          </span>
-        </div>
-      </header>
+    <>
+      <OnboardingNavbar />
 
-      <div className="mx-auto max-w-3xl px-6 py-8">
-        <OnboardingStepIndicator application={application} />
-        <div className="mt-8">{children}</div>
+      <div className="min-h-screen bg-background text-foreground flex flex-col">
+        {/* Optional: step indicator can go here if you want it globally */}
+        <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 lg:px-8 py-8">
+          {children}
+        </div>
       </div>
-    </div>
+
+      <OnboardingFooter />
+    </>
   )
 }

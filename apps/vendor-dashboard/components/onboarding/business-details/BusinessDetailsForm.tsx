@@ -1,21 +1,14 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@clerk/nextjs"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 
-import { Loader2, ArrowRight, InfoIcon, AlertTriangle } from "lucide-react"
+import { Loader2, ArrowRight, InfoIcon, AlertTriangle, Building2, User, MapPin, Phone } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { Input } from "@repo/ui/components/input"
-import {
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectValue,
-} from "@repo/ui/components/select"
 import { Alert, AlertDescription } from "@repo/ui/components/alert"
 import {
   AlertDialog,
@@ -36,6 +29,7 @@ import {
   FormMessage,
 } from "@repo/ui/components/form"
 
+import { SearchableSelect } from "@/components/onboarding/business-details"
 import { businessDetailsSchema, BusinessDetailsFormData } from "@/lib/validations/onboarding"
 import type { Application, Country, VendorType } from "@repo/types"
 import { toast } from "sonner"
@@ -43,25 +37,20 @@ import { toast } from "sonner"
 interface Props {
   application: Application | null
   countries: Country[]
-  // Pass whether the application already has uploaded docs — used to warn before country/type change
   hasDocuments: boolean
 }
 
 export function BusinessDetailsForm({ application, countries, hasDocuments }: Props) {
   const router = useRouter()
   const { getToken } = useAuth()
-  const [isPending, startTransition] = useTransition()
+
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [vendorTypes, setVendorTypes] = useState<VendorType[]>([])
   const [loadingVendorTypes, setLoadingVendorTypes] = useState(false)
   const [showOtherVendorType, setShowOtherVendorType] = useState(false)
-
-  // ── Dialog state ──────────────────────────────────────────────────────────
-  // When user tries to change country or vendorType and docs exist, we intercept
-  // the change, store the pending value, and show a confirmation dialog.
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogMessage, setDialogMessage] = useState("")
-  // We use a ref to store the pending field change so the dialog can confirm it
   const pendingChange = useRef<{ field: "countryId" | "vendorTypeId"; value: string } | null>(null)
 
   const form = useForm<BusinessDetailsFormData>({
@@ -88,7 +77,7 @@ export function BusinessDetailsForm({ application, countries, hasDocuments }: Pr
   const countryId = form.watch("countryId")
   const vendorTypeId = form.watch("vendorTypeId")
 
-  // ── Intercept country / vendorType change if docs exist ──────────────────
+  // ── Country/vendorType change interception ────────────────────────────────
   function handleCountryChange(newValue: string) {
     if (hasDocuments && newValue !== application?.countryId) {
       pendingChange.current = { field: "countryId", value: newValue }
@@ -114,23 +103,20 @@ export function BusinessDetailsForm({ application, countries, hasDocuments }: Pr
   }
 
   function handleDialogConfirm() {
-    if (!pendingChange.current) return
-    const { field, value } = pendingChange.current
-    form.setValue(field, value)
-    // If country changed, clear vendorTypeId since the list will reload
-    if (field === "countryId") {
-      form.setValue("vendorTypeId", "")
-    }
-    pendingChange.current = null
-    setDialogOpen(false)
+    setTimeout(() => {
+      if (!pendingChange.current) return
+      const { field, value } = pendingChange.current
+      form.setValue(field, value)
+      if (field === "countryId") form.setValue("vendorTypeId", "")
+      pendingChange.current = null
+    }, 0)
   }
 
   function handleDialogCancel() {
     pendingChange.current = null
-    setDialogOpen(false)
   }
 
-  // ── Fetch vendor types when countryId changes ─────────────────────────────
+  // ── Fetch vendor types when country changes ────────────────────────────────
   useEffect(() => {
     if (!countryId) {
       setVendorTypes([])
@@ -147,12 +133,11 @@ export function BusinessDetailsForm({ application, countries, hasDocuments }: Pr
           signal: controller.signal,
         })
         const json = await res.json()
-        if (json.status !== "success") throw new Error(json.message || "Failed to load vendor types")
+        if (json.status !== "success") throw new Error(json.message)
 
         const types: VendorType[] = json.data?.vendorTypes ?? []
         setVendorTypes(types)
 
-        // Restore saved vendorTypeId if it's still valid for the new country
         if (application?.vendorTypeId && types.some(t => t.id === application.vendorTypeId)) {
           form.setValue("vendorTypeId", application.vendorTypeId)
         }
@@ -169,51 +154,67 @@ export function BusinessDetailsForm({ application, countries, hasDocuments }: Pr
     return () => controller.abort()
   }, [countryId, application, form])
 
-  // ── Show "Other" field when vendor type name is "other" ───────────────────
+  // ── Show "Other" input ─────────────────────────────────────────────────────
   useEffect(() => {
     const selected = vendorTypes.find(t => t.id === vendorTypeId)
-    setShowOtherVendorType(selected?.name?.toLowerCase() === "other")
-    if (selected?.name?.toLowerCase() !== "other") form.setValue("otherVendorType", "")
+    const isOther = selected?.name?.toLowerCase() === "other"
+    setShowOtherVendorType(isOther)
+    if (!isOther) form.setValue("otherVendorType", "")
   }, [vendorTypeId, vendorTypes, form])
 
-  // ── Form Submit ───────────────────────────────────────────────────────────
+  // ── Submit ─────────────────────────────────────────────────────────────────
   async function onSubmit(values: BusinessDetailsFormData) {
     setError(null)
-    startTransition(async () => {
-      try {
-        const token = await getToken()
-        if (!token) return setError("Authentication error. Please refresh and try again.")
+    setIsSubmitting(true)
 
-        const res = await fetch(`/api/onboarding/application`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(values),
-        })
-
-        const data = await res.json()
-
-        if (!res.ok || data.status !== "success") {
-          // 400s are user-actionable, show as-is. 500s get a generic message.
-          const message = res.status < 500
-            ? data?.message || "Please check your details and try again."
-            : "Something went wrong. Please try again."
-          console.error("[BusinessDetailsForm] submit error:", data)
-          setError(message)
-          return
-        }
-
-        toast.success("Business details saved")
-        router.push("/onboarding/documents")
-      } catch (err: any) {
-        console.error("[BusinessDetailsForm] unexpected error:", err)
-        setError("Something went wrong. Please try again.")
+    try {
+      const token = await getToken()
+      if (!token) {
+        setError("Authentication error. Please refresh and try again.")
+        return
       }
-    })
+
+      const res = await fetch("/api/onboarding/application", {
+        method: "POST",
+        body: JSON.stringify(values),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok || data.status !== "success") {
+        const message = res.status < 500
+          ? data?.message || "Please check your details and try again."
+          : "Something went wrong. Please try again."
+        console.error("[BusinessDetailsForm] submit error:", data)
+        setError(message)
+        return
+      }
+
+      toast.success("Business details saved")
+      router.push("/onboarding/documents")
+    } catch (err: any) {
+      console.error("[BusinessDetailsForm] unexpected error:", err)
+      setError("Something went wrong. Please try again.")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
+
+  // ── Build select options ───────────────────────────────────────────────────
+  const countryOptions = countries.map(c => ({
+    value: c.id,
+    label: c.name,
+    sublabel: c.code ?? undefined, // e.g. "+254"
+  }))
+
+  const vendorTypeOptions = vendorTypes.map(v => ({
+    value: v.id,
+    label: v.name,
+  }))
 
   return (
     <>
-      {/* ── Warning dialog for country / vendorType change ── */}
+      {/* Document-deletion warning dialog */}
       <AlertDialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -227,7 +228,7 @@ export function BusinessDetailsForm({ application, countries, hasDocuments }: Pr
             <AlertDialogCancel onClick={handleDialogCancel}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDialogConfirm}
-              className="bg-red-600 hover:bg-red-700 text-white"
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
             >
               Yes, delete documents & continue
             </AlertDialogAction>
@@ -235,273 +236,311 @@ export function BusinessDetailsForm({ application, countries, hasDocuments }: Pr
         </AlertDialogContent>
       </AlertDialog>
 
-      <Form {...form}>
-        <form
-          onSubmit={form.handleSubmit(onSubmit)}
-          className="space-y-10 bg-white p-8 rounded-2xl border border-stone-200 shadow-sm"
-        >
-          {error && (
-            <Alert variant="destructive">
-              <InfoIcon className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+      {/*
+        Break out of the layout's max-w-2xl by using negative margins + explicit wider max-width.
+        This keeps the navbar/footer at 2xl but gives the form more breathing room.
+      */}
+      <div className="-mx-4 sm:-mx-6 lg:-mx-8 xl:-mx-16">
+        <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
 
-          {/* Business Registration */}
-          <Section title="Business Registration">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <FormField
-                control={form.control}
-                name="countryId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Country *</FormLabel>
-                    <FormControl>
-                      <Select
-                        value={field.value}
-                        onValueChange={handleCountryChange}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select country" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {countries.map(c => (
-                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          {/* Page title */}
+          <div className="mb-6">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Business Details</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Tell us about your business. All fields marked * are required.
+            </p>
+          </div>
 
-              <FormField
-                control={form.control}
-                name="vendorTypeId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Vendor Type *</FormLabel>
-                    <FormControl>
-                      <Select
-                        value={field.value}
-                        onValueChange={handleVendorTypeChange}
-                        disabled={!countryId || loadingVendorTypes}
-                      >
-                        <SelectTrigger>
-                          <SelectValue
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+
+              {error && (
+                <Alert variant="destructive">
+                  <InfoIcon className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {/* ── Card: Business Registration ─────────────────────────── */}
+              <FormCard
+                icon={<Building2 className="h-4 w-4" />}
+                title="Business Registration"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-5 gap-y-5">
+
+                  {/* Country — full width on mobile, spans 1 col on wider */}
+                  <FormField
+                    control={form.control}
+                    name="countryId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Country *</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            options={countryOptions}
+                            value={field.value}
+                            onValueChange={handleCountryChange}
+                            placeholder="Select country"
+                            searchPlaceholder="Search countries..."
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Vendor Type */}
+                  <FormField
+                    control={form.control}
+                    name="vendorTypeId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Vendor Type *</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            options={vendorTypeOptions}
+                            value={field.value}
+                            onValueChange={handleVendorTypeChange}
                             placeholder={
                               !countryId ? "Select country first"
                               : loadingVendorTypes ? "Loading..."
                               : "Select vendor type"
                             }
+                            searchPlaceholder="Search types..."
+                            disabled={!countryId || loadingVendorTypes}
                           />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {vendorTypes.map(v => (
-                            <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              {showOtherVendorType && (
-                <FormField
-                  control={form.control}
-                  name="otherVendorType"
-                  render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>Specify Vendor Type *</FormLabel>
-                      <FormControl><Input {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
+                  {/* Other vendor type — conditional */}
+                  {showOtherVendorType && (
+                    <FormField
+                      control={form.control}
+                      name="otherVendorType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Specify Vendor Type *</FormLabel>
+                          <FormControl><Input placeholder="e.g. Food truck" {...field} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                   )}
-                />
-              )}
 
-              <FormField
-                control={form.control}
-                name="legalBusinessName"
-                render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Legal Business Name *</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  {/* Legal business name — full row */}
+                  <FormField
+                    control={form.control}
+                    name="legalBusinessName"
+                    render={({ field }) => (
+                      <FormItem className="sm:col-span-2 xl:col-span-3">
+                        <FormLabel>Legal Business Name *</FormLabel>
+                        <FormControl><Input placeholder="As registered with government" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name="registrationNumber"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Registration Number</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  <FormField
+                    control={form.control}
+                    name="registrationNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Registration Number</FormLabel>
+                        <FormControl><Input placeholder="Optional" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name="taxId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tax ID</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </Section>
+                  <FormField
+                    control={form.control}
+                    name="taxId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tax ID / VAT Number</FormLabel>
+                        <FormControl><Input placeholder="Optional" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-          {/* Business Contact */}
-          <Section title="Business Contact">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <FormField
-                control={form.control}
-                name="businessEmail"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Business Email *</FormLabel>
-                    <FormControl><Input type="email" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="businessPhone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Business Phone</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </Section>
+                </div>
+              </FormCard>
 
-          {/* Owner Information */}
-          <Section title="Owner Information">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <FormField
-                control={form.control}
-                name="ownerFirstName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>First Name *</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="ownerLastName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Last Name *</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="ownerEmail"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Owner Email</FormLabel>
-                    <FormControl><Input type="email" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="ownerPhone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Owner Phone</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </Section>
+              {/* ── Card: Business Contact ───────────────────────────────── */}
+              <FormCard
+                icon={<Phone className="h-4 w-4" />}
+                title="Business Contact"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-5">
+                  <FormField
+                    control={form.control}
+                    name="businessEmail"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Business Email *</FormLabel>
+                        <FormControl><Input type="email" placeholder="hello@yourbusiness.com" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="businessPhone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Business Phone</FormLabel>
+                        <FormControl><Input placeholder="+1 555 000 0000" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </FormCard>
 
-          {/* Business Address */}
-          <Section title="Business Address">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <FormField
-                control={form.control}
-                name="businessAddress"
-                render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Street Address *</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="addressLine2"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Address Line 2</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="postalCode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Postal Code</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </Section>
+              {/* ── Card: Owner Information ──────────────────────────────── */}
+              <FormCard
+                icon={<User className="h-4 w-4" />}
+                title="Owner Information"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-5 gap-y-5">
+                  <FormField
+                    control={form.control}
+                    name="ownerFirstName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>First Name *</FormLabel>
+                        <FormControl><Input {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="ownerLastName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Last Name *</FormLabel>
+                        <FormControl><Input {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="ownerEmail"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Owner Email</FormLabel>
+                        <FormControl><Input type="email" placeholder="Optional" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="ownerPhone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Owner Phone</FormLabel>
+                        <FormControl><Input placeholder="Optional" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </FormCard>
 
-          {/* Footer */}
-          <div className="flex justify-end border-t pt-6">
-            <Button
-              type="submit"
-              disabled={isPending}
-              className="bg-orange-500 hover:bg-orange-600 text-white"
-            >
-              {isPending
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <>Save & Continue <ArrowRight className="ml-2 h-4 w-4" /></>
-              }
-            </Button>
-          </div>
-        </form>
-      </Form>
+              {/* ── Card: Business Address ───────────────────────────────── */}
+              <FormCard
+                icon={<MapPin className="h-4 w-4" />}
+                title="Business Address"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-5 gap-y-5">
+                  <FormField
+                    control={form.control}
+                    name="businessAddress"
+                    render={({ field }) => (
+                      <FormItem className="sm:col-span-3">
+                        <FormLabel>Street Address *</FormLabel>
+                        <FormControl><Input placeholder="123 Main St" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="addressLine2"
+                    render={({ field }) => (
+                      <FormItem className="sm:col-span-2">
+                        <FormLabel>Address Line 2</FormLabel>
+                        <FormControl><Input placeholder="Suite, floor, unit... (optional)" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="postalCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Postal Code</FormLabel>
+                        <FormControl><Input placeholder="00100" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </FormCard>
+
+              {/* ── Footer ──────────────────────────────────────────────── */}
+              <div className="flex justify-end pt-2 pb-8">
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  size="lg"
+                  className="min-w-40"
+                >
+                  {isSubmitting
+                    ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</>
+                    : <>Save & Continue <ArrowRight className="ml-2 h-4 w-4" /></>
+                  }
+                </Button>
+              </div>
+
+            </form>
+          </Form>
+        </div>
+      </div>
     </>
   )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+// ── Card wrapper ──────────────────────────────────────────────────────────────
+
+function FormCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: React.ReactNode
+  title: string
+  children: React.ReactNode
+}) {
   return (
-    <div>
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-stone-400 mb-4">{title}</h2>
-      {children}
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      {/* Card header */}
+      <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border bg-muted/30">
+        <span className="text-muted-foreground">{icon}</span>
+        <h2 className="text-sm font-medium text-foreground tracking-tight">{title}</h2>
+      </div>
+      {/* Card body */}
+      <div className="px-5 py-5">
+        {children}
+      </div>
     </div>
   )
 }
