@@ -1,47 +1,37 @@
-import { ReactNode } from "react"
-import { auth } from "@clerk/nextjs/server"
-import { redirect } from "next/navigation"
-import { OnboardingNavbar } from "@/components/onboarding/layout"
-import { OnboardingFooter } from "@/components/onboarding/layout"
+import { ReactNode } from 'react'
+import { OnboardingNavbar } from '@/components/onboarding/layout'
+import { OnboardingFooter } from '@/components/onboarding/layout'
 
-interface Props {
-  children: ReactNode
-}
+/*
+  ONBOARDING LAYOUT — SERVER COMPONENT
 
-export const dynamic = "force-dynamic"
+  Auth is not checked here. Each sub-page (business-details, documents, review)
+  runs its own auth() + fetch independently, which is correct because:
+  - They each need different data from the backend anyway
+  - Checking auth in the layout AND each page would hit Clerk twice per request
+  - Next.js deduplicates auth() calls within a request via React cache, but
+    the application fetch here was not cached and was being thrown away unused
 
-export default async function OnboardingLayout({ children }: Props) {
-  const { getToken, userId } = await auth()
-  if (!userId) redirect("/sign-in")
-  const token = await getToken()
-  if (!token) redirect("/sign-in")
-
-  const res = await fetch(
-    `${process.env.BACKEND_API_URL}/vendor/v1/application`,
-    {
-      method: "GET",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      cache: "no-store",
-    }
-  )
-
-  if (res.status === 401) redirect("/sign-in")
-
-  const json = await res.json()
-  const application = res.ok && json.status === "success" ? json.data : null
-
+  The previous version fetched /vendor/v1/application on every layout render
+  and then never used the result — the application data cannot be passed to
+  children from a layout. That fetch has been removed entirely.
+*/
+export default function OnboardingLayout({ children }: { children: ReactNode }) {
   return (
-    <>
+    <div className="flex min-h-screen flex-col bg-background">
       <OnboardingNavbar />
 
-      <div className="min-h-screen bg-background text-foreground flex flex-col">
-        {/* Optional: step indicator can go here if you want it globally */}
-        <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 lg:px-8 py-8">
-          {children}
-        </div>
-      </div>
+      {/*
+        max-w-3xl gives BusinessDetailsForm enough room for its 3-column grid
+        without needing the negative-margin breakout hack that was in the form.
+        Onboarding pages are intentionally narrower than the dashboard (max-w-7xl)
+        — forms need focus, not breadth.
+      */}
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
+        {children}
+      </main>
 
       <OnboardingFooter />
-    </>
+    </div>
   )
 }

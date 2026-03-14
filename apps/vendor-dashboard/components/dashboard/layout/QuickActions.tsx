@@ -1,109 +1,96 @@
 'use client'
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@repo/ui/components/card"
-import { Button } from "@repo/ui/components/button"
-import {
-  Plus,
-  Utensils,
-  Calendar,
-  Tag,
-  Cake,
-  ArrowUpRight,
-} from "lucide-react"
+import Link from 'next/link'
+import { Utensils, Calendar, Tag, Cake, ArrowRight } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@repo/ui/components/card'
 
 const quickActions = [
   {
-    title: "Create Meal",
-    description: "Add new meal to menu",
+    title: 'New Meal',
+    description: 'Add to your menu',
     icon: Utensils,
-    href: "/meals/create",
-    // Peach gradient for main action
-    iconBg: "bg-gradient-to-br from-peach-400 to-peach-600",
+    href: '/dashboard/menu/create',
+    // terracotta — primary brand action
+    iconClass: 'bg-primary text-primary-foreground',
+    hoverClass: 'hover:border-primary/30 hover:bg-primary/4',
+    accentClass: 'text-primary',
   },
   {
-    title: "Create Meal Plan",
-    description: "Setup subscription plan",
+    title: 'New Meal Plan',
+    description: 'Create a subscription',
     icon: Calendar,
-    href: "/meal-plans/create",
-    // Mint for subscription/recurring
-    iconBg: "bg-gradient-to-br from-mint-400 to-mint-600",
+    href: '/dashboard/meal-plans/create',
+    // warm gold accent
+    iconClass: 'bg-accent/80 text-accent-foreground',
+    hoverClass: 'hover:border-accent/40 hover:bg-accent/8',
+    accentClass: 'text-accent-foreground',
   },
   {
-    title: "Create Discount",
-    description: "Add promotion or coupon",
+    title: 'Add Discount',
+    description: 'Set a promo or coupon',
     icon: Tag,
-    href: "/discounts/create",
-    // Cream/gold for discounts/promotions
-    iconBg: "bg-gradient-to-br from-cream-400 to-cream-600",
+    href: '/dashboard/discounts/create',
+    // deep chocolate surface
+    iconClass: 'bg-deep text-deep-foreground',
+    hoverClass: 'hover:border-deep/20 hover:bg-deep/5',
+    accentClass: 'text-deep',
   },
   {
-    title: "Add Bakery Item",
-    description: "Fresh bread & pastries",
+    title: 'Add Bakery Item',
+    description: 'Fresh bread & pastries',
     icon: Cake,
-    href: "/bakery/create",
-    // Lavender for special/premium items
-    iconBg: "bg-gradient-to-br from-lavender-400 to-lavender-600",
+    href: '/dashboard/menu/bakery/create',
+    // muted warm — softer action
+    iconClass: 'bg-secondary text-secondary-foreground',
+    hoverClass: 'hover:border-border hover:bg-secondary/70',
+    accentClass: 'text-foreground',
   },
 ]
 
 export function QuickActions() {
   return (
-    <Card className="border border-border shadow-card hover:shadow-md transition-shadow">
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          {/* Peach icon header */}
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-peach-400 to-peach-600 shadow-sm">
-            <Plus className="h-5 w-5 text-white" />
-          </div>
-          <CardTitle className="text-xl font-semibold">Quick Actions</CardTitle>
-        </div>
-        <CardDescription className="text-sm text-muted-foreground pt-1">
-          Quickly create new content and promotions
+    <Card className="border-border/60 shadow-sm">
+      <CardHeader className="pb-4">
+        <CardTitle className="text-base font-semibold text-foreground">Quick Actions</CardTitle>
+        <CardDescription className="text-sm text-muted-foreground">
+          Jump straight into creating
         </CardDescription>
       </CardHeader>
-      
-      <CardContent>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {quickActions.map((action) => {
-            const Icon = action.icon
-            return (
-              <Button
-                key={action.title}
-                variant="outline"
-                className="h-auto p-4 justify-start hover:shadow-sm hover:border-peach-400 dark:hover:border-peach-500 transition-all duration-200 group"
-                asChild
-              >
-                <a href={action.href}>
-                  <div className="flex items-center gap-3 w-full">
-                    {/* Gradient icon backgrounds */}
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${action.iconBg} shrink-0 shadow-sm`}>
-                      <Icon className="h-5 w-5 text-white" />
-                    </div>
-                    
-                    {/* Text - stays black/white */}
-                    <div className="flex-1 text-left min-w-0">
-                      <div className="font-medium text-foreground truncate group-hover:text-peach-600 dark:group-hover:text-peach-400 transition-colors">
-                        {action.title}
-                      </div>
-                      <div className="text-sm text-muted-foreground truncate">
-                        {action.description}
-                      </div>
-                    </div>
-                    
-                    {/* Arrow */}
-                    <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-peach-600 dark:group-hover:text-peach-400 transition-colors shrink-0" />
-                  </div>
-                </a>
-              </Button>
-            )
-          })}
-        </div>
+
+      <CardContent className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        {quickActions.map((action) => {
+          const Icon = action.icon
+          return (
+            <Link
+              key={action.title}
+              href={action.href}
+              className={`
+                group flex items-center gap-3.5 rounded-xl border border-border/60 bg-white
+                p-3.5 transition-all duration-150
+                ${action.hoverClass}
+                hover:shadow-sm
+              `}
+            >
+              {/* Icon container — each action has a distinct surface */}
+              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${action.iconClass}`}>
+                <Icon className="h-4 w-4" />
+              </div>
+
+              {/* Text */}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium leading-tight text-foreground">
+                  {action.title}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {action.description}
+                </p>
+              </div>
+
+              {/* Arrow — subtle, appears on hover */}
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-muted-foreground/70" />
+            </Link>
+          )
+        })}
       </CardContent>
     </Card>
   )

@@ -1,19 +1,21 @@
-"use client"
-import { UserButton } from "@clerk/nextjs"
-import { ListOrdered } from "lucide-react"
-import { useRouter } from "next/navigation"
+'use client'
+
+import { UserButton } from '@clerk/nextjs'
+import { ListOrdered } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 export default function ProfileButton() {
-    const router = useRouter()
+  const router = useRouter()
+
   return (
     <UserButton>
-        <UserButton.MenuItems>
-            <UserButton.Action
-                label="See orders"
-                labelIcon={<ListOrdered className="w-4 h-4"/>}
-                onClick={() => router.push("/orders")}    
-            />
-        </UserButton.MenuItems>
+      <UserButton.MenuItems>
+        <UserButton.Action
+          label="My orders"
+          labelIcon={<ListOrdered className="h-4 w-4" />}
+          onClick={() => router.push('/dashboard/orders')}
+        />
+      </UserButton.MenuItems>
     </UserButton>
   )
 }

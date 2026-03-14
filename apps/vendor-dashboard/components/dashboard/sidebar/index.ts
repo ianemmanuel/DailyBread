@@ -1,3 +1,3 @@
 export { Sidebar } from './Sidebar'
 export { SidebarDesktop } from './SidebarDesktop'
-export { SidebarMobile } from './SidebarMobile'
+export { SidebarMobile } from './MobileSidebar'

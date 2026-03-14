@@ -1,24 +1,23 @@
-export const NavbarMenu = [
+
+export const NavbarLinks = [
   {
     id: 1,
-    title: "Home",
+    title: "About",
     link: "/welcome",
   },
   {
     id: 2,
-    title: "About",
-    link: "/about",
+    title: "How it works",
+    link: "#how-it-works",
   },
   {
     id: 3,
-    title: "Services",
-    link: "/services",
+    title: "FAQ",
+    link: "/faq",
   },
   {
     id: 4,
-    title: "Contact us",
-    link: "/contacts",
+    title: "Contact",
+    link: "/contact",
   },
-
-
-]
+] as const

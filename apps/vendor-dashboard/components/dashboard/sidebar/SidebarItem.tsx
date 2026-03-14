@@ -1,62 +1,41 @@
-'use client';
+'use client'
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@repo/ui/lib/utils'
-import { useSidebarStore } from '@/lib/state/sidebar-store'
 import { NavItem } from '@/utils/constants/nav-links'
 import { SidebarDropdown } from './SidebarDropdown'
-import { SidebarPopover } from './SidebarPopover'
 
 interface SidebarItemProps {
-  item: NavItem;
+  item: NavItem
 }
 
 export function SidebarItem({ item }: SidebarItemProps) {
-  const pathname = usePathname();
-  const { isCollapsed } = useSidebarStore();
-  const Icon = item.icon;
+  const pathname = usePathname()
+  const Icon = item.icon
 
   if (item.type === 'dropdown') {
-    if (isCollapsed) {
-      return <SidebarPopover item={item} />;
-    }
-    return <SidebarDropdown item={item} />;
+    return <SidebarDropdown item={item} />
   }
 
-  const isActive = pathname === item.href;
-
-  if (isCollapsed) {
-    return (
-      <Link
-        href={item.href!}
-        className={cn(
-          'flex items-center justify-center rounded-lg p-2.5 transition-all',
-          isActive
-            ? 'bg-peach-500/10 text-peach-600 dark:text-peach-400'
-            : 'text-foreground hover:bg-muted'
-        )}
-      >
-        <Icon className="h-5 w-5" />
-      </Link>
-    );
-  }
+  const isActive = pathname === item.href
 
   return (
     <Link
       href={item.href!}
       className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-150',
         isActive
-          ? 'bg-peach-500/10 text-peach-700 dark:text-peach-300 border border-peach-300 dark:border-peach-600'
-          : 'text-foreground hover:bg-muted'
+          ? 'bg-primary/8 text-primary'
+          : 'text-muted-foreground hover:bg-secondary/70 hover:text-foreground'
       )}
     >
       <Icon className={cn(
-        "h-5 w-5 transition-colors",
-        isActive && "text-peach-600 dark:text-peach-400"
+        'h-4 w-4 shrink-0',
+        isActive ? 'text-primary' : 'text-muted-foreground/70'
       )} />
-      <span>{item.label}</span>
+      <span className="flex-1">{item.label}</span>
+      {isActive && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
     </Link>
-  );
+  )
 }

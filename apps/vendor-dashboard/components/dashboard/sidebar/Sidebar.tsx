@@ -1,12 +1,6 @@
-
 import { SidebarDesktop } from './SidebarDesktop'
-import { SidebarMobile } from './SidebarMobile'
 
+// Desktop-only wrapper. MobileSidebar lives in Navbar.
 export function Sidebar() {
-  return (
-    <>
-      <SidebarDesktop />
-      <SidebarMobile />
-    </>
-  );
+  return <SidebarDesktop />
 }

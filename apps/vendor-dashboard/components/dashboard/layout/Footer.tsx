@@ -1,63 +1,65 @@
-import Link from 'next/link';
+import Link from 'next/link'
 
 export function DashboardFooter() {
-  const currentYear = new Date().getFullYear();
+  const currentYear = new Date().getFullYear()
 
   return (
-    <footer className="border-t border-border bg-card mt-16 shadow-sm">
-      <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-480 mx-auto">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-          {/* Brand with gradient accent */}
-          <div className="flex items-center gap-3 group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-terracotta-500 to-terracotta-600 shadow-sm group-hover:shadow-md group-hover:scale-105 transition-all duration-200">
-              {/* logo */}
-              <span className="font-['Fraunces'] text-base font-bold dark:text-white">A</span>
+    <footer className="mt-16 border-t border-border bg-white shadow-sm">
+      <div className="mx-auto max-w-screen-xl px-4 py-8 sm:px-6">
+        <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
+
+          {/* Brand */}
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary shadow-sm">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path
+                  d="M10 2C6.5 2 4 5 4 8c0 2 1 3.5 2 4.5V15h8v-2.5C15 11.5 16 10 16 8c0-3-2.5-6-6-6z"
+                  fill="white" fillOpacity="0.95"
+                />
+                <path
+                  d="M7 15h6v1.5a1 1 0 01-1 1H8a1 1 0 01-1-1V15z"
+                  fill="white" fillOpacity="0.7"
+                />
+              </svg>
             </div>
-            <Link 
-              href="/dashboard" 
-              className="font-['Fraunces'] text-xl font-semibold text-foreground hover:text-primary transition-colors"
+            <Link
+              href="/dashboard"
+              className="font-display text-lg font-semibold text-foreground transition-colors hover:text-primary"
             >
-              Daily Bread
+              Daily<span className="text-primary">Bread</span>
             </Link>
           </div>
 
-          <p className="text-sm text-muted-foreground text-center">
-            © {currentYear} Daily Bread. Crafted meals with care.
+          <p className="text-center text-sm text-muted-foreground">
+            © {currentYear} DailyBread. Crafted meals with care.
           </p>
 
           <div className="flex gap-6 text-sm">
-            <Link 
-              href="/privacy" 
-              className="text-muted-foreground hover:text-primary transition-colors font-medium"
-            >
-              Privacy
-            </Link>
-            <Link 
-              href="/terms" 
-              className="text-muted-foreground hover:text-primary transition-colors font-medium"
-            >
-              Terms
-            </Link>
-            <Link 
-              href="/support" 
-              className="text-muted-foreground hover:text-primary transition-colors font-medium"
-            >
-              Support
-            </Link>
+            {['Privacy', 'Terms', 'Support'].map((label) => (
+              <Link
+                key={label}
+                href={`/${label.toLowerCase()}`}
+                className="font-medium text-muted-foreground transition-colors hover:text-primary"
+              >
+                {label}
+              </Link>
+            ))}
           </div>
         </div>
-        
-        {/* Subtle gradient divider and version info */}
-        <div className="mt-6 pt-6 border-t border-border/50">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-2 text-xs text-muted-foreground">
-            <p>Vendor Dashboard </p>
+
+        <div className="mt-6 border-t border-border/50 pt-4">
+          <div className="flex flex-col items-center justify-between gap-2 text-xs text-muted-foreground sm:flex-row">
+            <p>Vendor Dashboard</p>
             <p>Designed for clarity and efficiency</p>
           </div>
         </div>
       </div>
-      
-      {/* Bottom accent gradient */}
-      <div className="h-1 w-full bg-linear-to-br from-terracotta-500 via-honey-500 to-sage-500 opacity-30" />
+
+      {/* Bottom accent — terracotta → gold, using real token values */}
+      <div
+        className="h-0.5 w-full opacity-40"
+        style={{ background: 'linear-gradient(to right, var(--primary), var(--accent))' }}
+      />
     </footer>
-  );
+  )
 }

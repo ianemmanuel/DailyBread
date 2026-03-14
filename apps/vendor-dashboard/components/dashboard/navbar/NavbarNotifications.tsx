@@ -1,142 +1,135 @@
-'use client';
+'use client'
 
-import { Button } from '@repo/ui/components/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@repo/ui/components/dropdown-menu'
-import { Badge, Bell, ChevronRight, Check } from 'lucide-react'
+import { Bell, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
+import { Button } from '@repo/ui/components/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@repo/ui/components/dropdown-menu'
+import { cn } from '@repo/ui/lib/utils'
+
+const notifications = [
+  {
+    id: 1,
+    title: 'New order received',
+    description: 'Order #1234 — Chicken Rice Bowl',
+    time: '2 min ago',
+    unread: true,
+    type: 'order' as const,
+  },
+  {
+    id: 2,
+    title: 'New meal plan subscriber',
+    description: 'Grace Muthoni subscribed to Weekly Plan',
+    time: '15 min ago',
+    unread: true,
+    type: 'subscription' as const,
+  },
+  {
+    id: 3,
+    title: 'Payment settled',
+    description: 'KSh 12,450 deposited to your account',
+    time: '1 hr ago',
+    unread: false,
+    type: 'payment' as const,
+  },
+  {
+    id: 4,
+    title: 'Delivery completed',
+    description: 'Batch #42 — 8 orders delivered',
+    time: '3 hr ago',
+    unread: false,
+    type: 'delivery' as const,
+  },
+]
+
+const typeBadge: Record<string, string> = {
+  order:        'bg-blue-50 text-blue-600',
+  subscription: 'bg-primary/8 text-primary',
+  payment:      'bg-emerald-50 text-emerald-700',
+  delivery:     'bg-amber-50 text-amber-700',
+}
 
 const NavbarNotifications = () => {
-  // Mock notifications data
-  const notifications = [
-    {
-      id: 1,
-      title: 'New order received',
-      description: 'Order #1234 from Pizza Place',
-      time: '2 minutes ago',
-      unread: true,
-      type: 'order'
-    },
-    {
-      id: 2,
-      title: 'Vendor approval pending',
-      description: 'New vendor registration awaiting review',
-      time: '15 minutes ago',
-      unread: true,
-      type: 'vendor'
-    },
-    {
-      id: 3,
-      title: 'Payment received',
-      description: '$2,450 from weekly settlements',
-      time: '1 hour ago',
-      unread: false,
-      type: 'payment'
-    },
-    {
-      id: 4,
-      title: 'Low inventory alert',
-      description: 'Chicken breasts running low (12 units left)',
-      time: '3 hours ago',
-      unread: false,
-      type: 'inventory'
-    }
-  ];
-
-  const unreadCount = notifications.filter(n => n.unread).length;
+  const unreadCount = notifications.filter((n) => n.unread).length
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="relative h-9 w-9 rounded-lg hover:bg-primary/5 transition-colors border border-transparent hover:border-border"
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative h-9 w-9 rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground"
+          aria-label="Notifications"
         >
-          <div className="relative">
-            <Bell className="h-5 w-5 text-muted-foreground transition-colors group-hover:text-foreground" />
-            
-            {/* Subtle notification indicator */}
-            {unreadCount > 0 && (
-              <div className="absolute -right-1 -top-1">
-                <div className="h-2 w-2 rounded-full bg-primary animate-ping opacity-75" />
-                <div className="absolute top-0 left-0 h-2 w-2 rounded-full bg-primary" />
-              </div>
-            )}
-          </div>
+          <Bell className="h-4.5 w-4.5" />
+          {unreadCount > 0 && (
+            <>
+              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary opacity-75 animate-ping" />
+              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+            </>
+          )}
         </Button>
       </DropdownMenuTrigger>
-      
-      <DropdownMenuContent 
-        align="end" 
-        className="w-96 bg-background/95 backdrop-blur-sm border-border shadow-lg"
-      >
+
+      <DropdownMenuContent align="end" className="w-80 p-0 shadow-lg">
+
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div>
-            <p className="font-semibold text-foreground">Notifications</p>
-          </div>
+        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+          <p className="text-sm font-semibold text-foreground">Notifications</p>
+          {unreadCount > 0 && (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+              {unreadCount} new
+            </span>
+          )}
         </div>
 
-        {/* Notifications list */}
-        <div className="max-h-100 overflow-y-auto">
-          {notifications.map((notification) => (
-            <DropdownMenuItem 
-              key={notification.id}
-              className={`flex flex-col items-start gap-1 p-4 cursor-pointer hover:bg-muted/50 transition-colors border-b border-border/50 last:border-b-0
-                ${notification.unread ? 'bg-primary/5' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                // Handle notification click
-              }}
+        {/* List */}
+        <div className="max-h-[400px] overflow-y-auto">
+          {notifications.map((n) => (
+            <DropdownMenuItem
+              key={n.id}
+              className={cn(
+                'flex cursor-pointer flex-col items-start gap-0.5 border-b border-border/40 px-4 py-3 last:border-b-0 focus:bg-secondary/60',
+                n.unread && 'bg-primary/4'
+              )}
             >
-              <div className="flex items-start justify-between w-full">
-                <div className="flex-1">
-                  {/* Title with unread indicator */}
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-foreground">
-                      {notification.title}
-                    </p>
-                    {notification.unread && (
-                      <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                    )}
-                  </div>
-                  
-                  {/* Description */}
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {notification.description}
-                  </p>
-                  
-                  {/* Time and type badge */}
-                  <div className="flex items-center justify-between mt-2">
-                    <p className="text-xs text-muted-foreground">
-                      {notification.time}
-                    </p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full
-                      ${notification.type === 'order' ? 'bg-blue-500/10 text-blue-600' :
-                        notification.type === 'vendor' ? 'bg-amber-500/10 text-amber-600' :
-                        notification.type === 'payment' ? 'bg-emerald-500/10 text-emerald-600' :
-                        'bg-red-500/10 text-red-600'
-                      }`}
-                    >
-                      {notification.type}
-                    </span>
-                  </div>
-                </div>
+              <div className="flex w-full items-start justify-between gap-2">
+                <p className={cn(
+                  'text-sm leading-snug',
+                  n.unread ? 'font-semibold text-foreground' : 'font-medium text-foreground/80'
+                )}>
+                  {n.title}
+                </p>
+                {n.unread && (
+                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">{n.description}</p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="text-[11px] text-muted-foreground/60">{n.time}</span>
+                <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', typeBadge[n.type])}>
+                  {n.type}
+                </span>
               </div>
             </DropdownMenuItem>
           ))}
         </div>
 
-        {/* Footer with View All link */}
-        <div className="border-t border-border p-3">
-          <Link 
-            href="/notifications" 
-            className="flex items-center justify-center w-full py-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors rounded-md hover:bg-primary/5"
+        {/* Footer */}
+        <div className="border-t border-border/60 p-2">
+          <Link
+            href="/dashboard/notifications"
+            className="flex w-full items-center justify-center gap-1 rounded-md py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
           >
-            View all notifications
-            <ChevronRight className="h-4 w-4 ml-1" />
+            View all
+            <ChevronRight className="h-3.5 w-3.5" />
           </Link>
         </div>
+
       </DropdownMenuContent>
     </DropdownMenu>
   )

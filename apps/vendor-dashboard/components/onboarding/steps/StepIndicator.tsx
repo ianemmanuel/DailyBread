@@ -1,7 +1,8 @@
-"use client"
+'use client'
 
-import Link from "next/link"
-import { Check } from "lucide-react"
+import Link from 'next/link'
+import { Check } from 'lucide-react'
+import { cn } from '@repo/ui/lib/utils'
 
 interface Application {
   status: string
@@ -14,71 +15,75 @@ interface Props {
 
 function getStep(application: Application | null): 1 | 2 | 3 {
   if (!application) return 1
-  const status = application.status
-  if (["SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"].includes(status))
-    return 3
-  const hasDocuments =
-    application.documents?.some(d => d.status !== "WITHDRAWN") ?? false
+  if (['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED'].includes(application.status)) return 3
+  const hasDocuments = application.documents?.some((d) => d.status !== 'WITHDRAWN') ?? false
   return hasDocuments ? 3 : 2
 }
 
-const STEPS = ["Business Details", "Documents", "Review & Submit"]
-const STEP_ROUTES = ["/onboarding", "/onboarding/documents", "/onboarding/review"]
+const STEPS = [
+  { label: 'Business Details', route: '/onboarding/business-details' },
+  { label: 'Documents',        route: '/onboarding/documents'        },
+  { label: 'Review & Submit',  route: '/onboarding/review'           },
+]
 
 export function OnboardingStepIndicator({ application }: Props) {
   const current = getStep(application)
 
   return (
-    <div className="flex flex-col sm:flex-row items-center sm:justify-between gap-4 sm:gap-0">
-      {STEPS.map((label, i) => {
-        const step = (i + 1) as 1 | 2 | 3
-        const isCompleted = step < current
-        const isActive = step === current
+    <nav aria-label="Onboarding progress" className="mb-8">
+      <ol className="flex items-center">
+        {STEPS.map(({ label, route }, i) => {
+          const step = (i + 1) as 1 | 2 | 3
+          const isCompleted = step < current
+          const isActive    = step === current
+          const isLast      = i === STEPS.length - 1
 
-        const stepContent = (
-          <div className="flex items-center gap-3 flex-1 sm:flex-none w-full">
+          const circle = (
             <div
-              className={`h-8 w-8 flex items-center justify-center rounded-full text-sm font-semibold transition-all ${
-                isCompleted
-                  ? "bg-foreground text-background"
-                  : isActive
-                  ? "border-2 border-foreground text-foreground"
-                  : "border-2 border-border text-muted-foreground"
-              }`}
+              aria-current={isActive ? 'step' : undefined}
+              className={cn(
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors',
+                isCompleted && 'bg-primary text-primary-foreground',
+                isActive    && 'border-2 border-primary bg-white text-primary',
+                !isCompleted && !isActive && 'border-2 border-border bg-white text-muted-foreground'
+              )}
             >
-              {isCompleted ? <Check className="h-4 w-4" /> : step}
+              {isCompleted ? <Check className="h-3.5 w-3.5" /> : step}
             </div>
-            <span
-              className={`text-sm font-medium ${
-                isActive ? "text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              {label}
-            </span>
-          </div>
-        )
+          )
 
-        return (
-          <div key={label} className="flex flex-1 items-center">
-            {isCompleted ? (
-              <Link href={STEP_ROUTES[i]} className="flex-1">
-                {stepContent}
-              </Link>
-            ) : (
-              stepContent
-            )}
+          return (
+            <li key={label} className="flex flex-1 items-center">
+              <div className="flex items-center gap-2.5">
+                {isCompleted ? (
+                  <Link href={route} className="flex items-center gap-2.5">
+                    {circle}
+                    <span className="hidden text-sm font-medium text-primary sm:block">{label}</span>
+                  </Link>
+                ) : (
+                  <>
+                    {circle}
+                    <span className={cn(
+                      'hidden text-sm font-medium sm:block',
+                      isActive ? 'text-foreground' : 'text-muted-foreground'
+                    )}>
+                      {label}
+                    </span>
+                  </>
+                )}
+              </div>
 
-            {/* Connector line */}
-            {i < STEPS.length - 1 && (
-              <div
-                className={`hidden sm:block flex-1 h-px mx-4 ${
-                  step < current ? "bg-foreground" : "bg-border"
-                }`}
-              />
-            )}
-          </div>
-        )
-      })}
-    </div>
+              {/* Connector line between steps */}
+              {!isLast && (
+                <div className={cn(
+                  'mx-3 h-px flex-1 transition-colors',
+                  step < current ? 'bg-primary' : 'bg-border'
+                )} />
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
   )
 }

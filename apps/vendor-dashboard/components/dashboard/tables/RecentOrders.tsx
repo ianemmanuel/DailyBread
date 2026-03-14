@@ -1,208 +1,127 @@
-'use client';
+'use client'
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@repo/ui/components/card';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@repo/ui/components/table';
-import { Badge } from '@repo/ui/components/badge';
-import { Button } from '@repo/ui/components/button';
-import { Avatar, AvatarFallback } from '@repo/ui/components/avatar';
-import { ArrowUpRight, Clock, CheckCircle, Truck, ChefHat, ShoppingBag } from 'lucide-react';
-import Link from 'next/link';
+  Card, CardContent, CardDescription, CardHeader, CardTitle,
+} from '@repo/ui/components/card'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@repo/ui/components/table'
+import { Badge } from '@repo/ui/components/badge'
+import { Button } from '@repo/ui/components/button'
+import { Avatar, AvatarFallback } from '@repo/ui/components/avatar'
+import { ArrowUpRight, Clock, CheckCircle, Truck, ChefHat, ShoppingBag } from 'lucide-react'
+import Link from 'next/link'
+import { cn } from '@repo/ui/lib/utils'
 
 const orders = [
-  {
-    id: '#ORD-1234',
-    customer: 'John Doe',
-    category: 'meal',
-    amount: 45.99,
-    status: 'delivered',
-    time: '5 min ago',
-    items: 3,
-  },
-  {
-    id: '#ORD-1235',
-    customer: 'Sarah Smith',
-    category: 'meal-plan',
-    amount: 89.99,
-    status: 'in-transit',
-    time: '12 min ago',
-    items: 1,
-  },
-  {
-    id: '#ORD-1236',
-    customer: 'Mike Johnson',
-    category: 'meal',
-    amount: 78.20,
-    status: 'preparing',
-    time: '18 min ago',
-    items: 5,
-  },
-  {
-    id: '#ORD-1237',
-    customer: 'Emma Wilson',
-    category: 'meal-plan',
-    amount: 120.50,
-    status: 'delivered',
-    time: '25 min ago',
-    items: 2,
-  },
-  {
-    id: '#ORD-1238',
-    customer: 'Chris Brown',
-    category: 'meal',
-    amount: 56.80,
-    status: 'in-transit',
-    time: '32 min ago',
-    items: 3,
-  },
-];
+  { id: '#ORD-1234', customer: 'John Kamau',    category: 'meal' as const,      amount: 450,  status: 'delivered' as const,  time: '5 min ago'  },
+  { id: '#ORD-1235', customer: 'Sarah Wanjiru',  category: 'meal-plan' as const, amount: 1200, status: 'in-transit' as const,  time: '12 min ago' },
+  { id: '#ORD-1236', customer: 'Mike Odhiambo',  category: 'meal' as const,      amount: 780,  status: 'preparing' as const,   time: '18 min ago' },
+  { id: '#ORD-1237', customer: 'Emma Njoki',     category: 'meal-plan' as const, amount: 2400, status: 'delivered' as const,   time: '25 min ago' },
+  { id: '#ORD-1238', customer: 'Chris Mwangi',   category: 'meal' as const,      amount: 560,  status: 'in-transit' as const,  time: '32 min ago' },
+]
 
 const statusConfig = {
-  delivered: {
-    icon: CheckCircle,
-    className: "bg-mint-500/10 text-mint-700 dark:text-mint-300 border border-mint-300 dark:border-mint-600",
-  },
-  'in-transit': {
-    icon: Truck,
-    className: "bg-peach-500/10 text-peach-700 dark:text-peach-300 border border-peach-300 dark:border-peach-600",
-  },
-  preparing: {
-    icon: ChefHat,
-    className: "bg-cream-500/10 text-cream-700 dark:text-cream-300 border border-cream-300 dark:border-cream-600",
-  },
-};
+  delivered:  { icon: CheckCircle, className: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  'in-transit': { icon: Truck,     className: 'border-primary/20 bg-primary/8 text-primary'       },
+  preparing:  { icon: ChefHat,     className: 'border-amber-200 bg-amber-50 text-amber-700'        },
+}
 
 const categoryConfig = {
-  meal: {
-    label: 'Single Meal',
-    className: "bg-stone-500/10 text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-stone-600",
-  },
-  'meal-plan': {
-    label: 'Meal Plan',
-    className: "bg-lavender-500/10 text-lavender-700 dark:text-lavender-300 border border-lavender-300 dark:border-lavender-600",
-  },
-};
+  meal:        { label: 'Single Meal', className: 'border-border/60 bg-secondary/60 text-secondary-foreground' },
+  'meal-plan': { label: 'Meal Plan',   className: 'border-primary/20 bg-primary/8 text-primary'               },
+}
 
 export function RecentOrders() {
   return (
-    <Card className="border border-border shadow-card">
-      <CardHeader className="flex flex-row items-center justify-between pb-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            {/* Peach icon */}
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-peach-400 to-peach-600 shadow-sm">
-              <ShoppingBag className="h-5 w-5 text-white" />
+    <Card className="border-border/60 shadow-sm">
+      <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+              <ShoppingBag className="h-5 w-5 text-primary" />
             </div>
-            <CardTitle className="text-xl font-semibold">Recent Orders</CardTitle>
+            <CardTitle className="text-base font-semibold">Recent Orders</CardTitle>
           </div>
-          <CardDescription className="text-sm text-muted-foreground">
-            Latest customer orders with real-time updates
-          </CardDescription>
+          <CardDescription className="pl-11 text-sm">Latest orders with real-time status</CardDescription>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Live indicator - mint green */}
-          <Badge className="bg-mint-500/10 text-mint-700 dark:text-mint-300 border border-mint-300 dark:border-mint-600">
-            <div className="flex items-center gap-1.5">
-              <div className="h-1.5 w-1.5 rounded-full bg-mint-500 animate-pulse" />
-              Live Updates
-            </div>
-          </Badge>
-          <Button variant="outline" size="sm" className="hover:border-peach-400 dark:hover:border-peach-500 group" asChild>
-            <Link href="/orders">
-              See More
-              <ArrowUpRight className="h-4 w-4 ml-2 group-hover:text-peach-600 dark:group-hover:text-peach-400 transition-colors" />
+
+        <div className="flex shrink-0 items-center gap-3">
+          <div className="hidden items-center gap-1.5 sm:flex">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
+            <span className="text-xs font-medium text-muted-foreground">Live</span>
+          </div>
+          <Button variant="outline" size="sm" className="group h-8 gap-1 text-xs" asChild>
+            <Link href="/dashboard/orders">
+              View all
+              <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
             </Link>
           </Button>
         </div>
       </CardHeader>
-      
+
+      {/* overflow-x-auto here so the table scrolls independently of the page */}
       <CardContent className="p-0">
-        <div className="relative w-full overflow-auto">
-          <Table>
+        <div className="overflow-x-auto">
+          <Table className="min-w-140">
             <TableHeader>
-              <TableRow className="border-b border-border hover:bg-transparent">
-                <TableHead className="px-6 py-4 text-muted-foreground font-medium">Customer</TableHead>
-                <TableHead className="px-6 py-4 text-muted-foreground font-medium">Category</TableHead>
-                <TableHead className="px-6 py-4 text-muted-foreground font-medium">Items</TableHead>
-                <TableHead className="px-6 py-4 text-right text-muted-foreground font-medium">Amount</TableHead>
-                <TableHead className="px-6 py-4 text-muted-foreground font-medium">Status</TableHead>
-                <TableHead className="px-6 py-4 text-muted-foreground font-medium">Time</TableHead>
+              <TableRow className="border-b border-border/60 hover:bg-transparent">
+                <TableHead className="px-5 py-3 text-xs font-medium text-muted-foreground">Customer</TableHead>
+                <TableHead className="px-5 py-3 text-xs font-medium text-muted-foreground">Type</TableHead>
+                <TableHead className="px-5 py-3 text-right text-xs font-medium text-muted-foreground">Amount</TableHead>
+                <TableHead className="px-5 py-3 text-xs font-medium text-muted-foreground">Status</TableHead>
+                <TableHead className="px-5 py-3 text-xs font-medium text-muted-foreground">Time</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {orders.map((order) => {
-                const StatusIcon = statusConfig[order.status as keyof typeof statusConfig].icon;
-                const categoryInfo = categoryConfig[order.category as keyof typeof categoryConfig];
-                
+                const { icon: StatusIcon, className: statusClass } = statusConfig[order.status]
+                const { label: catLabel, className: catClass } = categoryConfig[order.category]
                 return (
-                  <TableRow key={order.id} className="group border-b border-border transition-colors">
-                    <TableCell className="px-6 py-4">
-                      <Link href={`/customers/${order.id}`} className="group/link block">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-9 w-9 border border-border shadow-sm">
-                            <AvatarFallback className="text-sm font-semibold bg-muted text-foreground group-hover/link:bg-peach-500/10 group-hover/link:text-peach-600 dark:group-hover/link:text-peach-400 transition-colors">
-                              {order.customer.split(' ').map(n => n[0]).join('')}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-foreground group-hover/link:text-peach-600 dark:group-hover/link:text-peach-400 transition-colors truncate">
-                              {order.customer}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-                              {order.id}
-                            </p>
-                          </div>
+                  <TableRow key={order.id} className="border-b border-border/40 transition-colors hover:bg-secondary/30 last:border-b-0">
+                    <TableCell className="px-5 py-3.5">
+                      <Link href={`/dashboard/orders/${order.id}`} className="group/link flex items-center gap-3">
+                        <Avatar className="h-8 w-8 shrink-0 border border-border/60">
+                          <AvatarFallback className="bg-secondary text-xs font-semibold text-secondary-foreground">
+                            {order.customer.split(' ').map((n) => n[0]).join('')}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-foreground transition-colors group-hover/link:text-primary">
+                            {order.customer}
+                          </p>
+                          <p className="font-mono text-[11px] text-muted-foreground/70">{order.id}</p>
                         </div>
                       </Link>
                     </TableCell>
-                    
-                    <TableCell className="px-6 py-4">
-                      <Badge className={categoryInfo.className}>
-                        {categoryInfo.label}
+                    <TableCell className="px-5 py-3.5">
+                      <Badge variant="outline" className={cn('text-xs font-medium', catClass)}>{catLabel}</Badge>
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5 text-right">
+                      <span className="text-sm font-semibold text-foreground">KSh {order.amount.toLocaleString()}</span>
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5">
+                      <Badge variant="outline" className={cn('gap-1.5 text-xs font-medium', statusClass)}>
+                        <StatusIcon className="h-3 w-3" />
+                        <span className="capitalize">{order.status.replace('-', ' ')}</span>
                       </Badge>
                     </TableCell>
-                    
-                    <TableCell className="px-6 py-4">
-                      <Badge variant="outline" className="bg-muted/50 text-foreground">
-                        {order.items} {order.items === 1 ? 'item' : 'items'}
-                      </Badge>
-                    </TableCell>
-                    
-                    {/* Amount - use cream/gold for money */}
-                    <TableCell className="px-6 py-4 text-right">
-                      <div className="font-semibold text-cream-600 dark:text-cream-400">
-                        ${order.amount.toFixed(2)}
-                      </div>
-                    </TableCell>
-                    
-                    <TableCell className="px-6 py-4">
-                      <Badge className={statusConfig[order.status as keyof typeof statusConfig].className}>
-                        <div className="flex items-center gap-1.5">
-                          <StatusIcon className="h-3 w-3" />
-                          <span className="capitalize">{order.status}</span>
-                        </div>
-                      </Badge>
-                    </TableCell>
-                    
-                    <TableCell className="px-6 py-4">
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Clock className="h-3.5 w-3.5" />
-                        <span className="text-sm">{order.time}</span>
+                    <TableCell className="px-5 py-3.5">
+                      <div className="flex items-center gap-1.5 text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5 shrink-0" />
+                        <span className="text-xs">{order.time}</span>
                       </div>
                     </TableCell>
                   </TableRow>
-                );
+                )
               })}
             </TableBody>
           </Table>
         </div>
       </CardContent>
     </Card>
-  );
+  )
 }
