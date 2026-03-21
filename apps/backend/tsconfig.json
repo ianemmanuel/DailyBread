@@ -3,7 +3,11 @@
     "compilerOptions": {
         "baseUrl": ".",
         "paths": {
-            "@/*": ["src/*"]
+            "@/*": ["src/*"],
+            "@repo/types":           ["../../packages/types/src/index.ts"],
+            "@repo/types/backend":   ["../../packages/types/src/backend/index.ts"],
+            "@repo/types/*":         ["../../packages/types/src/*"]
+            
         }   
   }
 

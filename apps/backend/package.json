@@ -16,6 +16,7 @@
     "@aws-sdk/s3-request-presigner": "^3.988.0",
     "@clerk/backend": "^2.29.5",
     "@repo/db": "workspace:*",
+    "@repo/types": "workspace:*",
     "@types/node": "^25.0.10",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

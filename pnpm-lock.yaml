@@ -76,6 +76,9 @@ importers:
       '@repo/db':
         specifier: workspace:*
         version: link:../../packages/database
+      '@repo/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@types/node':
         specifier: ^25.0.10
         version: 25.0.10
@@ -330,10 +333,17 @@ importers:
         version: 22.19.3
 
   packages/types:
+    dependencies:
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
     devDependencies:
       '@repo/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
       '@types/node':
         specifier: ^24.8.1
         version: 24.10.12
