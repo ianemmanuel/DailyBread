@@ -10,7 +10,9 @@
         "seed:vendortypes": "tsx src/seed/vendorTypes.seed.ts",
         "seed:vendortypecountry": "tsx src/seed/vendorTypeCountry.seed.ts",
         "seed:documenttypeconfig": "tsx src/seed/documentTypeConfig.seed.ts",
-        "seed:documenttypevendortype": "tsx src/seed/documentTypeVendorType.seed.ts"
+        "seed:documenttypevendortype": "tsx src/seed/documentTypeVendorType.seed.ts",
+        "seed:admin": "tsx src/seed/admin.seed.ts",
+        "create-super-admin": "tsx src/scripts/create-super-admin.ts"
     },
     "devDependencies": {
         "@repo/typescript-config": "workspace:*",
@@ -20,6 +22,7 @@
         "tsx": "^4.21.0"
     },
     "dependencies": {
+        "@clerk/backend": "^2.29.5",
         "@prisma/adapter-pg": "^7.3.0",
         "@prisma/client": "^7.2.0",
         "pg": "^8.17.2"

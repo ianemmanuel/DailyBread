@@ -2,19 +2,16 @@ import { Request, Response, NextFunction } from "express"
 import { prisma } from "@repo/db"
 
 /**
- * STEP 2 — Load the admin user from the database.
+ * STEP 2 — Load the admin user with all data needed for the request lifecycle.
  *
- * Uses the clerkUserId set by verifyAdminToken to find the admin_users row.
- * A single query loads the user, their role, all permissions on that role,
- * and all geographic scope rows. Everything downstream needs is fetched here
- * — no subsequent middleware makes another database call.
+ * Single query loads:
+ *   - The admin user row
+ *   - Their role (for name, displayName, and the permission pool)
+ *   - Their individual permission grants (AdminUserPermission → AdminPermission)
+ *   - Their geographic scope rows
  *
- * Returns 401 (not 403) if no admin_users row exists for this Clerk user.
- * This handles the case where someone has a valid admin Clerk token but was
- * never provisioned in the system (e.g. a deleted or migrated account).
- * 401 = "we don't recognise you", 403 = "we know you but you can't do this".
- *
- * Sets req.adminUser on success.
+ * Returns 401 (not 403) if no row exists — "we don't recognise you."
+ * A valid Clerk token with no AdminUser row means the user was never onboarded.
  */
 export async function loadAdminUser(
   req: Request,
@@ -24,23 +21,20 @@ export async function loadAdminUser(
   const clerkUserId = (req as any).adminClerkUserId as string | undefined
 
   if (!clerkUserId) {
-    //* Should never happen — verifyAdminToken always runs first
     return res.status(401).json({
-      status: "error",
+      status : "error",
       message: "Unauthorized",
-      code: "MISSING_CLERK_ID",
+      code   : "MISSING_CLERK_ID",
     })
   }
 
   const adminUser = await prisma.adminUser.findUnique({
-    where: { clerkUserId },
+    where  : { clerkUserId },
     include: {
-      role: {
-        include: { 
-          permissions: {
-            include: { permission: true },
-          },
-        },
+      role: true,
+      // Individual permission grants — what this user CAN DO
+      permissions: {
+        include: { permission: true },
       },
       scopes: true,
     },
@@ -48,9 +42,9 @@ export async function loadAdminUser(
 
   if (!adminUser) {
     return res.status(401).json({
-      status: "error",
+      status : "error",
       message: "Unauthorized",
-      code: "ADMIN_USER_NOT_FOUND",
+      code   : "ADMIN_USER_NOT_FOUND",
     })
   }
 
