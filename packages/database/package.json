@@ -12,7 +12,7 @@
         "seed:documenttypeconfig": "tsx src/seed/documentTypeConfig.seed.ts",
         "seed:documenttypevendortype": "tsx src/seed/documentTypeVendorType.seed.ts",
         "seed:admin": "tsx src/seed/admin.seed.ts",
-        "create-super-admin": "tsx src/scripts/create-super-admin.ts"
+        "create-super-admin": "tsx --env-file=../../.env src/scripts/create-super-admin.ts"
     },
     "devDependencies": {
         "@repo/typescript-config": "workspace:*",

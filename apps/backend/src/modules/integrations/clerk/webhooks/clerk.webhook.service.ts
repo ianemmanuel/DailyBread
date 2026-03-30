@@ -8,7 +8,7 @@ const CLERK_WEBHOOK_SECRETS = {
   customer: process.env.CLERK_CUSTOMER_WEBHOOK_SECRET!,
   courier : process.env.CLERK_COURIER_WEBHOOK_SECRET!,
   admin   : process.env.CLERK_ADMIN_WEBHOOK_SECRET!,
-}
+} 
 
 // ─── Clerk event payload shapes ───────────────────────────────────────────────
 

@@ -13,8 +13,9 @@
  * Does NOT seed AdminUserPermission — individual grants happen during
  * admin user onboarding, not at seed time.
  */
-
+import 'dotenv/config'
 import {prisma} from '../index';
+
 
 // ─── 1. Roles ─────────────────────────────────────────────────────────────────
 // Each role maps to a department. Hierarchy within a department is expressed

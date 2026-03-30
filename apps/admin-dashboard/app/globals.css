@@ -1,50 +1,211 @@
+@import "tailwindcss";
+@import "@repo/ui/styles/tokens.css";
+
+/*
+ * ============================================================
+ * Admin Dashboard — globals.css
+ * Dark, precise, authoritative. Mission control aesthetic.
+ * Tailwind v4 compatible — @layer components uses only core
+ * Tailwind utilities, never references other custom classes.
+ * ============================================================
+ */
+
+@theme {
+  --font-sans    : var(--font-inter);
+  --font-display : var(--font-playfair);
+  --font-mono    : var(--font-ibm-mono);
+
+  --color-background             : var(--background);
+  --color-foreground             : var(--foreground);
+  --color-card                   : var(--card);
+  --color-card-foreground        : var(--card-foreground);
+  --color-primary                : var(--primary);
+  --color-primary-foreground     : var(--primary-foreground);
+  --color-secondary              : var(--secondary);
+  --color-secondary-foreground   : var(--secondary-foreground);
+  --color-muted                  : var(--muted);
+  --color-muted-foreground       : var(--muted-foreground);
+  --color-accent                 : var(--accent);
+  --color-accent-foreground      : var(--accent-foreground);
+  --color-deep                   : var(--deep);
+  --color-deep-foreground        : var(--deep-foreground);
+  --color-destructive            : var(--destructive);
+  --color-destructive-foreground : var(--destructive-foreground);
+  --color-border                 : var(--border);
+  --color-input                  : var(--input);
+  --color-ring                   : var(--ring);
+  --color-sidebar                : var(--sidebar);
+  --color-sidebar-foreground     : var(--sidebar-foreground);
+
+  --radius-sm   : calc(var(--radius) - 4px);
+  --radius-md   : var(--radius);
+  --radius-lg   : calc(var(--radius) + 4px);
+  --radius-xl   : calc(var(--radius) + 8px);
+  --radius-2xl  : calc(var(--radius) + 14px);
+  --radius-full : 9999px;
+
+  /* Status colours — used in badge utilities below */
+  --color-success       : oklch(0.60 0.14 145);
+  --color-success-muted : oklch(0.18 0.04  145);
+  --color-warning       : oklch(0.75 0.15  72);
+  --color-warning-muted : oklch(0.20 0.04  78);
+  --color-danger        : oklch(0.62 0.22  25);
+  --color-danger-muted  : oklch(0.19 0.06  25);
+  --color-info          : oklch(0.62 0.14  230);
+  --color-info-muted    : oklch(0.18 0.04  230);
+}
+
+/* ---------------------------------------- */
+/* ADMIN PERSONALITY                        */
+/* ---------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --radius: 0.45rem;
+
+  --background         : oklch(0.11 0.008 240);
+  --foreground         : oklch(0.93 0.005 240);
+
+  --card               : oklch(0.15 0.010 240);
+  --card-foreground    : oklch(0.93 0.005 240);
+
+  --popover            : oklch(0.16 0.011 240);
+  --popover-foreground : oklch(0.93 0.005 240);
+
+  --primary            : oklch(0.65 0.17 42);
+  --primary-foreground : oklch(0.99 0.006 68);
+
+  --secondary            : oklch(0.18 0.010 240);
+  --secondary-foreground : oklch(0.80 0.008 240);
+
+  --muted            : oklch(0.20 0.010 240);
+  --muted-foreground : oklch(0.56 0.012 240);
+
+  --accent            : oklch(0.76 0.13 72);
+  --accent-foreground : oklch(0.11 0.008 240);
+
+  --deep            : oklch(0.08 0.006 240);
+  --deep-foreground : oklch(0.93 0.005 240);
+
+  --destructive            : oklch(0.58 0.22 25);
+  --destructive-foreground : oklch(0.99 0 0);
+
+  --border : oklch(0.22 0.010 240);
+  --input  : oklch(0.20 0.010 240);
+  --ring   : oklch(0.65 0.17 42);
+
+  --sidebar            : oklch(0.09 0.007 240);
+  --sidebar-foreground : oklch(0.80 0.008 240);
+  --sidebar-border     : oklch(0.18 0.010 240);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ---------------------------------------- */
+/* BASE                                     */
+/* ---------------------------------------- */
+@layer base {
+  * {
+    border-color: var(--border);
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0.25 0.010 240) transparent;
+  }
+
+  *::-webkit-scrollbar       { width: 5px; height: 5px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: oklch(0.25 0.010 240);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display), Georgia, serif;
+    letter-spacing: -0.02em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
   }
 }
 
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
+/* ---------------------------------------- */
+/* COMPONENTS                               */
+/* Only core Tailwind utilities inside      */
+/* @apply — no cross-references to other   */
+/* custom classes (Tailwind v4 rule).       */
+/* ---------------------------------------- */
+@layer components {
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.imgDark {
-  display: none;
-}
-
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
+  /* Sidebar nav link */
+  .sidebar-link {
+    @apply flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium
+           transition-colors duration-150
+           text-[var(--sidebar-foreground)] opacity-60
+           hover:bg-white/5 hover:opacity-100;
   }
 
-  .imgLight {
-    display: none;
+  .sidebar-link-active {
+    @apply opacity-100 text-primary bg-primary/10
+           border-l-2 border-primary;
+    padding-left: calc(0.75rem - 2px);
   }
-  .imgDark {
-    display: unset;
+
+  .sidebar-section-label {
+    @apply px-3 py-1 text-[10px] font-semibold tracking-widest uppercase select-none
+           text-[var(--muted-foreground)];
+    opacity: 0.5;
   }
+
+  /* Status badges — self-contained, no cross-class @apply */
+  .badge-success {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+    background-color: var(--color-success-muted);
+    color: var(--color-success);
+  }
+
+  .badge-warning {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+    background-color: var(--color-warning-muted);
+    color: var(--color-warning);
+  }
+
+  .badge-danger {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+    background-color: var(--color-danger-muted);
+    color: var(--color-danger);
+  }
+
+  .badge-info {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+    background-color: var(--color-info-muted);
+    color: var(--color-info);
+  }
+
+  .badge-neutral {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
+           bg-[var(--muted)] text-[var(--muted-foreground)];
+  }
+}
+
+/* ---------------------------------------- */
+/* KEYFRAMES                                */
+/* ---------------------------------------- */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
