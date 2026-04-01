@@ -22,21 +22,25 @@ datasource db {
 ///   5. Employee can now log in with full access immediately
 ///
 /// Never deleted — deactivated via isActive=false to preserve audit history.
+
+
+
 model AdminUser {
-  id                  String    @id @default(uuid())
-  clerkUserId         String?   @unique   // null until invitation accepted
-  roleId              String?             // null only during role-change transitions
-  email               String    @unique
+  id                  String          @id @default(uuid())
+  clerkUserId         String?         @unique
+  roleId              String?
+  email               String          @unique
   fullName            String
-  isActive            Boolean   @default(false) // false until webhook fires
+  status              AdminUserStatus @default(pending)
+  isActive            Boolean         @default(false)  // true only when status = active
   invitedById         String?
-  invitationSentCount Int       @default(0)
+  invitationSentCount Int             @default(0)
   invitationSentAt    DateTime?
   lastSeenAt          DateTime?
   deactivatedAt       DateTime?
   deactivationReason  String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
   role        AdminRole?              @relation(fields: [roleId], references: [id])
   invitedBy   AdminUser?              @relation("AdminInvitedBy", fields: [invitedById], references: [id])
@@ -48,7 +52,7 @@ model AdminUser {
 
   @@index([clerkUserId])
   @@index([roleId])
-  @@index([isActive])
+  @@index([status])           // replaces @@index([isActive]) — query by status
   @@index([email])
 }
 
@@ -1023,4 +1027,12 @@ enum StaffRole {
   MANAGER
   CHEF
   STAFF
+}
+
+enum AdminUserStatus {
+  pending     // Row created, invitation not yet sent
+  invited     // Invitation sent, user has not accepted yet
+  active      // Invitation accepted — user can log in
+  suspended   // Temporarily blocked (investigation, disciplinary action)
+  deactivated // Permanently offboarded (left company, fired, access revoked)
 }

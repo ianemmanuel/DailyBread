@@ -1,7 +1,7 @@
 import { Webhook } from "svix"
 import { prisma } from "@repo/db"
 import { Request } from "express"
-import { auditService } from "@/modules/admin/services/audit.service"
+import { auditService } from "@/modules/admin/services/admin.audit.service"
 
 const CLERK_WEBHOOK_SECRETS = {
   vendor  : process.env.CLERK_VENDOR_WEBHOOK_SECRET!,

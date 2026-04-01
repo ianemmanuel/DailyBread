@@ -1,12 +1,13 @@
-import { AdminScopeType, AdminPermissionKey } from "../enums/admin"
+import { AdminScopeType, AdminPermissionKey, AdminUserStatus } from "../enums/admin"
 
-// ─── Admin domain types ───────────────────────────────────────────────────────
+//* ─── Admin domain types ───────────────────────────────────────────────────────
 
 export interface AdminPermission {
   id          : string
   key         : AdminPermissionKey
   module      : string
   description : string | null
+  isActive    : boolean
 }
 
 export interface AdminRole {
@@ -30,44 +31,55 @@ export interface AdminUserScope {
 }
 
 export interface AdminUser {
-  id                 : string
-  clerkUserId        : string
-  roleId             : string
-  email              : string
-  fullName           : string
-  isActive           : boolean
-  invitedById        : string | null
-  lastSeenAt         : string | null
-  deactivatedAt      : string | null
-  deactivationReason : string | null
-  createdAt          : string
-  updatedAt          : string
+  id                  : string
+  clerkUserId         : string | null   // null until invitation accepted
+  roleId              : string | null   // null only during role-change transitions
+  email               : string
+  fullName            : string
+  status              : AdminUserStatus // replaces bare isActive boolean
+  isActive            : boolean         // true only when status === active
+  invitedById         : string | null
+  invitationSentCount : number
+  invitationSentAt    : string | null
+  lastSeenAt          : string | null
+  deactivatedAt       : string | null
+  deactivationReason  : string | null
+  createdAt           : string
+  updatedAt           : string
 }
 
 // ─── With relations ───────────────────────────────────────────────────────────
 
+export interface AdminUserPermissionGrant {
+  id           : string
+  userId       : string
+  permissionId : string
+  grantedById  : string
+  permission   : AdminPermission
+}
+
 export interface AdminUserWithRole extends AdminUser {
-  role   : AdminRoleWithPermissions
-  scopes : AdminUserScope[]
+  role        : AdminRole | null
+  scopes      : AdminUserScope[]
+  permissions : AdminUserPermissionGrant[]
 }
 
 export interface AdminUserProfile extends AdminUser {
-  role      : AdminRole
+  role      : AdminRole | null
   scopes    : AdminUserScope[]
   invitedBy : Pick<AdminUser, "id" | "fullName" | "email"> | null
 }
 
 // ─── Scope context ────────────────────────────────────────────────────────────
-// Defined here — single source of truth used by both:
-//   - api/admin/auth.ts  (what the session endpoint returns to the frontend)
-//   - backend/admin.ts   (what the middleware attaches to the request)
+// Single source of truth — used by:
+//   backend/admin.ts   (what the middleware attaches to req.adminScope)
+//   api/admin/auth.ts  (what the session endpoint returns to the frontend)
 
 export interface AdminScopeContext {
   isGlobal   : boolean
   countryIds : string[]
   cityIds    : string[]
-  // Raw scope rows — used by the frontend scope picker UI
-  scopes?    : AdminUserScope[]
+  scopes?    : AdminUserScope[]   // raw rows — used by the frontend scope picker
 }
 
 // ─── Audit log ────────────────────────────────────────────────────────────────

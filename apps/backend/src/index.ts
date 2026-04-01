@@ -1,17 +1,17 @@
 import express from "express"
-import helmet from "helmet"
-import cors from "cors"
-import morgan from "morgan"
+import helmet  from "helmet"
+import cors    from "cors"
+import morgan  from "morgan"
 import cookieParser from "cookie-parser"
 
 import "./env"
-import { corsOptions } from "./config/cors"
+import { corsOptions }    from "./config/cors"
 import { apiRateLimiter } from "./config/rateLimit"
-import router from "./routes"
-import { errorHandler } from "./middleware/error/error.middleware"
-import clerkWebhookRoutes from "./modules/integrations/clerk/webhooks/clerk.webhook.routes"
+import router             from "./routes"
+import { errorHandler }   from "./middleware/error/error.middleware"
+import clerkWebhookRouter from "./modules/integrations/clerk/webhooks"
 
-const app = express()
+const app  = express()
 const port = process.env.PORT || 8000
 
 //* ── Security & logging ────────────────────────────────────────────────────────
@@ -20,10 +20,19 @@ app.use(helmet())
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"))
 app.use(cookieParser())
 
-// ── Clerk webhooks (raw body, before JSON parser) ─────────────────────────────
-// Must be mounted before express.json() — Svix signature verification
-// requires the raw unparsed body. Order is critical here.
-app.use("/webhooks/clerk", express.raw({ type: "application/json" }), clerkWebhookRoutes)
+//* ── Clerk webhooks (raw body, BEFORE JSON parser) ─────────────────────────────
+// express.raw() is required here so Svix signature verification
+// receives the original unparsed bytes. Order is critical — this
+// must come before express.json().
+//
+// Routes:
+//   POST /webhooks/clerk/admin   ← Admin Clerk app
+//   POST /webhooks/clerk/vendor  ← Vendor Clerk app
+app.use(
+  "/webhooks/clerk",
+  express.raw({ type: "application/json" }),
+  clerkWebhookRouter
+)
 
 //* ── API routes ────────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "1mb" }))
