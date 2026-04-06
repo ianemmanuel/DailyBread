@@ -1,11 +1,37 @@
-import { clerkClient } from "@clerk/express"
-import { prisma,AdminUserStatus } from "@repo/db"
-import { ApiError } from "@/middleware/error"
-import type {
-  CreateAdminUserInput,
-  SendInviteInput,
-  UpdateAdminUserPermissionsInput,
-} from "./admin-user.types"
+import { createClerkClient }       from "@clerk/backend"
+import { prisma, AdminUserStatus } from "@repo/db"
+import { ApiError }                from "@/middleware/error"
+
+// ─── Input types ──────────────────────────────────────────────────────────────
+//
+// These are internal to this service — only called by the admin user controller.
+// They don't cross app/package boundaries so they live here, not in @repo/types.
+
+interface CreateAdminUserInput {
+  email          : string
+  fullName       : string
+  roleId         : string
+  permissionKeys : string[]
+}
+
+interface SendInviteInput {
+  adminUserId: string
+}
+
+interface UpdateAdminUserPermissionsInput {
+  adminUserId    : string
+  permissionKeys : string[]
+}
+
+// ─── Clerk client ─────────────────────────────────────────────────────────────
+
+function getAdminClerkClient() {
+  const secretKey = process.env.CLERK_ADMIN_SECRET_KEY
+  if (!secretKey) {
+    throw new ApiError(500, "CLERK_ADMIN_SECRET_KEY is not configured", "CLERK_MISCONFIGURED")
+  }
+  return createClerkClient({ secretKey })
+}
 
 // ─── Create admin user ────────────────────────────────────────────────────────
 
@@ -42,9 +68,10 @@ export async function createAdminUser(
       const permissions = await tx.adminPermission.findMany({
         where: { key: { in: permissionKeys }, isActive: true },
       })
+
       await tx.adminUserPermission.createMany({
         data: permissions.map((p) => ({
-          userId      : user.id,
+          adminUserId : user.id,   // ← Prisma field name (not userId)
           permissionId: p.id,
           grantedById : actorId,
         })),
@@ -72,8 +99,10 @@ export async function sendAdminInvitation(input: SendInviteInput, actorId: strin
     )
   }
 
+  const clerk = getAdminClerkClient()
+
   try {
-    await clerkClient.invitations.createInvitation({
+    await clerk.invitations.createInvitation({
       emailAddress  : adminUser.email,
       redirectUrl   : process.env.CLERK_ADMIN_INVITE_REDIRECT_URL,
       publicMetadata: { adminUserId: adminUser.id, role: adminUser.roleId },
@@ -118,10 +147,12 @@ export async function updateAdminUserPermissions(
   })
 
   await prisma.$transaction([
-    prisma.adminUserPermission.deleteMany({ where: { userId: adminUserId } }),
+    prisma.adminUserPermission.deleteMany({
+      where: { adminUserId },           // ← Prisma field name
+    }),
     prisma.adminUserPermission.createMany({
       data: permissions.map((p) => ({
-        userId      : adminUserId,
+        adminUserId,                    // ← Prisma field name
         permissionId: p.id,
         grantedById : actorId,
       })),
@@ -131,7 +162,7 @@ export async function updateAdminUserPermissions(
   return { updated: permissions.length }
 }
 
-// ─── Suspend user ─────────────────────────────────────────────────────────────
+// ─── Suspend ──────────────────────────────────────────────────────────────────
 
 export async function suspendAdminUser(
   adminUserId: string,
@@ -153,7 +184,8 @@ export async function suspendAdminUser(
 
   if (user.clerkUserId) {
     try {
-      await clerkClient.users.banUser(user.clerkUserId)
+      const clerk = getAdminClerkClient()
+      await clerk.users.banUser(user.clerkUserId)
     } catch (err) {
       throw new ApiError(502, `Failed to ban Clerk user: ${(err as Error).message}`, "CLERK_ERROR")
     }
@@ -171,7 +203,7 @@ export async function suspendAdminUser(
   return { success: true }
 }
 
-// ─── Reinstate (lift suspension) ─────────────────────────────────────────────
+// ─── Reinstate ────────────────────────────────────────────────────────────────
 
 export async function reinstateAdminUser(adminUserId: string, actorId: string) {
   const user = await prisma.adminUser.findUnique({ where: { id: adminUserId } })
@@ -183,7 +215,8 @@ export async function reinstateAdminUser(adminUserId: string, actorId: string) {
 
   if (user.clerkUserId) {
     try {
-      await clerkClient.users.unbanUser(user.clerkUserId)
+      const clerk = getAdminClerkClient()
+      await clerk.users.unbanUser(user.clerkUserId)
     } catch (err) {
       throw new ApiError(502, `Failed to unban Clerk user: ${(err as Error).message}`, "CLERK_ERROR")
     }
@@ -201,7 +234,7 @@ export async function reinstateAdminUser(adminUserId: string, actorId: string) {
   return { success: true }
 }
 
-// ─── Deactivate (permanent offboard) ─────────────────────────────────────────
+// ─── Deactivate ───────────────────────────────────────────────────────────────
 
 export async function deactivateAdminUser(
   adminUserId: string,
@@ -217,10 +250,10 @@ export async function deactivateAdminUser(
 
   if (user.clerkUserId) {
     try {
-      await clerkClient.users.deleteUser(user.clerkUserId)
+      const clerk = getAdminClerkClient()
+      await clerk.users.deleteUser(user.clerkUserId)
     } catch (err) {
-      // Don't throw — DB deactivation must succeed regardless.
-      // Cron reconciliation will clean up any Clerk orphan.
+      // Log but don't throw — DB deactivation must succeed regardless
       console.error(`[admin-user] Failed to delete Clerk user ${user.clerkUserId}:`, err)
     }
   }

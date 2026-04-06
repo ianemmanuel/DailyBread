@@ -9,11 +9,8 @@ export const metadata: Metadata = {
 
 /**
  * Auth layout — wraps all (auth) routes.
- *
  * Clean centred layout: navbar → centred content → footer.
- * No aside — users of this tool know what it is.
- * All future auth routes (e.g. /sign-up for invited users)
- * inherit this layout automatically.
+ * Light warm theme. No sidebar — this is the public-facing auth surface.
  */
 export default function AuthLayout({
   children,
@@ -25,7 +22,7 @@ export default function AuthLayout({
       <AuthNavbar />
 
       <main className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-[420px] animate-slide-up">
+        <div className="w-full max-w-105 animate-slide-up">
           {children}
         </div>
       </main>

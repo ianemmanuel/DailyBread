@@ -1,4 +1,4 @@
-// ─── Admin enums & permission constants ──────────────────────────────────────
+//* ─── Admin enums & permission constants ──────────────────────────────────────
 
 /**
  * AdminUserStatus — for FRONTEND use only.
@@ -26,7 +26,7 @@ export enum AdminScopeType {
   CITY    = "CITY",
 }
 
-// ─── Permission keys ──────────────────────────────────────────────────────────
+//* ─── Permission keys ──────────────────────────────────────────────────────────
 // Single source of truth for every permission string in the system.
 // Backend middleware checks these. Frontend hooks check these.
 // A typo in a constant is a compile error. A typo in a raw string is a silent bug.

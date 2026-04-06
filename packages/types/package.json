@@ -22,15 +22,15 @@
         "require": "./src/backend/index.ts",
         "types": "./src/backend/index.ts"
         },
-        "./vendor-dashboard": {
-        "import": "./src/vendor-dashboard/index.ts",
-        "require": "./src/vendor-dashboard/index.ts",
-        "types": "./src/vendor-dashboard/index.ts"
+        "./vendor-app": {
+        "import": "./src/frontend/vendor.ts",
+        "require": "./src/frontend/vendor.ts",
+        "types": "./src/frontend/vendor.ts"
         },
-        "./admin-dashboard": {
-        "import": "./src/admin-dashboard/index.ts",
-        "require": "./src/admin-dashboard/index.ts",
-        "types": "./src/admin-dashboard/index.ts"
+        "./admin-app": {
+        "import": "./src/frontend/admin.ts",
+        "require": "./src/frontend/admin.ts",
+        "types": "./src/frontend/admin.ts"
         }
     },
     "dependencies": {

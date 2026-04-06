@@ -4,9 +4,9 @@
 /*
  * ============================================================
  * Admin Dashboard — globals.css
- * Dark, precise, authoritative. Mission control aesthetic.
- * Tailwind v4 compatible — @layer components uses only core
- * Tailwind utilities, never references other custom classes.
+ * Light warm-neutral theme for auth routes.
+ * Dark theme (applied via .dark class by next-themes) for
+ * dashboard routes — authoritative, precise, easy on the eyes.
  * ============================================================
  */
 
@@ -44,76 +44,92 @@
   --radius-2xl  : calc(var(--radius) + 14px);
   --radius-full : 9999px;
 
-  /* Status colours — used in badge utilities below */
-  --color-success       : oklch(0.60 0.14 145);
-  --color-success-muted : oklch(0.18 0.04  145);
-  --color-warning       : oklch(0.75 0.15  72);
-  --color-warning-muted : oklch(0.20 0.04  78);
-  --color-danger        : oklch(0.62 0.22  25);
-  --color-danger-muted  : oklch(0.19 0.06  25);
-  --color-info          : oklch(0.62 0.14  230);
-  --color-info-muted    : oklch(0.18 0.04  230);
+  --color-success       : oklch(0.55 0.14 145);
+  --color-success-muted : oklch(0.95 0.04  145);
+  --color-warning       : oklch(0.68 0.15  72);
+  --color-warning-muted : oklch(0.97 0.04  78);
+  --color-danger        : oklch(0.58 0.20  25);
+  --color-danger-muted  : oklch(0.97 0.04  25);
+  --color-info          : oklch(0.58 0.14  230);
+  --color-info-muted    : oklch(0.96 0.04  230);
 }
 
-/* ---------------------------------------- */
-/* ADMIN PERSONALITY                        */
-/* ---------------------------------------- */
+/* ─── LIGHT (default — auth + dashboard light mode) ─────────────────────────── */
 :root {
-  --radius: 0.45rem;
+  --radius: 0.6rem;
 
-  --background         : oklch(0.11 0.008 240);
-  --foreground         : oklch(0.93 0.005 240);
+  --background         : oklch(0.975 0.006 65);
+  --foreground         : oklch(0.16 0.018 42);
 
-  --card               : oklch(0.15 0.010 240);
-  --card-foreground    : oklch(0.93 0.005 240);
+  --card               : oklch(1 0.002 65);
+  --card-foreground    : oklch(0.16 0.018 42);
 
-  --popover            : oklch(0.16 0.011 240);
-  --popover-foreground : oklch(0.93 0.005 240);
+  --popover            : oklch(1 0.002 65);
+  --popover-foreground : oklch(0.16 0.018 42);
 
-  --primary            : oklch(0.65 0.17 42);
+  --primary            : oklch(0.60 0.17 42);
   --primary-foreground : oklch(0.99 0.006 68);
 
-  --secondary            : oklch(0.18 0.010 240);
-  --secondary-foreground : oklch(0.80 0.008 240);
+  --secondary            : oklch(0.93 0.014 62);
+  --secondary-foreground : oklch(0.26 0.018 42);
 
-  --muted            : oklch(0.20 0.010 240);
-  --muted-foreground : oklch(0.56 0.012 240);
+  --muted            : oklch(0.91 0.012 62);
+  --muted-foreground : oklch(0.50 0.016 52);
 
-  --accent            : oklch(0.76 0.13 72);
-  --accent-foreground : oklch(0.11 0.008 240);
+  --accent            : oklch(0.78 0.11 70);
+  --accent-foreground : oklch(0.16 0.018 42);
 
-  --deep            : oklch(0.08 0.006 240);
-  --deep-foreground : oklch(0.93 0.005 240);
+  --deep            : oklch(0.18 0.026 40);
+  --deep-foreground : oklch(0.97 0.006 68);
 
-  --destructive            : oklch(0.58 0.22 25);
+  --destructive            : oklch(0.56 0.20 25);
   --destructive-foreground : oklch(0.99 0 0);
 
-  --border : oklch(0.22 0.010 240);
-  --input  : oklch(0.20 0.010 240);
-  --ring   : oklch(0.65 0.17 42);
+  --border : oklch(0.87 0.012 62);
+  --input  : oklch(0.93 0.010 62);
+  --ring   : oklch(0.60 0.17 42);
 
-  --sidebar            : oklch(0.09 0.007 240);
-  --sidebar-foreground : oklch(0.80 0.008 240);
-  --sidebar-border     : oklch(0.18 0.010 240);
+  --shadow-primary : oklch(0.60 0.17 42 / 28%);
+  --shadow-warm    : oklch(0.18 0.026 42 / 10%);
+
+  --sidebar            : oklch(0.97 0.007 65);
+  --sidebar-foreground : oklch(0.20 0.018 42);
+  --sidebar-primary    : var(--primary);
+  --sidebar-primary-foreground : var(--primary-foreground);
+  --sidebar-accent     : oklch(0.91 0.014 62);
+  --sidebar-accent-foreground  : oklch(0.26 0.018 42);
+  --sidebar-border     : oklch(0.87 0.012 62);
+  --sidebar-ring       : var(--ring);
 }
 
-/* ---------------------------------------- */
-/* BASE                                     */
-/* ---------------------------------------- */
-@layer base {
-  * {
-    border-color: var(--border);
-    scrollbar-width: thin;
-    scrollbar-color: oklch(0.25 0.010 240) transparent;
-  }
+/* ─── DARK (applied via .dark class by next-themes on <html>) ─────────────────
+   Inherits from tokens.css .dark block as the base, then overrides
+   with admin-specific values for more precision.                              */
+.dark {
+  /* tokens.css .dark values are already applied via the import above.
+     We only need to override what's admin-specific. */
 
-  *::-webkit-scrollbar       { width: 5px; height: 5px; }
-  *::-webkit-scrollbar-track { background: transparent; }
-  *::-webkit-scrollbar-thumb {
-    background: oklch(0.25 0.010 240);
-    border-radius: 999px;
-  }
-  *::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+  /* Sidebar gets the deepest surface in dark mode */
+  --sidebar            : oklch(0.14 0.016 42);
+  --sidebar-foreground : oklch(0.88 0.008 65);
+  --sidebar-accent     : oklch(0.22 0.022 42);
+  --sidebar-accent-foreground : oklch(0.88 0.008 65);
+  --sidebar-border     : oklch(1 0 0 / 8%);
+
+  /* Status colours — brighter on dark surfaces */
+  --color-success       : oklch(0.62 0.16 145);
+  --color-success-muted : oklch(0.20 0.06  145);
+  --color-warning       : oklch(0.74 0.16  72);
+  --color-warning-muted : oklch(0.22 0.06  78);
+  --color-danger        : oklch(0.62 0.22  25);
+  --color-danger-muted  : oklch(0.20 0.08  25);
+  --color-info          : oklch(0.64 0.16  230);
+  --color-info-muted    : oklch(0.20 0.06  230);
+}
+
+/* ─── BASE ───────────────────────────────────────────────────────────────────── */
+@layer base {
+  * { border-color: var(--border); }
 
   body {
     background-color: var(--background);
@@ -137,75 +153,62 @@
     background-color: var(--primary);
     color: var(--primary-foreground);
   }
+
+  ::-webkit-scrollbar        { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track  { background: transparent; }
+  ::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--primary); }
 }
 
-/* ---------------------------------------- */
-/* COMPONENTS                               */
-/* Only core Tailwind utilities inside      */
-/* @apply — no cross-references to other   */
-/* custom classes (Tailwind v4 rule).       */
-/* ---------------------------------------- */
+/* ─── COMPONENTS ─────────────────────────────────────────────────────────────── */
 @layer components {
 
-  /* Sidebar nav link */
-  .sidebar-link {
-    @apply flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium
-           transition-colors duration-150
-           text-[var(--sidebar-foreground)] opacity-60
-           hover:bg-white/5 hover:opacity-100;
-  }
-
-  .sidebar-link-active {
-    @apply opacity-100 text-primary bg-primary/10
-           border-l-2 border-primary;
-    padding-left: calc(0.75rem - 2px);
-  }
-
-  .sidebar-section-label {
-    @apply px-3 py-1 text-[10px] font-semibold tracking-widest uppercase select-none
-           text-[var(--muted-foreground)];
-    opacity: 0.5;
-  }
-
-  /* Status badges — self-contained, no cross-class @apply */
   .badge-success {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
     background-color: var(--color-success-muted);
     color: var(--color-success);
   }
-
   .badge-warning {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
     background-color: var(--color-warning-muted);
     color: var(--color-warning);
   }
-
   .badge-danger {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
     background-color: var(--color-danger-muted);
     color: var(--color-danger);
   }
-
   .badge-info {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
     background-color: var(--color-info-muted);
     color: var(--color-info);
   }
-
   .badge-neutral {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
            bg-[var(--muted)] text-[var(--muted-foreground)];
   }
 }
 
-/* ---------------------------------------- */
-/* KEYFRAMES                                */
-/* ---------------------------------------- */
+/* ─── UTILITIES ──────────────────────────────────────────────────────────────── */
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(
+      135deg,
+      oklch(0.60 0.17 42) 0%,
+      oklch(0.70 0.14 50) 50%,
+      oklch(0.56 0.16 38) 100%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+/* ─── KEYFRAMES ──────────────────────────────────────────────────────────────── */
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-
 .animate-slide-up {
   animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }

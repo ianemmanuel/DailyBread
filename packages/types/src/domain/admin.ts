@@ -1,6 +1,6 @@
 import { AdminScopeType, AdminPermissionKey, AdminUserStatus } from "../enums/admin"
 
-//* ─── Admin domain types ───────────────────────────────────────────────────────
+// ─── Primitive domain types ───────────────────────────────────────────────────
 
 export interface AdminPermission {
   id          : string
@@ -15,7 +15,7 @@ export interface AdminRole {
   name        : string
   displayName : string
   description : string | null
-  createdAt   : string
+  createdAt   : Date    
 }
 
 export interface AdminRoleWithPermissions extends AdminRole {
@@ -32,29 +32,30 @@ export interface AdminUserScope {
 
 export interface AdminUser {
   id                  : string
-  clerkUserId         : string | null   // null until invitation accepted
-  roleId              : string | null   // null only during role-change transitions
+  clerkUserId         : string | null
+  roleId              : string | null
   email               : string
   fullName            : string
-  status              : AdminUserStatus // replaces bare isActive boolean
-  isActive            : boolean         // true only when status === active
+  status              : AdminUserStatus
+  isActive            : boolean
   invitedById         : string | null
   invitationSentCount : number
-  invitationSentAt    : string | null
-  lastSeenAt          : string | null
-  deactivatedAt       : string | null
+  invitationSentAt    : Date | null   
+  lastSeenAt          : Date | null   
+  deactivatedAt       : Date | null   
   deactivationReason  : string | null
-  createdAt           : string
-  updatedAt           : string
+  createdAt           : Date          
+  updatedAt           : Date
 }
 
 // ─── With relations ───────────────────────────────────────────────────────────
 
 export interface AdminUserPermissionGrant {
   id           : string
-  userId       : string
+  adminUserId  : string
   permissionId : string
   grantedById  : string
+  grantedAt    : Date
   permission   : AdminPermission
 }
 
@@ -71,15 +72,15 @@ export interface AdminUserProfile extends AdminUser {
 }
 
 // ─── Scope context ────────────────────────────────────────────────────────────
-// Single source of truth — used by:
-//   backend/admin.ts   (what the middleware attaches to req.adminScope)
-//   api/admin/auth.ts  (what the session endpoint returns to the frontend)
+// What scopeFilter writes to req.adminScope, and what the session endpoint
+// returns to the frontend. The optional `scopes` field carries the raw rows
+// so the frontend scope picker can display them.
 
 export interface AdminScopeContext {
   isGlobal   : boolean
   countryIds : string[]
   cityIds    : string[]
-  scopes?    : AdminUserScope[]   // raw rows — used by the frontend scope picker
+  scopes?    : AdminUserScope[]
 }
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ export interface AuditLog {
   entityId    : string | null
   changes     : { before: Record<string, unknown>; after: Record<string, unknown> } | null
   metadata    : Record<string, unknown> | null
-  createdAt   : string
+  createdAt   : Date              // Prisma DateTime → Date
 }
 
 export interface AuditLogWithAdmin extends AuditLog {

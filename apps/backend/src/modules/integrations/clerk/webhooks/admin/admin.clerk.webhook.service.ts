@@ -1,7 +1,6 @@
-import { clerkClient }    from "@clerk/express"
-import { prisma }          from "@repo/db"
-import { AdminUserStatus } from "@repo/db"
-import { Request }         from "express"
+import { createClerkClient } from "@clerk/backend"
+import { prisma, AdminUserStatus } from "@repo/db"
+import { Request }                 from "express"
 import {
   verifyWebhookRequest,
   extractPrimaryEmail,
@@ -10,7 +9,20 @@ import {
   type ClerkUserCreatedData,
 } from "../shared/clerk.webhook.utils"
 
-//* ─── Entry point ──────────────────────────────────────────────────────────────
+
+
+function getAdminClerkClient() {
+  const secretKey = process.env.CLERK_ADMIN_SECRET_KEY
+  if (!secretKey) {
+    throw new Error(
+      "[webhook:admin] CLERK_ADMIN_SECRET_KEY is not set. " +
+      "Cannot perform Clerk user operations."
+    )
+  }
+  return createClerkClient({ secretKey })
+}
+
+// ─── Entry point ──────────────────────────────────────────────────────────────
 
 export async function processAdminClerkWebhook(req: Request): Promise<void> {
   const secret = process.env.CLERK_ADMIN_WEBHOOK_SECRET
@@ -28,14 +40,14 @@ export async function processAdminClerkWebhook(req: Request): Promise<void> {
   }
 }
 
-//* ─── user.created ─────────────────────────────────────────────────────────────
+// ─── user.created ─────────────────────────────────────────────────────────────
 //
 // Status-based routing:
-//   invited     → legitimate happy path — activate
-//   not in DB   → unauthorized signup — delete from Clerk
-//   pending     → invite never sent — delete from Clerk
-//   suspended / deactivated → should not be accepting invites — delete from Clerk
-//   active      → already activated — idempotency skip
+//   invited              → legitimate happy path — activate
+//   not in DB            → unauthorized signup — delete from Clerk
+//   pending              → invite never formally sent — delete from Clerk
+//   suspended/deactivated → not eligible for activation — delete from Clerk
+//   active               → already activated — idempotency skip
 
 async function handleUserCreated(data: ClerkUserCreatedData): Promise<void> {
   const clerkUserId = data.id
@@ -48,20 +60,20 @@ async function handleUserCreated(data: ClerkUserCreatedData): Promise<void> {
   const email     = normalizeEmail(rawEmail)
   const adminUser = await prisma.adminUser.findUnique({ where: { email } })
 
-  // Not in DB at all
+  // Not in DB at all — unauthorized signup
   if (!adminUser) {
     console.warn(`[webhook:admin] Unauthorized signup for ${email} — deleting from Clerk`)
     await safeDeleteClerkUser(clerkUserId)
     return
   }
 
-  // Already active — idempotency
+  // Already active — idempotency guard
   if (adminUser.status === AdminUserStatus.active) {
     console.info(`[webhook:admin] user.created for ${email} — already active, skipping`)
     return
   }
 
-  // Suspended, deactivated, or pending — should not be activating
+  // Any status other than invited is not eligible for activation
   if (adminUser.status !== AdminUserStatus.invited) {
     console.warn(
       `[webhook:admin] user.created for ${email} — account status is "${adminUser.status}", ` +
@@ -72,12 +84,12 @@ async function handleUserCreated(data: ClerkUserCreatedData): Promise<void> {
   }
 
   // Happy path: status === invited
-  // updateMany with guards makes this safe under concurrent Svix retries
+  // updateMany with two conditions is safe under concurrent Svix retries
   const result = await prisma.adminUser.updateMany({
     where: {
       id          : adminUser.id,
       status      : AdminUserStatus.invited,
-      clerkUserId : null,
+      clerkUserId : null,                    // guard: only if not already linked
     },
     data: {
       clerkUserId : clerkUserId,
@@ -103,7 +115,7 @@ async function handleUserDeleted(clerkUserId: string): Promise<void> {
   }
 
   // Only touch rows that are currently active or suspended.
-  // Rows we already deactivated (or that never had a DB row) are left alone.
+  // Rows already deactivated (or that never had a DB row) are left alone.
   const result = await prisma.adminUser.updateMany({
     where: {
       clerkUserId,
@@ -130,10 +142,11 @@ async function handleUserDeleted(clerkUserId: string): Promise<void> {
 
 async function safeDeleteClerkUser(clerkUserId: string): Promise<void> {
   try {
-    await clerkClient.users.deleteUser(clerkUserId)
+    const clerk = getAdminClerkClient()
+    await clerk.users.deleteUser(clerkUserId)
     console.info(`[webhook:admin] Deleted Clerk user ${clerkUserId}`)
   } catch (err) {
-    // Don't throw — the user is still blocked at API level without a DB row.
+    // Don't throw — the user is blocked at API level without a DB row.
     // The cron reconciliation job will clean up anything that slips through.
     console.error(`[webhook:admin] Failed to delete Clerk user ${clerkUserId}:`, err)
   }

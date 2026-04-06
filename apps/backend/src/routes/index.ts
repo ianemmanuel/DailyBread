@@ -2,7 +2,6 @@ import { Router } from 'express'
 import vendorRoutes from '../modules/vendor/routes'
 import metaRoutes from '@/modules/meta/routes'
 import { clerkAuthMiddleware, requireApp } from '@/middleware/auth'
-import clerkWebhookRoutes from "@/modules/integrations/clerk/webhooks/clerk.webhook.routes"
 import adminRoutes from '../modules/admin/routes'
 const router: Router = Router()
 
