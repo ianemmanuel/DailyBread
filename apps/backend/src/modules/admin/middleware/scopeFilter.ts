@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import type { AdminScopeContext } from "@repo/types/backend"
-import { AdminScopeType } from "@repo/types"
-
+import { AdminScopeType } from "@repo/types/enums"
+ 
 /**
  * STEP 5 — Build the geographic scope context.
  *

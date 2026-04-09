@@ -1,3 +1,5 @@
+//* src/backend/admin.ts
+
 import type { Request } from "express"
 import type { AdminUserWithRole, AdminScopeContext } from "../domain/admin"
 import type { AdminPermissionKey } from "../enums/admin"

@@ -1,5 +1,5 @@
 import { Router }          from "express"
-import { AdminPermissions } from "@repo/types"
+import { AdminPermissions } from "@repo/types/enums"
 import { requirePermission } from "@/modules/admin/middleware"
 import {
   handleListAdminUsers,

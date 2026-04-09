@@ -1,3 +1,5 @@
+//* src/domain/admin.ts
+
 import { AdminScopeType, AdminPermissionKey, AdminUserStatus } from "../enums/admin"
 
 // ─── Primitive domain types ───────────────────────────────────────────────────

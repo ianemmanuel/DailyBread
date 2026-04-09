@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express"
-import type { AdminPermissionKey } from "@repo/types"
+import type { AdminPermissionKey } from "@repo/types/enums"
 
 /**
  * STEP 6 — Gate a specific route behind a permission check.

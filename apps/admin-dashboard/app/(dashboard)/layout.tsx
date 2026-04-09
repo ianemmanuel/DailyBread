@@ -1,83 +1,60 @@
 import type { Metadata } from "next"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
-import { headers } from "next/headers"
 import { ThemeProvider } from "@/components/dashboard/layout/ThemeProvider"
 import { AdminSessionProvider } from "@/components/dashboard/layout/AdminSessionContext"
 import { Sidebar } from "@/components/dashboard/sidebar/Sidebar"
 import { Navbar } from "@/components/dashboard/navbar/Navbar"
 import { Footer } from "@/components/dashboard/layout/Footer"
-import type { AdminSessionData } from "@repo/types/admin-app"
+import type { AdminSessionData, ApiSuccess }   from "@repo/types/admin-app"
 
 export const metadata: Metadata = { title: "Dashboard" }
 
 /**
  * Dashboard layout — server component.
  *
- * 1. Verifies Clerk session (defence-in-depth; middleware already guards)
- * 2. Fetches admin session data from /api/admin/v1/auth/session
- *    - Forwarded with the Clerk token so the backend can authenticate
- *    - Cached per-request via Next.js fetch deduplication
- *    - No useEffect, no client round-trip
- * 3. Provides session via AdminSessionProvider to all client components
- * 4. Wraps in ThemeProvider (dark mode toggle lives here)
+ * Data flow:
+ *   1. auth() → get Clerk token
+ *   2. fetch /api/admin/v1/auth/session with Bearer token
+ *      → cached with next: { revalidate: 300 }
+ *      → Next.js deduplicates if overview page fetches the same URL
+ *   3. Pass session as props to server components (Sidebar, Navbar)
+ *   4. Wrap in AdminSessionProvider for client components
  *
- * Layout:
- *   ┌──────────┬─────────────────────────┐
- *   │          │  Navbar (sticky)        │
- *   │ Sidebar  ├─────────────────────────┤
- *   │ (fixed)  │  {children}             │
- *   │          ├─────────────────────────┤
- *   │          │  Footer                 │
- *   └──────────┴─────────────────────────┘
+ * If the backend rejects the token (deactivated, suspended) → redirect /sign-in
+ * The backend is the authoritative gatekeeper — the layout just propagates the result.
  */
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  // ── Auth guard ──────────────────────────────────────────────────────────────
-  const { getToken,  isAuthenticated } = await auth()
-  if (!isAuthenticated) redirect("/sign-in")
+  const { getToken, userId } = await auth()
+  if (!userId) redirect("/sign-in")
 
-  // ── Fetch session data server-side ──────────────────────────────────────────
-  // We forward the Clerk JWT so the backend can authenticate the request.
-  // next: { revalidate: 300 } — re-fetch every 5 min on server.
-  // The frontend also re-fetches on hard navigation (new layout render).
-  // For changes like role reassignment, the user re-logs in or navigates away.
   const token = await getToken()
 
   const sessionRes = await fetch(
     `${process.env.BACKEND_API_URL}/admin/v1/auth/session`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        // Forward the incoming request headers for edge cases
-        ...(await headers()).get("x-forwarded-for")
-          ? { "x-forwarded-for": (await headers()).get("x-forwarded-for")! }
-          : {},
-      },
-      next: { revalidate: 300 },  // 5-minute server cache
+      headers: { Authorization: `Bearer ${token}` },
+      next   : { revalidate: 300 },
     },
   )
 
-  if (!sessionRes.ok) {
-    // Backend rejected the token — redirect to sign-in
-    // This handles deactivated/suspended users whose Clerk token is still valid
-    redirect("/sign-in")
-  }
+  if (!sessionRes.ok) redirect("/sign-in")
 
-  const { data: session }: { data: AdminSessionData } = await sessionRes.json()
+  const { data: session }: ApiSuccess<AdminSessionData> = await sessionRes.json()
 
   return (
     <ThemeProvider>
       <AdminSessionProvider session={session}>
         <div className="flex min-h-screen bg-background">
 
-          {/* Desktop sidebar — fixed, always visible */}
+          {/* Fixed desktop sidebar */}
           <Sidebar session={session} />
 
-          {/* Main column */}
+          {/* Main column — offset by sidebar width on lg+ */}
           <div className="flex flex-1 flex-col lg:pl-64">
             <Navbar session={session} />
 

@@ -1,3 +1,5 @@
+//* src/enums/admin.ts
+
 //* ─── Admin enums & permission constants ──────────────────────────────────────
 
 /**

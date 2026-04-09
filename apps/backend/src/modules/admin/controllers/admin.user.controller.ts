@@ -1,6 +1,6 @@
 import { NextFunction, RequestHandler }    from "express"
-import { AdminUserStatus }   from "@repo/db"            // Prisma enum — one source of truth
-import type { AdminRequest } from "@repo/types/backend"
+import { AdminUserStatus }   from "@repo/db"            
+import type { AdminRequest } from "@repo/types/backend/admin"
 import { sendSuccess }       from "@/helpers/api-response/response"
 import { ApiError }          from "@/middleware/error"
 import {

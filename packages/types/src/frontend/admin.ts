@@ -1,3 +1,6 @@
+//* src/frontend/admin.ts
+
+
 //* ─── Admin dashboard type exports ────────────────────────────────────────────
 // This is the ONLY file Next.js dashboard components should import from.
 //? Usage: import type { AdminSessionData } from "@repo/types/admin-dashboard"
@@ -14,3 +17,5 @@ export type { AdminRoleName }       from "../enums/admin"
 export { AdminRoleNames }           from "../enums/admin"
 export { AdminUserStatus }          from "../enums/admin"
 export { AdminScopeType }           from "../enums/admin"
+
+export type { ApiSuccess, ApiErrorResponse } from "../api/common"
