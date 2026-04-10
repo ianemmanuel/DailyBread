@@ -4,9 +4,15 @@
 /*
  * ============================================================
  * Admin Dashboard — globals.css
- * Light warm-neutral theme for auth routes.
- * Dark theme (applied via .dark class by next-themes) for
- * dashboard routes — authoritative, precise, easy on the eyes.
+ *
+ * Light: warm neutral — the default, used for auth + dashboard
+ * Dark:  warm charcoal — inspired by Laravel Herd's docs
+ *        Very dark warm background (not cold slate), terracotta
+ *        primary still reads beautifully, brand stays intact.
+ *
+ * Dark mode is toggled via .dark on <html> by next-themes.
+ * Only (dashboard) routes wrap in ThemeProvider — auth routes
+ * are always light.
  * ============================================================
  */
 
@@ -44,6 +50,7 @@
   --radius-2xl  : calc(var(--radius) + 14px);
   --radius-full : 9999px;
 
+  /* Status colours */
   --color-success       : oklch(0.55 0.14 145);
   --color-success-muted : oklch(0.95 0.04  145);
   --color-warning       : oklch(0.68 0.15  72);
@@ -54,44 +61,33 @@
   --color-info-muted    : oklch(0.96 0.04  230);
 }
 
-/* ─── LIGHT (default — auth + dashboard light mode) ─────────────────────────── */
+/* ─── LIGHT ──────────────────────────────────────────────────────────────────── */
 :root {
   --radius: 0.6rem;
 
   --background         : oklch(0.975 0.006 65);
   --foreground         : oklch(0.16 0.018 42);
-
   --card               : oklch(1 0.002 65);
   --card-foreground    : oklch(0.16 0.018 42);
-
   --popover            : oklch(1 0.002 65);
   --popover-foreground : oklch(0.16 0.018 42);
-
   --primary            : oklch(0.60 0.17 42);
   --primary-foreground : oklch(0.99 0.006 68);
-
   --secondary            : oklch(0.93 0.014 62);
   --secondary-foreground : oklch(0.26 0.018 42);
-
   --muted            : oklch(0.91 0.012 62);
   --muted-foreground : oklch(0.50 0.016 52);
-
   --accent            : oklch(0.78 0.11 70);
   --accent-foreground : oklch(0.16 0.018 42);
-
   --deep            : oklch(0.18 0.026 40);
   --deep-foreground : oklch(0.97 0.006 68);
-
   --destructive            : oklch(0.56 0.20 25);
   --destructive-foreground : oklch(0.99 0 0);
-
   --border : oklch(0.87 0.012 62);
   --input  : oklch(0.93 0.010 62);
   --ring   : oklch(0.60 0.17 42);
-
   --shadow-primary : oklch(0.60 0.17 42 / 28%);
   --shadow-warm    : oklch(0.18 0.026 42 / 10%);
-
   --sidebar            : oklch(0.97 0.007 65);
   --sidebar-foreground : oklch(0.20 0.018 42);
   --sidebar-primary    : var(--primary);
@@ -102,29 +98,76 @@
   --sidebar-ring       : var(--ring);
 }
 
-/* ─── DARK (applied via .dark class by next-themes on <html>) ─────────────────
-   Inherits from tokens.css .dark block as the base, then overrides
-   with admin-specific values for more precision.                              */
+/* ─── DARK — warm charcoal (Herd-inspired) ───────────────────────────────────
+   Philosophy: not cold/blue, not pure black.
+   Dark warm brown-charcoal as the base — like aged wood in low light.
+   The terracotta primary stays vivid. Borders are warm, not stark.
+   Content areas slightly lighter than background — classic layered depth.
+   ─────────────────────────────────────────────────────────────────────────── */
 .dark {
-  /* tokens.css .dark values are already applied via the import above.
-     We only need to override what's admin-specific. */
+  /* Page background — very dark warm charcoal */
+  --background         : oklch(0.14 0.014 48);
+  --foreground         : oklch(0.92 0.008 65);
 
-  /* Sidebar gets the deepest surface in dark mode */
-  --sidebar            : oklch(0.14 0.016 42);
-  --sidebar-foreground : oklch(0.88 0.008 65);
-  --sidebar-accent     : oklch(0.22 0.022 42);
-  --sidebar-accent-foreground : oklch(0.88 0.008 65);
-  --sidebar-border     : oklch(1 0 0 / 8%);
+  /* Cards — slightly elevated surface */
+  --card               : oklch(0.18 0.016 46);
+  --card-foreground    : oklch(0.92 0.008 65);
 
-  /* Status colours — brighter on dark surfaces */
+  --popover            : oklch(0.20 0.016 46);
+  --popover-foreground : oklch(0.92 0.008 65);
+
+  /* Primary terracotta — slightly brighter on dark to maintain contrast */
+  --primary            : oklch(0.68 0.18 44);
+  --primary-foreground : oklch(0.99 0.006 68);
+
+  /* Secondary — warm mid-dark panel */
+  --secondary            : oklch(0.22 0.014 48);
+  --secondary-foreground : oklch(0.80 0.010 62);
+
+  /* Muted */
+  --muted            : oklch(0.22 0.012 48);
+  --muted-foreground : oklch(0.62 0.012 58);
+
+  /* Accent — warm amber/gold, rich on dark */
+  --accent            : oklch(0.72 0.14 68);
+  --accent-foreground : oklch(0.14 0.014 48);
+
+  /* Deep — darkest surface (used for navbar/elevated chrome) */
+  --deep            : oklch(0.10 0.012 46);
+  --deep-foreground : oklch(0.92 0.008 65);
+
+  /* Destructive */
+  --destructive            : oklch(0.62 0.22 25);
+  --destructive-foreground : oklch(0.99 0 0);
+
+  /* Chrome — warm, not stark white */
+  --border : oklch(0.28 0.012 52);
+  --input  : oklch(0.22 0.014 48);
+  --ring   : oklch(0.68 0.18 44);
+
+  /* Shadows */
+  --shadow-primary : oklch(0.68 0.18 44 / 35%);
+  --shadow-warm    : oklch(0 0 0 / 40%);
+
+  /* Sidebar — deepest warm surface */
+  --sidebar            : oklch(0.11 0.013 46);
+  --sidebar-foreground : oklch(0.82 0.010 62);
+  --sidebar-primary    : var(--primary);
+  --sidebar-primary-foreground : var(--primary-foreground);
+  --sidebar-accent     : oklch(0.20 0.014 48);
+  --sidebar-accent-foreground  : oklch(0.82 0.010 62);
+  --sidebar-border     : oklch(0.24 0.012 50);
+  --sidebar-ring       : var(--ring);
+
+  /* Status colours — vibrant enough on dark */
   --color-success       : oklch(0.62 0.16 145);
-  --color-success-muted : oklch(0.20 0.06  145);
+  --color-success-muted : oklch(0.18 0.06  145);
   --color-warning       : oklch(0.74 0.16  72);
-  --color-warning-muted : oklch(0.22 0.06  78);
-  --color-danger        : oklch(0.62 0.22  25);
+  --color-warning-muted : oklch(0.20 0.06  78);
+  --color-danger        : oklch(0.64 0.22  25);
   --color-danger-muted  : oklch(0.20 0.08  25);
   --color-info          : oklch(0.64 0.16  230);
-  --color-info-muted    : oklch(0.20 0.06  230);
+  --color-info-muted    : oklch(0.18 0.06  230);
 }
 
 /* ─── BASE ───────────────────────────────────────────────────────────────────── */
@@ -137,6 +180,8 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* Smooth theme transitions — avoids hard flash on toggle */
+    transition: background-color 0.2s ease, color 0.15s ease;
   }
 
   h1, h2, h3 {
@@ -162,7 +207,6 @@
 
 /* ─── COMPONENTS ─────────────────────────────────────────────────────────────── */
 @layer components {
-
   .badge-success {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
     background-color: var(--color-success-muted);
@@ -185,8 +229,14 @@
   }
   .badge-neutral {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
-           bg-[var(--muted)] text-[var(--muted-foreground)];
+           bg-(--muted) text-(--muted-foreground);
   }
+  /* Status pill for admin user status */
+  .status-pending     { @apply badge-neutral; }
+  .status-invited     { @apply badge-info; }
+  .status-active      { @apply badge-success; }
+  .status-suspended   { @apply badge-warning; }
+  .status-deactivated { @apply badge-danger; }
 }
 
 /* ─── UTILITIES ──────────────────────────────────────────────────────────────── */
@@ -201,6 +251,16 @@
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+  }
+
+  /* Page content wrapper — consistent padding across all dashboard pages */
+  .page-content {
+    @apply mx-auto max-w-7xl space-y-6;
+  }
+
+  /* Card — consistent styling, inherits theme automatically */
+  .admin-card {
+    @apply rounded-xl border border-border/60 bg-card p-5;
   }
 }
 

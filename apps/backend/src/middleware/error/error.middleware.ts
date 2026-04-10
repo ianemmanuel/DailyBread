@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from "express"
-import { Prisma } from "@repo/db"
+import { Prisma }  from "@repo/db"
+import { logger }  from "@/lib/pino/logger"
+
+const errorLog = logger.child({ module: "error-handler" })
 
 /**
  * Application error with HTTP status code and optional machine-readable code.
@@ -8,91 +11,89 @@ import { Prisma } from "@repo/db"
  *   throw new ApiError(404, "Vendor not found", "VENDOR_NOT_FOUND")
  */
 export class ApiError extends Error {
-  statusCode: number
-  code: string
+  statusCode : number
+  code       : string
 
   constructor(statusCode: number, message: string, code = "API_ERROR") {
     super(message)
     this.statusCode = statusCode
-    this.code = code
-    // Restore prototype chain — required when extending built-ins in TypeScript
+    this.code       = code
     Object.setPrototypeOf(this, ApiError.prototype)
   }
 }
 
 /**
  * Global error handler. Must be the last middleware registered.
- * Handles ApiError, Prisma errors, and unexpected errors uniformly.
- *
- * All responses follow the same shape:
- *   { status: "error", message: string, code: string }
  */
 export const errorHandler = (
-  err: unknown,
-  req: Request,
-  res: Response,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _next: NextFunction
+  err  : unknown,
+  req  : Request,
+  res  : Response,
+  _next: NextFunction,
 ) => {
   // ── Known application error ────────────────────────────────────────────────
   if (err instanceof ApiError) {
+    // 4xx errors are expected — log at warn, not error
+    if (err.statusCode >= 500) {
+      errorLog.error({ err, correlationId: req.id }, err.message)
+    } else {
+      errorLog.warn({ statusCode: err.statusCode, code: err.code, correlationId: req.id }, err.message)
+    }
     return res.status(err.statusCode).json({
-      status: "error",
+      status : "error",
       message: err.message,
-      code: err.code,
+      code   : err.code,
     })
   }
 
   // ── Prisma: unique constraint violation ────────────────────────────────────
-  // e.g. duplicate email, duplicate business registration number
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
     const fields = (err.meta?.target as string[])?.join(", ") ?? "unknown field"
+    errorLog.warn({ prismaCode: "P2002", fields, correlationId: req.id }, "Duplicate record")
     return res.status(409).json({
-      status: "error",
+      status : "error",
       message: `A record with this ${fields} already exists.`,
-      code: "DUPLICATE_RECORD",
+      code   : "DUPLICATE_RECORD",
     })
   }
 
-  // ── Prisma: record not found (findUniqueOrThrow, updateOrThrow, etc.) ──────
+  // ── Prisma: record not found ───────────────────────────────────────────────
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+    errorLog.warn({ prismaCode: "P2025", correlationId: req.id }, "Record not found")
     return res.status(404).json({
-      status: "error",
+      status : "error",
       message: "Record not found.",
-      code: "NOT_FOUND",
+      code   : "NOT_FOUND",
     })
   }
 
-  // ── Prisma: foreign key constraint failed ──────────────────────────────────
+  // ── Prisma: foreign key constraint ────────────────────────────────────────
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
+    errorLog.warn({ prismaCode: "P2003", correlationId: req.id }, "FK constraint failed")
     return res.status(400).json({
-      status: "error",
+      status : "error",
       message: "Referenced record does not exist.",
-      code: "INVALID_REFERENCE",
+      code   : "INVALID_REFERENCE",
     })
   }
 
-  // ── Prisma: validation error (bad data shape) ──────────────────────────────
+  // ── Prisma: validation error ───────────────────────────────────────────────
   if (err instanceof Prisma.PrismaClientValidationError) {
+    errorLog.warn({ correlationId: req.id }, "Prisma validation error")
     return res.status(400).json({
-      status: "error",
+      status : "error",
       message: "Invalid data provided.",
-      code: "VALIDATION_ERROR",
+      code   : "VALIDATION_ERROR",
     })
   }
 
   // ── Unexpected error ───────────────────────────────────────────────────────
-  // Log the full error in development; never expose internals to the client.
-  if (process.env.NODE_ENV !== "production") {
-    console.error("[error]", err)
-  } else {
-    // In production, log to your observability platform here (e.g. Sentry)
-    console.error("[error] Unhandled exception:", err instanceof Error ? err.message : err)
-  }
+  // Always log at error level with the full stack in production
+  errorLog.error({ err, correlationId: req.id }, "Unhandled exception")
 
   return res.status(500).json({
-    status: "error",
+    status : "error",
     message: "Internal server error.",
-    code: "INTERNAL_SERVER_ERROR",
+    code   : "INTERNAL_SERVER_ERROR",
   })
 }

@@ -1,37 +1,37 @@
-import Link from "next/link"
-import { SidebarNav } from "./SidebarNav"
+import Link                   from "next/link"
+import { SidebarNav }         from "./SidebarNav"
 import type { AdminSessionData } from "@repo/types/admin-app"
 
-interface SidebarDesktopProps {
-  session: AdminSessionData
-}
+interface Props { session: AdminSessionData }
 
 /**
- * SidebarDesktop — server component.
- * Fixed left column, hidden below lg breakpoint.
- * Receives session from the layout (no client fetch needed).
+ * SidebarDesktop — fixed left sidebar for lg+ screens.
+ * Server component — receives session from layout.
+ *
+ * Uses CSS custom properties (var(--sidebar), var(--sidebar-border), etc.)
+ * rather than hardcoded Tailwind colours. This means light/dark theme works
+ * automatically — globals.css defines different values per theme.
  */
-export function SidebarDesktop({ session }: SidebarDesktopProps) {
-  // Build initials for the avatar
+export function SidebarDesktop({ session }: Props) {
   const initials = session.fullName
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase()
+    .split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
 
-  const scopeLabel =
-    session.scope.isGlobal
-      ? "Global"
-      : session.scope.countryIds.length > 0
-        ? `${session.scope.countryIds.length} countr${session.scope.countryIds.length > 1 ? "ies" : "y"}`
-        : "Limited scope"
+  const scopeLabel = session.scope.isGlobal
+    ? "Global"
+    : session.scope.countryIds.length > 0
+      ? `${session.scope.countryIds.length} countr${session.scope.countryIds.length > 1 ? "ies" : "y"}`
+      : "Limited scope"
 
   return (
-    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-64 flex-col border-r border-sidebar-border bg-sidebar lg:flex">
-
+    <aside
+      className="fixed left-0 top-0 z-40 hidden h-screen w-64 flex-col lg:flex"
+      style={{ backgroundColor: "var(--sidebar)", borderRight: "1px solid var(--sidebar-border)" }}
+    >
       {/* Logo */}
-      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-sidebar-border px-5">
+      <div
+        className="flex h-16 shrink-0 items-center gap-3 px-5"
+        style={{ borderBottom: "1px solid var(--sidebar-border)" }}
+      >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary shadow-sm">
           <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path d="M10 2C6.5 2 4 5 4 8c0 2 1 3.5 2 4.5V15h8v-2.5C15 11.5 16 10 16 8c0-3-2.5-6-6-6z" fill="white" fillOpacity="0.95"/>
@@ -40,7 +40,8 @@ export function SidebarDesktop({ session }: SidebarDesktopProps) {
         </div>
         <Link
           href="/overview"
-          className="font-display text-lg font-semibold tracking-tight text-foreground"
+          className="font-display text-lg font-semibold tracking-tight"
+          style={{ color: "var(--sidebar-foreground)" }}
           aria-label="DailyBread Admin — go to overview"
         >
           Daily<span className="text-primary">Bread</span>
@@ -55,9 +56,15 @@ export function SidebarDesktop({ session }: SidebarDesktopProps) {
         <SidebarNav />
       </div>
 
-      {/* User identity card — mirrors vendor's "Wanjiku's Kitchen" */}
-      <div className="shrink-0 border-t border-sidebar-border p-3">
-        <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/60 px-3 py-2.5">
+      {/* User identity card */}
+      <div
+        className="shrink-0 p-3"
+        style={{ borderTop: "1px solid var(--sidebar-border)" }}
+      >
+        <div
+          className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+          style={{ backgroundColor: "var(--sidebar-accent)" }}
+        >
           <div
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground"
             aria-hidden="true"
@@ -65,16 +72,18 @@ export function SidebarDesktop({ session }: SidebarDesktopProps) {
             {initials}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-sidebar-foreground">
+            <p
+              className="truncate text-sm font-semibold"
+              style={{ color: "var(--sidebar-foreground)" }}
+            >
               {session.fullName}
             </p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-xs" style={{ color: "var(--muted-foreground)" }}>
               {session.role?.displayName ?? "—"} · {scopeLabel}
             </p>
           </div>
         </div>
       </div>
-
     </aside>
   )
 }

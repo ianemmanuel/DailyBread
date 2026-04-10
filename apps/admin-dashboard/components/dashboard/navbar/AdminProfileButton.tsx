@@ -1,14 +1,11 @@
 "use client"
 
-import { UserButton }        from "@clerk/nextjs"
-import { useAdminSession }   from "../layout/AdminSessionContext"
+import { UserButton }      from "@clerk/nextjs"
+import { useAdminSession } from "../layout/AdminSessionContext"
 
 /**
- * AdminProfileButton
- *
- * Clerk's UserButton (handles sign-out, profile management).
- * Shows the admin's role and scope as a context pill next to the avatar.
- * The pill is informational — full details are in the sidebar card.
+ * AdminProfileButton — Clerk UserButton with role/scope context pill.
+ * Uses CSS variables so it looks correct in both light and dark.
  */
 export function AdminProfileButton() {
   const { role, scope } = useAdminSession()
@@ -21,22 +18,26 @@ export function AdminProfileButton() {
 
   return (
     <div className="flex items-center gap-2">
-      {/* Role + scope pill — desktop only */}
       {role && (
         <div className="hidden flex-col items-end sm:flex">
-          <span className="text-xs font-medium text-foreground leading-none">
+          <span
+            className="text-xs font-medium leading-none"
+            style={{ color: "var(--foreground)" }}
+          >
             {role.displayName}
           </span>
-          <span className="mt-0.5 text-[10px] text-muted-foreground leading-none">
+          <span
+            className="mt-0.5 text-[10px] leading-none"
+            style={{ color: "var(--muted-foreground)" }}
+          >
             {scopeLabel}
           </span>
         </div>
       )}
-
       <UserButton
         appearance={{
           elements: {
-            avatarBox: "h-8 w-8 ring-2 ring-border hover:ring-primary transition-all",
+            avatarBox: "h-8 w-8 ring-2 ring-border hover:ring-primary transition-all duration-150",
           },
         }}
       />
