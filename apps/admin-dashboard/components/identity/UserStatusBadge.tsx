@@ -10,12 +10,6 @@ const labelMap: Record<string, string> = {
   deactivated: "Deactivated",
 }
 
-/**
- * UserStatusBadge — maps AdminUserStatus to the correct CSS badge class.
- * Classes are defined in globals.css (.status-*) so they work in both
- * light and dark themes automatically.
- * Server component — no client JS needed.
- */
 export function UserStatusBadge({ status }: Props) {
   return (
     <span className={`status-${status}`} aria-label={`Status: ${labelMap[status] ?? status}`}>

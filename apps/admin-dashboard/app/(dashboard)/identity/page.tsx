@@ -1,47 +1,42 @@
-import type { Metadata }      from "next"
-import { redirect }           from "next/navigation"
-import Link                   from "next/link"
-import { auth }               from "@clerk/nextjs/server"
-import { Plus, Search }       from "lucide-react"
-import { adminFetch }         from "@/lib/api"
-import { Button }             from "@repo/ui/components/button"
-import { Input }              from "@repo/ui/components/input"
-import { UserStatusBadge }    from "@/components/identity/UserStatusBadge"
-import { UserActionsMenu }    from "@/components/identity/UserActionsMenu"
+import type { Metadata }        from "next"
+import { redirect }             from "next/navigation"
+import Link                     from "next/link"
+import { auth }                 from "@clerk/nextjs/server"
+import { Plus }                 from "lucide-react"
+import { adminFetch }           from "@/lib/api"
+import { Button }               from "@repo/ui/components/button"
+import { UserStatusBadge }      from "@/components/identity/UserStatusBadge"
+import { UserActionsMenu }      from "@/components/identity/UserActionsMenu"
+import { UsersTableFilters }    from "@/components/identity/UsersTableFilters"
 import type { AdminSessionData, ApiSuccess } from "@repo/types/admin-app"
-import { AdminPermissions }   from "@repo/types/admin-app"
+import { AdminPermissions }     from "@repo/types/admin-app"
 import type { ListAdminUsersResult } from "@/types"
 
 export const metadata: Metadata = { title: "Identity & Access" }
+
+// ISR: revalidate every 60 seconds — list stays fresh without blocking every render
+export const revalidate = 60
 
 interface PageProps {
   searchParams: Promise<{ page?: string; search?: string; status?: string }>
 }
 
-/**
- * Identity & Access page — server-rendered list of admin users.
- *
- * Permission gate: requires ADMIN_USERS_READ.
- * Create button: only shown if ADMIN_USERS_CREATE is held.
- *
- * No client-side fetching — data is fetched server-side at render time.
- * Search and pagination use URL search params → full page navigation (SSR).
- */
 export default async function IdentityPage({ searchParams }: PageProps) {
   const { getToken, userId } = await auth()
   if (!userId) redirect("/sign-in")
 
   const token = await getToken()
 
-  // Get session to check permissions (deduped with layout fetch)
   const sessionRes = await fetch(
     `${process.env.BACKEND_API_URL}/admin/v1/auth/session`,
-    { headers: { Authorization: `Bearer ${token}` }, next: { revalidate: 300 } },
+    { 
+      headers: { Authorization: `Bearer ${token}` }, 
+      next: { revalidate: 300 } 
+    },
   )
   if (!sessionRes.ok) redirect("/sign-in")
   const { data: session }: ApiSuccess<AdminSessionData> = await sessionRes.json()
 
-  // Permission gate — if no read access, redirect to overview
   if (!session.permissions.includes(AdminPermissions.ADMIN_USERS_READ)) {
     redirect("/overview")
   }
@@ -54,12 +49,10 @@ export default async function IdentityPage({ searchParams }: PageProps) {
   const canInvite = session.permissions.includes(AdminPermissions.ADMIN_USERS_INVITE)
   const canManage = session.permissions.includes(AdminPermissions.ADMIN_USERS_DEACTIVATE)
 
-  // Fetch users — scoped by backend based on actor's scope
   const qs = new URLSearchParams({
-    page,
-    pageSize: "20",
+    page, pageSize: "20",
     ...(search ? { search } : {}),
-    ...(status ? { status } : {}),
+    ...(status && status !== "all" ? { status } : {}),
   })
 
   let result: ListAdminUsersResult | null = null
@@ -67,17 +60,15 @@ export default async function IdentityPage({ searchParams }: PageProps) {
     result = await adminFetch<ListAdminUsersResult>(`/admin/v1/users?${qs}`, {
       next: { revalidate: 60, tags: ["admin-users"] },
     })
-  } catch {
-    result = null
-  }
+  } catch { result = null }
 
   return (
     <div className="page-content animate-slide-up">
 
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-mono tracking-widest uppercase text-muted-foreground/60 mb-1">
+          <p className="mb-1 text-xs font-mono uppercase tracking-widest text-muted-foreground/60">
             Administration
           </p>
           <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
@@ -97,36 +88,8 @@ export default async function IdentityPage({ searchParams }: PageProps) {
         )}
       </div>
 
-      {/* Filters */}
-      <form method="GET" className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            name="search"
-            defaultValue={search}
-            placeholder="Search by name or email..."
-            className="pl-9"
-          />
-        </div>
-        <select
-          name="status"
-          defaultValue={status}
-          className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="invited">Invited</option>
-          <option value="active">Active</option>
-          <option value="suspended">Suspended</option>
-          <option value="deactivated">Deactivated</option>
-        </select>
-        <Button type="submit" variant="secondary" size="sm">Filter</Button>
-        {(search || status) && (
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/identity">Clear</Link>
-          </Button>
-        )}
-      </form>
+      {/* Filters — client component for reactive URL updates + shadcn Select */}
+      <UsersTableFilters defaultSearch={search} defaultStatus={status} />
 
       {/* Table */}
       <div className="admin-card overflow-hidden p-0">
@@ -155,16 +118,14 @@ export default async function IdentityPage({ searchParams }: PageProps) {
                   <tr key={user.id} className="transition-colors hover:bg-muted/20">
                     <td className="px-4 py-3">
                       <Link href={`/identity/${user.id}`} className="group">
-                        <p className="font-medium text-foreground group-hover:text-primary transition-colors">
+                        <p className="font-medium text-foreground transition-colors group-hover:text-primary">
                           {user.fullName}
                         </p>
                         <p className="text-xs text-muted-foreground">{user.email}</p>
                       </Link>
                     </td>
                     <td className="hidden px-4 py-3 sm:table-cell">
-                      <span className="text-sm text-muted-foreground">
-                        {user.role?.displayName ?? "—"}
-                      </span>
+                      <span className="text-sm text-muted-foreground">{user.role?.displayName ?? "—"}</span>
                     </td>
                     <td className="px-4 py-3">
                       <UserStatusBadge status={user.status} />
@@ -176,11 +137,7 @@ export default async function IdentityPage({ searchParams }: PageProps) {
                     </td>
                     {(canInvite || canManage) && (
                       <td className="px-4 py-3 text-right">
-                        <UserActionsMenu
-                          user={user}
-                          canInvite={canInvite}
-                          canManage={canManage}
-                        />
+                        <UserActionsMenu user={user} canInvite={canInvite} canManage={canManage} />
                       </td>
                     )}
                   </tr>
@@ -199,19 +156,13 @@ export default async function IdentityPage({ searchParams }: PageProps) {
             <div className="flex items-center gap-2">
               {parseInt(page) > 1 && (
                 <Button asChild variant="ghost" size="sm">
-                  <Link href={`/identity?page=${parseInt(page) - 1}&search=${search}&status=${status}`}>
-                    Previous
-                  </Link>
+                  <Link href={`/identity?page=${parseInt(page) - 1}&search=${search}&status=${status}`}>Previous</Link>
                 </Button>
               )}
-              <span className="text-xs text-muted-foreground">
-                Page {page} of {result.totalPages}
-              </span>
+              <span className="text-xs text-muted-foreground">Page {page} of {result.totalPages}</span>
               {parseInt(page) < result.totalPages && (
                 <Button asChild variant="ghost" size="sm">
-                  <Link href={`/identity?page=${parseInt(page) + 1}&search=${search}&status=${status}`}>
-                    Next
-                  </Link>
+                  <Link href={`/identity?page=${parseInt(page) + 1}&search=${search}&status=${status}`}>Next</Link>
                 </Button>
               )}
             </div>

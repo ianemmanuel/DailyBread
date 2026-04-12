@@ -48,3 +48,10 @@ export interface ListAdminUsersResult {
   pageSize   : number
   totalPages : number
 }
+
+export interface Permission {
+  id         : string
+  key        : string
+  module     : string
+  description: string | null
+}

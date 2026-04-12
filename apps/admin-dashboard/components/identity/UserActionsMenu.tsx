@@ -1,8 +1,8 @@
 "use client"
 
-import { useRouter }          from "next/navigation"
+import { useRouter } from "next/navigation"
 import { MoreHorizontal, Mail, Eye, Ban, RefreshCw } from "lucide-react"
-import { Button }             from "@repo/ui/components/button"
+import { Button } from "@repo/ui/components/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,7 +25,6 @@ interface Props {
 
 /**
  * UserActionsMenu — dropdown for the user table row.
- * Client component — uses router for navigation and fetch for actions.
  * Each action re-validates via router.refresh() after completion.
  */
 export function UserActionsMenu({ user, canInvite, canManage }: Props) {

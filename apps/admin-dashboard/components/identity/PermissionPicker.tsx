@@ -1,36 +1,43 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { Permission } from "@/types"
 
-interface Permission {
-  id     : string
-  key    : string
-  module : string
-  description?: string | null
-}
 
 interface Props {
   roleId?      : string
   selectedKeys?: string[]
+  onChange?    : (keys: string[]) => void
+  /** If true, renders hidden inputs for native form submission */
+  useHiddenInputs?: boolean
 }
 
 /**
- * PermissionPicker — dynamically loads the permission pool for a role
- * and renders a grouped checkbox list.
+ * PermissionPicker — permission checkbox grid for a role's pool.
  *
- * - On the create form: listens for "roleChanged" custom event from RoleSelect
- * - On the edit form:   receives roleId as prop, loads pool on mount
+ * Two modes:
+ *   - Controlled (onChange prop): parent owns selection state (CreateUserForm)
+ *   - Hidden inputs (useHiddenInputs): embeds <input type="hidden"> for server actions
  *
- * Permissions are grouped by module. Selected state is kept locally
- * and submitted as multiple `permissions` form values.
+ * Permissions are grouped by module for easy scanning.
+ * Fetches pool via /api/admin/roles/:roleId/pool route handler.
  */
-export function PermissionPicker({ roleId: initialRoleId, selectedKeys = [] }: Props) {
-  const [roleId,      setRoleId]      = useState(initialRoleId ?? "")
-  const [pool,        setPool]        = useState<Permission[]>([])
-  const [selected,    setSelected]    = useState<Set<string>>(new Set(selectedKeys))
-  const [loading,     setLoading]     = useState(false)
+export function PermissionPicker({
+  roleId,
+  selectedKeys = [],
+  onChange,
+  useHiddenInputs = false,
+}: Props) {
+  const [pool,    setPool]    = useState<Permission[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set(selectedKeys))
+  const [loading,  setLoading]  = useState(false)
 
-  // Load pool whenever roleId changes
+  // Sync external selectedKeys on mount / prop change
+  useEffect(() => {
+    setSelected(new Set(selectedKeys))
+  }, [selectedKeys.join(",")])
+
+  // Fetch pool when roleId changes
   useEffect(() => {
     if (!roleId) { setPool([]); return }
 
@@ -38,39 +45,35 @@ export function PermissionPicker({ roleId: initialRoleId, selectedKeys = [] }: P
     fetch(`/api/admin/roles/${roleId}/pool`)
       .then((r) => r.json())
       .then((data) => {
-        setPool(data.permissions ?? [])
-        // Remove any selected keys not in the new pool
+        const perms: Permission[] = data.permissions ?? []
+        setPool(perms)
+        // Remove keys no longer in pool
         setSelected((prev) => {
-          const poolKeys = new Set(data.permissions?.map((p: Permission) => p.key) ?? [])
-          return new Set([...prev].filter((k) => poolKeys.has(k)))
+          const poolKeys = new Set(perms.map((p) => p.key))
+          const next     = new Set([...prev].filter((k) => poolKeys.has(k)))
+          onChange?.([...next])
+          return next
         })
       })
+      .catch(() => setPool([]))
       .finally(() => setLoading(false))
   }, [roleId])
 
-  // Listen for role changes from RoleSelect (on create form)
-  useEffect(() => {
-    function handler(e: Event) {
-      const { roleId: newRoleId } = (e as CustomEvent).detail
-      setRoleId(newRoleId)
-    }
-    window.addEventListener("roleChanged", handler)
-    return () => window.removeEventListener("roleChanged", handler)
-  }, [])
-
-  const toggle = (key: string) => {
+  function toggle(key: string) {
     setSelected((prev) => {
       const next = new Set(prev)
       next.has(key) ? next.delete(key) : next.add(key)
+      onChange?.([...next])
       return next
     })
   }
 
-  // Group by module
-  const byModule = pool.reduce<Record<string, Permission[]>>((acc, p) => {
-    (acc[p.module] ??= []).push(p)
-    return acc
-  }, {})
+  function toggleAll() {
+    const allKeys = pool.map((p) => p.key)
+    const next    = selected.size === pool.length ? [] : allKeys
+    setSelected(new Set(next))
+    onChange?.(next)
+  }
 
   if (!roleId) {
     return <p className="text-sm text-muted-foreground">Select a role to see available permissions.</p>
@@ -79,8 +82,8 @@ export function PermissionPicker({ roleId: initialRoleId, selectedKeys = [] }: P
   if (loading) {
     return (
       <div className="space-y-2">
-        {[1,2,3].map((i) => (
-          <div key={i} className="h-6 rounded bg-muted/50 animate-pulse" />
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-6 animate-pulse rounded bg-muted/50" />
         ))}
       </div>
     )
@@ -90,10 +93,15 @@ export function PermissionPicker({ roleId: initialRoleId, selectedKeys = [] }: P
     return <p className="text-sm text-muted-foreground">No permissions available for this role.</p>
   }
 
+  const byModule = pool.reduce<Record<string, Permission[]>>((acc, p) => {
+    (acc[p.module] ??= []).push(p)
+    return acc
+  }, {})
+
   return (
     <div className="space-y-4">
-      {/* Hidden inputs for form submission */}
-      {[...selected].map((key) => (
+      {/* Hidden inputs for server action / form submission mode */}
+      {useHiddenInputs && [...selected].map((key) => (
         <input key={key} type="hidden" name="permissions" value={key} />
       ))}
 
@@ -101,11 +109,7 @@ export function PermissionPicker({ roleId: initialRoleId, selectedKeys = [] }: P
         <p className="text-xs text-muted-foreground">
           {selected.size} of {pool.length} selected
         </p>
-        <button
-          type="button"
-          onClick={() => setSelected(selected.size === pool.length ? new Set() : new Set(pool.map((p) => p.key)))}
-          className="text-xs text-primary hover:underline"
-        >
+        <button type="button" onClick={toggleAll} className="text-xs text-primary hover:underline">
           {selected.size === pool.length ? "Deselect all" : "Select all"}
         </button>
       </div>
@@ -119,9 +123,7 @@ export function PermissionPicker({ roleId: initialRoleId, selectedKeys = [] }: P
             {perms.map((p) => (
               <label
                 key={p.key}
-                className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/50 px-3 py-2.5
-                           hover:border-primary/40 hover:bg-primary/5 transition-colors
-                           has-checked:border-primary/50 has-checked:bg-primary/8"
+                className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/50 px-3 py-2.5 transition-colors hover:border-primary/40 hover:bg-primary/5 has-[:checked]:border-primary/50 has-[:checked]:bg-primary/8"
               >
                 <input
                   type="checkbox"
