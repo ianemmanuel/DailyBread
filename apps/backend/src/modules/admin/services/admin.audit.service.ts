@@ -1,128 +1,73 @@
 import { prisma, Prisma } from "@repo/db"
+import { logger }          from "@/lib/pino/logger"
+import { SYSTEM_USER_ID }  from "@/lib/pino/constants"
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+const auditLog = logger.child({ module: "audit-service" })
 
-export interface AuditLogEntry {
+export interface AuditLogInput {
   adminUserId : string
   action      : string
   entityType  : string
-  entityId?   : string
-  changes?    : { before: Record<string, unknown>; after: Record<string, unknown> }
+  entityId    : string | null
+  changes?    : {
+    before?: Record<string, unknown>
+    after?  : Record<string, unknown>
+  }
   metadata?   : Record<string, unknown>
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Queue ────────────────────────────────────────────────────────────────────
 
-/**
- * Prisma's InputJsonValue type does not accept Record<string, unknown>
- * because `unknown` is wider than what JSON allows. We serialise through
- * JSON.parse(JSON.stringify(...)) to strip any non-serialisable values,
- * then cast to Prisma.InputJsonValue.
- *
- * If the value is undefined/null, return Prisma.JsonNull so Prisma knows
- * to explicitly write NULL rather than omit the column.
- */
-function toJsonValue(
-  value: Record<string, unknown> | undefined
-): typeof Prisma.JsonNull | Prisma.InputJsonValue {
-  if (value === undefined || value === null) return Prisma.JsonNull
-  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
+const pendingWrites: Promise<unknown>[] = []
+
+function enqueue(p: Promise<unknown>): void {
+  const wrapped = p.catch((err) => {
+    auditLog.warn({ err }, "Audit log write failed — event may be lost")
+  })
+  pendingWrites.push(wrapped)
+  wrapped.finally(() => {
+    const idx = pendingWrites.indexOf(wrapped)
+    if (idx !== -1) pendingWrites.splice(idx, 1)
+  })
 }
 
-// ─── In-memory queue ──────────────────────────────────────────────────────────
+export async function drainAuditQueue(): Promise<void> {
+  if (pendingWrites.length === 0) return
+  auditLog.info({ pending: pendingWrites.length }, "Draining audit queue before shutdown")
+  await Promise.allSettled(pendingWrites)
+  auditLog.info("Audit queue drained")
+}
 
-const queue: AuditLogEntry[] = []
-let draining = false
+// ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * AUDIT SERVICE
- *
- * Fire-and-forget audit logging. Route handlers call auditService.log(...)
- * after responding — they never await it and it never blocks a response.
- *
- * The queue drains in batches every 3 seconds via a background interval.
- * On SIGTERM, flush() drains whatever remains before the process exits.
- *
- * Data loss window: if the process crashes with unflushed entries in the
- * in-memory queue, those entries are lost. This is acceptable at this stage.
- * When guaranteed delivery is needed, swap the in-memory array for a
- * database-backed job table — the interface (auditService.log) stays identical.
- */
 export const auditService = {
-  /**
-   * Enqueue an audit log entry. Never throws. Never awaits DB write.
-   * Call this after every data-mutating operation.
-   *
-   * Example:
-   *   auditService.log({
-   *     adminUserId: req.adminUser.id,
-   *     action:      "vendor_application.approved",
-   *     entityType:  "VendorApplication",
-   *     entityId:    application.id,
-   *     changes:     { before: { status: "SUBMITTED" }, after: { status: "APPROVED" } },
-   *     metadata:    { ip: req.ip, reasonCode: body.reasonCode },
-   *   })
-   */
-  log(entry: AuditLogEntry): void {
-    queue.push(entry)
+  log(input: AuditLogInput): void {
+    // Prisma's Json fields require explicit casting from Record<string, unknown>.
+    // JSON.parse(JSON.stringify(...)) is the idiomatic safe cast — it strips
+    // undefined values and produces a structure Prisma accepts as InputJsonValue.
+    const changes  = input.changes  ? (JSON.parse(JSON.stringify(input.changes))  as Prisma.InputJsonValue) : undefined
+    const metadata = input.metadata ? (JSON.parse(JSON.stringify(input.metadata)) as Prisma.InputJsonValue) : undefined
+
+    const write = prisma.auditLog.create({
+      data: {
+        adminUserId: input.adminUserId,
+        action     : input.action,
+        entityType : input.entityType,
+        entityId   : input.entityId,
+        changes,
+        metadata,
+      },
+    })
+    enqueue(write)
   },
 
-  /**
-   * Flush all queued entries to the database immediately.
-   * Used during graceful shutdown (SIGTERM) and in tests.
-   */
-  async flush(): Promise<void> {
-    if (queue.length === 0) return
-
-    const batch = queue.splice(0, queue.length)
-
-    try {
-      await prisma.auditLog.createMany({
-        data: batch.map((entry) => ({
-          adminUserId : entry.adminUserId,
-          action      : entry.action,
-          entityType  : entry.entityType,
-          entityId    : entry.entityId ?? null,
-          changes     : toJsonValue(entry.changes),
-          metadata    : toJsonValue(entry.metadata),
-        })),
-        skipDuplicates: false,
-      })
-    } catch (err) {
-      // Put unwritten entries back at the front so they retry on next drain
-      queue.unshift(...batch)
-      console.error("[audit] Failed to flush batch:", err)
-    }
-  },
-
-  get queueDepth(): number {
-    return queue.length
+  security(action: string, metadata: Record<string, unknown>): void {
+    this.log({
+      adminUserId: SYSTEM_USER_ID,
+      action,
+      entityType : "SecurityEvent",
+      entityId   : null,
+      metadata,
+    })
   },
 }
-
-// ─── Background drain ─────────────────────────────────────────────────────────
-
-const DRAIN_INTERVAL_MS = 3_000
-
-const drainInterval = setInterval(async () => {
-  if (queue.length === 0 || draining) return
-  draining = true
-  try {
-    await auditService.flush()
-  } finally {
-    draining = false
-  }
-}, DRAIN_INTERVAL_MS)
-
-// Prevents the interval from keeping the process alive during tests
-drainInterval.unref()
-
-// ─── Graceful shutdown ────────────────────────────────────────────────────────
-
-async function onShutdown() {
-  clearInterval(drainInterval)
-  await auditService.flush()
-}
-
-process.once("SIGTERM", onShutdown)
-process.once("SIGINT",  onShutdown)

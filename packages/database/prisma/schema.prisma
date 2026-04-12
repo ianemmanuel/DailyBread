@@ -146,7 +146,7 @@ model AdminUserScope {
   @@index([cityId])
 }
 
-/// Append-only audit log across all models.
+//* Append-only audit log across all models.
 /// Written asynchronously — never blocks a request.
 /// No UPDATE or DELETE ever issued against this table.
 model AuditLog {
@@ -166,6 +166,31 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
 }
+
+//* Long-term audit record storage.
+/* Records are moved here from AuditLog after AUDIT_HOT_DAYS (90 days) 
+/// by the monthly audit-archive cron job.
+/// Not shown in admin UI by default — accessible via export or direct query.
+/// Deleted after AUDIT_DELETE_DAYS (730 days) by the same job.
+*/
+model AuditLogArchive {
+  id          String   @id @default(uuid())
+  adminUserId String
+  action      String
+  entityType  String
+  entityId    String?
+  changes     Json?
+  metadata    Json?
+  createdAt   DateTime
+  archivedAt  DateTime @default(now())
+
+  @@index([adminUserId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([archivedAt])
+}
+
 
 /// Predefined reasons for standard admin actions.
 /// Selected by admin when taking an action — stored in AuditLog.metadata.reasonCode.
@@ -924,11 +949,6 @@ enum AdminScopeType {
   CITY
 }
 
-enum AdminStatus {
-  ACTIVE
-  SUSPENDED
-  DEACTIVATED
-}
 
 enum ConsumerStatus {
   ACTIVE
