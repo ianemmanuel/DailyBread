@@ -15,10 +15,16 @@ import { sendSuccess } from "@/helpers/api-response/response"
 export const getAdminSession: RequestHandler = (req, res) => {
   const { adminUser, adminPermissions, adminScope } = req as unknown as AdminRequest
 
+  const fullName = [adminUser.firstName, adminUser.middleName, adminUser.lastName]
+    .filter(Boolean)
+    .join(" ")
+
   const response: AdminSessionData = {
     id         : adminUser.id,
     email      : adminUser.email,
-    fullName   : adminUser.fullName,
+    firstName  : adminUser.firstName,
+    lastName   : adminUser.lastName,
+    middleName : adminUser.middleName,
     role       : adminUser.role
       ? { name: adminUser.role.name, displayName: adminUser.role.displayName }
       : null,

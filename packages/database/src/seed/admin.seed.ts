@@ -1,25 +1,21 @@
 /**
  * ADMIN INFRASTRUCTURE SEED
+ * Idempotent — safe to run multiple times.
  *
- * Idempotent — safe to run multiple times without duplicating data.
- * Run via: pnpm --filter @repo/db seed
+ * Permission naming convention:
+ *   key    : "module:submodule:action"  (machine-readable, used in code)
+ *   display: For the permission picker UI, the key is split on ":" and the
+ *            module prefix is shown as the group header.
+ *            E.g. "vendors:applications:approve" shows as "applications:approve"
+ *            under the "Vendors" group header.
  *
- * Seeds:
- *   1. AdminRole          (6 roles — departments)
- *   2. AdminPermission    (29 permission keys)
- *   3. AdminRolePermission (permission pools per role — the ceiling)
- *   4. AdminActionReason  (predefined reasons for standard actions)
- *
- * Does NOT seed AdminUserPermission — individual grants happen during
- * admin user onboarding, not at seed time.
+ * Description: Full sentence. Tells the identity admin exactly what granting
+ *   this permission allows the user to do — no ambiguity.
  */
 import 'dotenv/config'
-import {prisma} from '../index';
+import { prisma } from '../index'
 
-
-// ─── 1. Roles ─────────────────────────────────────────────────────────────────
-// Each role maps to a department. Hierarchy within a department is expressed
-// through individual permission grants, not sub-roles.
+// ─── Roles ────────────────────────────────────────────────────────────────────
 
 const ROLES = [
   {
@@ -30,107 +26,293 @@ const ROLES = [
   {
     name        : "identity_admin",
     displayName : "Identity Admin",
-    description : "Admin user management within assigned country. Cannot access business data.",
+    description : "Admin user management within assigned country. No access to business or financial data.",
   },
   {
     name        : "finance",
     displayName : "Finance",
-    description : "Transactions, payouts, discounts, revenue reporting.",
+    description : "Transactions, payouts, discounts, and revenue reporting.",
   },
   {
     name        : "vendor_ops",
     displayName : "Vendor Operations",
-    description : "Vendor onboarding, approvals, account management.",
+    description : "Vendor onboarding, application review, and account management.",
   },
   {
     name        : "customer_care",
     displayName : "Customer Care",
-    description : "Customer accounts, orders, refunds.",
+    description : "Customer accounts, order support, and refunds.",
   },
   {
     name        : "courier_ops",
     displayName : "Courier Operations",
-    description : "Courier onboarding, dispatch, live delivery monitoring.",
+    description : "Courier onboarding, dispatch management, and live delivery monitoring.",
   },
 ] as const
 
-// ─── 2. Permissions ───────────────────────────────────────────────────────────
-// Every discrete action in the system. Never created at runtime — only seeded.
-// To deprecate: set isActive=false. Never delete (preserves grant history).
+// ─── Permissions ──────────────────────────────────────────────────────────────
+// Key convention: module:submodule:action (never just module:action for ambiguity)
+// Each key is unique and self-describing without requiring context.
 
 const PERMISSIONS = [
-  // Vendors
-  { key: "vendors:read",    module: "vendors",  description: "View vendor applications, accounts, documents, outlets" },
-  { key: "vendors:create",  module: "vendors",  description: "Create vendor accounts manually (admin-assisted onboarding)" },
-  { key: "vendors:approve", module: "vendors",  description: "Approve or reject vendor applications" },
-  { key: "vendors:suspend", module: "vendors",  description: "Suspend or reinstate vendor accounts and outlets" },
-  { key: "vendors:export",  module: "vendors",  description: "Export vendor data as CSV" },
+  // ── Vendors ──────────────────────────────────────────────────────────────
+  {
+    key        : "vendors:accounts:read",
+    module     : "vendors",
+    description: "View vendor account profiles, status, outlets, and payout accounts",
+  },
+  {
+    key        : "vendors:accounts:create",
+    module     : "vendors",
+    description: "Manually create a vendor account (admin-assisted onboarding, bypasses application flow)",
+  },
+  {
+    key        : "vendors:accounts:suspend",
+    module     : "vendors",
+    description: "Suspend an active vendor account and block all vendor login sessions",
+  },
+  {
+    key        : "vendors:accounts:reinstate",
+    module     : "vendors",
+    description: "Reinstate a suspended vendor account and restore access",
+  },
+  {
+    key        : "vendors:accounts:ban",
+    module     : "vendors",
+    description: "Permanently ban a vendor account from the platform",
+  },
+  {
+    key        : "vendors:accounts:export",
+    module     : "vendors",
+    description: "Export vendor account data as CSV for reporting or compliance",
+  },
+  {
+    key        : "vendors:applications:read",
+    module     : "vendors",
+    description: "View vendor applications, submitted documents, and applicant details",
+  },
+  {
+    key        : "vendors:applications:review",
+    module     : "vendors",
+    description: "Mark a submitted vendor application as under review (no decision yet)",
+  },
+  {
+    key        : "vendors:applications:approve",
+    module     : "vendors",
+    description: "Approve a vendor application and create the vendor account automatically",
+  },
+  {
+    key        : "vendors:applications:reject",
+    module     : "vendors",
+    description: "Reject a vendor application and notify the applicant with a reason",
+  },
+  {
+    key        : "vendors:documents:view",
+    module     : "vendors",
+    description: "Generate signed preview URLs to view vendor documents in-browser",
+  },
 
-  // Finance
-  { key: "finance:transactions:read",    module: "finance", description: "View transaction ledger" },
-  { key: "finance:payouts:read",         module: "finance", description: "View payout queue and history" },
-  { key: "finance:payouts:approve",      module: "finance", description: "Approve individual or batch payouts" },
-  { key: "finance:payouts:reverse",      module: "finance", description: "Reverse an approved payout" },
-  { key: "finance:discounts:read",       module: "finance", description: "View discount campaigns" },
-  { key: "finance:discounts:create",     module: "finance", description: "Create new discount campaigns" },
-  { key: "finance:discounts:deactivate", module: "finance", description: "Deactivate a discount campaign" },
-  { key: "finance:reports:read",         module: "finance", description: "View financial reports and dashboards" },
-  { key: "finance:reports:export",       module: "finance", description: "Export reports as CSV or PDF" },
+  // ── Finance ───────────────────────────────────────────────────────────────
+  {
+    key        : "finance:transactions:read",
+    module     : "finance",
+    description: "View the full transaction ledger across all vendors and orders",
+  },
+  {
+    key        : "finance:payouts:read",
+    module     : "finance",
+    description: "View the payout queue, payout history, and individual payout details",
+  },
+  {
+    key        : "finance:payouts:approve",
+    module     : "finance",
+    description: "Approve individual or batch vendor payouts for processing",
+  },
+  {
+    key        : "finance:payouts:reverse",
+    module     : "finance",
+    description: "Reverse an already-approved payout (requires audit reason)",
+  },
+  {
+    key        : "finance:discounts:read",
+    module     : "finance",
+    description: "View active and historical discount campaigns and redemption stats",
+  },
+  {
+    key        : "finance:discounts:create",
+    module     : "finance",
+    description: "Create new discount campaigns with rules, limits, and expiry",
+  },
+  {
+    key        : "finance:discounts:deactivate",
+    module     : "finance",
+    description: "Deactivate a running discount campaign before its natural expiry",
+  },
+  {
+    key        : "finance:reports:read",
+    module     : "finance",
+    description: "View financial reports, revenue dashboards, and summary statistics",
+  },
+  {
+    key        : "finance:reports:export",
+    module     : "finance",
+    description: "Export financial reports as CSV or PDF for accounting or compliance",
+  },
 
-  // Customers
-  { key: "customers:read",    module: "customers", description: "View customer profiles, addresses, order history" },
-  { key: "customers:refund",  module: "customers", description: "Issue refunds on customer orders" },
-  { key: "customers:suspend", module: "customers", description: "Suspend or reinstate customer accounts" },
+  // ── Customers ─────────────────────────────────────────────────────────────
+  {
+    key        : "customers:profiles:read",
+    module     : "customers",
+    description: "View customer profiles, delivery addresses, and account history",
+  },
+  {
+    key        : "customers:orders:read",
+    module     : "customers",
+    description: "View customer order history and individual order details",
+  },
+  {
+    key        : "customers:orders:refund",
+    module     : "customers",
+    description: "Issue a full or partial refund on a customer order",
+  },
+  {
+    key        : "customers:accounts:suspend",
+    module     : "customers",
+    description: "Suspend a customer account for policy violations or abuse",
+  },
+  {
+    key        : "customers:accounts:reinstate",
+    module     : "customers",
+    description: "Reinstate a suspended customer account",
+  },
 
-  // Orders (cross-cutting — used by multiple departments)
-  { key: "orders:read", module: "orders", description: "View order details across any module" },
+  // ── Orders ────────────────────────────────────────────────────────────────
+  {
+    key        : "orders:all:read",
+    module     : "orders",
+    description: "View order details across all modules (vendors, customers, couriers)",
+  },
 
-  // Couriers
-  { key: "couriers:read",    module: "couriers", description: "View courier profiles, applications, delivery history" },
-  { key: "couriers:approve", module: "couriers", description: "Approve or reject courier applications" },
-  { key: "couriers:assign",  module: "couriers", description: "Manually reassign deliveries to a courier" },
-  { key: "couriers:suspend", module: "couriers", description: "Suspend or reinstate courier accounts" },
+  // ── Couriers ──────────────────────────────────────────────────────────────
+  {
+    key        : "couriers:profiles:read",
+    module     : "couriers",
+    description: "View courier profiles, ratings, and delivery history",
+  },
+  {
+    key        : "couriers:applications:approve",
+    module     : "couriers",
+    description: "Approve or reject courier applications after document review",
+  },
+  {
+    key        : "couriers:deliveries:assign",
+    module     : "couriers",
+    description: "Manually reassign an active delivery to a different courier",
+  },
+  {
+    key        : "couriers:accounts:suspend",
+    module     : "couriers",
+    description: "Suspend a courier account for policy violations or safety issues",
+  },
+  {
+    key        : "couriers:accounts:reinstate",
+    module     : "couriers",
+    description: "Reinstate a suspended courier account",
+  },
 
-  // Admin user management
-  { key: "admin_users:read",         module: "admin", description: "View admin user list, profiles, permission grants" },
-  { key: "admin_users:create",       module: "admin", description: "Create admin user records before sending invitation" },
-  { key: "admin_users:invite",       module: "admin", description: "Send Clerk invitation to a created admin user" },
-  { key: "admin_users:permissions",  module: "admin", description: "Assign or revoke permission grants within a user's role pool" },
-  { key: "admin_users:deactivate",   module: "admin", description: "Suspend or offboard admin users" },
-  { key: "admin_users:roles:assign", module: "admin", description: "Change an admin user's role" },
+  // ── Admin Users (Identity module) ─────────────────────────────────────────
+  {
+    key        : "admin_users:profiles:read",
+    module     : "admin_users",
+    description: "View admin user profiles, roles, permissions, and scope within assigned country",
+  },
+  {
+    key        : "admin_users:accounts:create",
+    module     : "admin_users",
+    description: "Create a new admin user record (does not send invitation — separate step)",
+  },
+  {
+    key        : "admin_users:invitations:send",
+    module     : "admin_users",
+    description: "Send or resend a Clerk invitation to a created admin user",
+  },
+  {
+    key        : "admin_users:permissions:manage",
+    module     : "admin_users",
+    description: "Assign or revoke individual permission grants within a user's role pool",
+  },
+  {
+    key        : "admin_users:accounts:suspend",
+    module     : "admin_users",
+    description: "Suspend an active admin user account and revoke dashboard access",
+  },
+  {
+    key        : "admin_users:accounts:reinstate",
+    module     : "admin_users",
+    description: "Reinstate a suspended admin user account",
+  },
+  {
+    key        : "admin_users:accounts:deactivate",
+    module     : "admin_users",
+    description: "Permanently deactivate an admin user account (offboarding)",
+  },
+  {
+    key        : "admin_users:roles:assign",
+    module     : "admin_users",
+    description: "Change an admin user's role (resets permission pool ceiling)",
+  },
 
-  // Audit & settings
-  { key: "audit_logs:read", module: "admin", description: "View and export the audit log" },
-  { key: "settings:read",   module: "admin", description: "View system settings (geography, document types, payout types)" },
-  { key: "settings:write",  module: "admin", description: "Modify system settings" },
+  // ── Audit & Settings ──────────────────────────────────────────────────────
+  {
+    key        : "audit_logs:all:read",
+    module     : "audit_logs",
+    description: "View and search the audit log for all admin actions within assigned scope",
+  },
+  {
+    key        : "settings:geography:read",
+    module     : "settings",
+    description: "View system geography settings (countries, cities, service areas)",
+  },
+  {
+    key        : "settings:geography:write",
+    module     : "settings",
+    description: "Create and update geography settings (countries, cities, service areas)",
+  },
+  {
+    key        : "settings:documents:read",
+    module     : "settings",
+    description: "View document type configurations per country and vendor type",
+  },
+  {
+    key        : "settings:documents:write",
+    module     : "settings",
+    description: "Create and update document type requirements for onboarding",
+  },
 ] as const
 
 type PermissionKey = typeof PERMISSIONS[number]["key"]
 const ALL: PermissionKey[] = PERMISSIONS.map((p) => p.key)
 
-// ─── 3. Permission pools per role ─────────────────────────────────────────────
-// This defines the CEILING — what CAN be granted to a user with this role.
-// Individual grants (what IS granted) happen during onboarding via AdminUserPermission.
+// ─── Role permission pools ────────────────────────────────────────────────────
 
 const ROLE_POOLS: Record<string, PermissionKey[]> = {
-  // super_admin can do everything — full pool
   super_admin: ALL,
 
-  // identity_admin manages admin users only — no business data access
   identity_admin: [
-    "admin_users:read",
-    "admin_users:create",
-    "admin_users:invite",
-    "admin_users:permissions",
-    "admin_users:deactivate",
+    "admin_users:profiles:read",
+    "admin_users:accounts:create",
+    "admin_users:invitations:send",
+    "admin_users:permissions:manage",
+    "admin_users:accounts:suspend",
+    "admin_users:accounts:reinstate",
+    "admin_users:accounts:deactivate",
     "admin_users:roles:assign",
-    "audit_logs:read",
-    "settings:read",
+    "audit_logs:all:read",
+    "settings:geography:read",
   ],
 
-  // finance sees vendors and orders in read-only context, manages financial ops
   finance: [
-    "vendors:read",
+    "vendors:accounts:read",
     "finance:transactions:read",
     "finance:payouts:read",
     "finance:payouts:approve",
@@ -140,197 +322,119 @@ const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "finance:discounts:deactivate",
     "finance:reports:read",
     "finance:reports:export",
-    "orders:read",
+    "orders:all:read",
   ],
 
-  // vendor_ops handles onboarding and account management
   vendor_ops: [
-    "vendors:read",
-    "vendors:create",
-    "vendors:approve",
-    "vendors:suspend",
-    "vendors:export",
+    "vendors:accounts:read",
+    "vendors:accounts:create",
+    "vendors:accounts:suspend",
+    "vendors:accounts:reinstate",
+    "vendors:accounts:ban",
+    "vendors:accounts:export",
+    "vendors:applications:read",
+    "vendors:applications:review",
+    "vendors:applications:approve",
+    "vendors:applications:reject",
+    "vendors:documents:view",
     "finance:discounts:read",
-    "orders:read",
-    "settings:read",
+    "orders:all:read",
+    "settings:geography:read",
+    "settings:documents:read",
   ],
 
-  // customer_care handles customer accounts and order support
   customer_care: [
-    "customers:read",
-    "customers:refund",
-    "customers:suspend",
-    "orders:read",
-    "vendors:read",
+    "customers:profiles:read",
+    "customers:orders:read",
+    "customers:orders:refund",
+    "customers:accounts:suspend",
+    "customers:accounts:reinstate",
+    "orders:all:read",
+    "vendors:accounts:read",
   ],
 
-  // courier_ops handles courier onboarding and live dispatch
   courier_ops: [
-    "couriers:read",
-    "couriers:approve",
-    "couriers:assign",
-    "couriers:suspend",
-    "orders:read",
+    "couriers:profiles:read",
+    "couriers:applications:approve",
+    "couriers:deliveries:assign",
+    "couriers:accounts:suspend",
+    "couriers:accounts:reinstate",
+    "orders:all:read",
   ],
 }
 
-// ─── 4. Action reasons ────────────────────────────────────────────────────────
+// ─── Action reasons (unchanged) ───────────────────────────────────────────────
 
 const ACTION_REASONS = [
-  // Suspension reasons — vendors and outlets
-  {
-    code       : "POLICY_VIOLATION",
-    label      : "Policy violation",
-    description: "The vendor has violated platform terms of service or operational policies.",
-    appliesTo  : ["vendor_account.suspended", "outlet.suspended", "meal.suspended"],
-  },
-  {
-    code       : "QUALITY_ISSUES",
-    label      : "Quality issues",
-    description: "Repeated complaints about food quality or hygiene standards.",
-    appliesTo  : ["vendor_account.suspended", "outlet.suspended", "meal.suspended"],
-  },
-  {
-    code       : "SAFETY_CONCERN",
-    label      : "Food safety concern",
-    description: "A food safety issue has been reported or identified.",
-    appliesTo  : ["vendor_account.suspended", "outlet.suspended", "meal.banned"],
-  },
-  {
-    code       : "FRAUDULENT_ACTIVITY",
-    label      : "Fraudulent activity",
-    description: "Suspected or confirmed fraudulent behaviour.",
-    appliesTo  : [
-      "vendor_account.suspended", "vendor_account.banned",
-      "outlet.suspended", "outlet.banned",
-      "customer.suspended",
-    ],
-  },
-  {
-    code       : "DOCUMENT_ISSUES",
-    label      : "Document issues",
-    description: "Documents are expired, invalid, or have not been submitted.",
-    appliesTo  : ["vendor_account.suspended", "outlet.suspended"],
-  },
-
-  // Application rejection reasons
-  {
-    code       : "INCOMPLETE_DOCUMENTS",
-    label      : "Incomplete or missing documents",
-    description: "Required documents are missing or have not been uploaded.",
-    appliesTo  : ["vendor_application.rejected"],
-  },
-  {
-    code       : "DOCUMENT_EXPIRED",
-    label      : "Expired documents",
-    description: "One or more submitted documents have expired.",
-    appliesTo  : ["vendor_application.rejected"],
-  },
-  {
-    code       : "INVALID_INFORMATION",
-    label      : "Invalid business information",
-    description: "Business details cannot be verified or are inconsistent.",
-    appliesTo  : ["vendor_application.rejected"],
-  },
-  {
-    code       : "INELIGIBLE_VENDOR_TYPE",
-    label      : "Vendor type not supported",
-    description: "This vendor type is not currently supported in the selected country.",
-    appliesTo  : ["vendor_application.rejected"],
-  },
-
-  // Customer reasons
-  {
-    code       : "REFUND_POLICY",
-    label      : "Refund per policy",
-    description: "Refund issued in accordance with platform refund policy.",
-    appliesTo  : ["customer.refund"],
-  },
-  {
-    code       : "CUSTOMER_ABUSE",
-    label      : "Abusive behaviour",
-    description: "Customer has engaged in abusive behaviour towards vendors, couriers, or staff.",
-    appliesTo  : ["customer.suspended"],
-  },
-
-  // Admin user reasons
-  {
-    code       : "EMPLOYMENT_ENDED",
-    label      : "Employment ended",
-    description: "Team member has left the organisation.",
-    appliesTo  : ["admin_user.deactivated"],
-  },
-  {
-    code       : "TEMPORARY_SUSPENSION",
-    label      : "Temporary suspension",
-    description: "Account suspended pending investigation or review.",
-    appliesTo  : ["admin_user.deactivated", "vendor_account.suspended"],
-  },
+  { code: "POLICY_VIOLATION",   label: "Policy violation",        description: "Violated platform terms of service or operational policies.", appliesTo: ["vendor_account.suspended", "outlet.suspended"] },
+  { code: "QUALITY_ISSUES",     label: "Quality issues",          description: "Repeated complaints about food quality or hygiene.",            appliesTo: ["vendor_account.suspended", "outlet.suspended"] },
+  { code: "SAFETY_CONCERN",     label: "Food safety concern",     description: "A food safety issue has been reported or identified.",          appliesTo: ["vendor_account.suspended", "meal.banned"] },
+  { code: "FRAUDULENT_ACTIVITY",label: "Fraudulent activity",     description: "Suspected or confirmed fraudulent behaviour.",                  appliesTo: ["vendor_account.suspended", "vendor_account.banned", "customer.suspended"] },
+  { code: "DOCUMENT_ISSUES",    label: "Document issues",         description: "Documents are expired, invalid, or have not been submitted.",   appliesTo: ["vendor_account.suspended"] },
+  { code: "INCOMPLETE_DOCUMENTS",label: "Incomplete documents",   description: "Required documents are missing or have not been uploaded.",     appliesTo: ["vendor_application.rejected"] },
+  { code: "DOCUMENT_EXPIRED",   label: "Expired documents",       description: "One or more submitted documents have expired.",                 appliesTo: ["vendor_application.rejected"] },
+  { code: "INVALID_INFORMATION",label: "Invalid business info",   description: "Business details cannot be verified or are inconsistent.",      appliesTo: ["vendor_application.rejected"] },
+  { code: "INELIGIBLE_TYPE",    label: "Vendor type not supported",description: "This vendor type is not supported in the selected country.",    appliesTo: ["vendor_application.rejected"] },
+  { code: "REFUND_POLICY",      label: "Refund per policy",       description: "Refund issued per platform refund policy.",                     appliesTo: ["customer.refund"] },
+  { code: "CUSTOMER_ABUSE",     label: "Abusive behaviour",       description: "Customer engaged in abuse towards vendors, couriers, or staff.",appliesTo: ["customer.suspended"] },
+  { code: "EMPLOYMENT_ENDED",   label: "Employment ended",        description: "Team member has left the organisation.",                        appliesTo: ["admin_user.deactivated"] },
+  { code: "TEMPORARY_REVIEW",   label: "Temporary — under review",description: "Account suspended pending investigation or review.",            appliesTo: ["admin_user.suspended", "vendor_account.suspended"] },
 ] as const
 
-// ─── Seed ─────────────────────────────────────────────────────────────────────
+// ─── Seed runner ──────────────────────────────────────────────────────────────
 
 async function seed() {
   console.log("🌱 Seeding DailyBread admin infrastructure...\n")
 
-  // 1. Roles
   console.log("  [1/4] Roles...")
   for (const role of ROLES) {
     await prisma.adminRole.upsert({
-      where  : { name: role.name },
-      update : { displayName: role.displayName, description: role.description },
-      create : role,
+      where : { name: role.name },
+      update: { displayName: role.displayName, description: role.description },
+      create: role,
     })
   }
   console.log(`        ✓ ${ROLES.length} roles`)
 
-  // 2. Permissions
   console.log("  [2/4] Permissions...")
   for (const perm of PERMISSIONS) {
     await prisma.adminPermission.upsert({
-      where  : { key: perm.key },
-      update : { module: perm.module, description: perm.description },
-      create : { ...perm, isActive: true },
+      where : { key: perm.key },
+      update: { module: perm.module, description: perm.description },
+      create: { ...perm, isActive: true },
     })
   }
   console.log(`        ✓ ${PERMISSIONS.length} permissions`)
 
-  // 3. Role permission pools
   console.log("  [3/4] Role permission pools...")
   let poolCount = 0
-
   for (const [roleName, keys] of Object.entries(ROLE_POOLS)) {
     const role = await prisma.adminRole.findUnique({ where: { name: roleName } })
-    if (!role) { console.warn(`        ⚠ Role not found: ${roleName}`); continue }
-
+    if (!role) { console.warn(`⚠ Role not found: ${roleName}`); continue }
     for (const key of keys) {
       const permission = await prisma.adminPermission.findUnique({ where: { key } })
-      if (!permission) { console.warn(`        ⚠ Permission not found: ${key}`); continue }
-
+      if (!permission) { console.warn(`⚠ Permission not found: ${key}`); continue }
       await prisma.adminRolePermission.upsert({
-        where  : { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
-        update : {},
-        create : { roleId: role.id, permissionId: permission.id },
+        where : { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
+        update: {},
+        create: { roleId: role.id, permissionId: permission.id },
       })
       poolCount++
     }
   }
-  console.log(`        ✓ ${poolCount} pool entries across ${Object.keys(ROLE_POOLS).length} roles`)
+  console.log(`        ✓ ${poolCount} pool entries`)
 
-  // 4. Action reasons
   console.log("  [4/4] Action reasons...")
   for (const reason of ACTION_REASONS) {
     await prisma.adminActionReason.upsert({
-      where  : { code: reason.code },
-      update : { label: reason.label, description: reason.description, appliesTo: [...reason.appliesTo] },
-      create : { code: reason.code, label: reason.label, description: reason.description, appliesTo: [...reason.appliesTo] },
+      where : { code: reason.code },
+      update: { label: reason.label, description: reason.description, appliesTo: [...reason.appliesTo] },
+      create: { code: reason.code, label: reason.label, description: reason.description, appliesTo: [...reason.appliesTo] },
     })
   }
   console.log(`        ✓ ${ACTION_REASONS.length} action reasons`)
 
-  console.log("\n✅ Seed complete.\n")
-  console.log("Next step: run the create-super-admin script to create your first admin user.")
-  console.log("  pnpm --filter @repo/db create-super-admin -- --email <email> --name \"<name>\"\n")
+  console.log("\n✅ Seed complete.")
 }
 
 seed()

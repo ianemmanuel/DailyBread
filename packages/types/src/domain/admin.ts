@@ -37,7 +37,9 @@ export interface AdminUser {
   clerkUserId         : string | null
   roleId              : string | null
   email               : string
-  fullName            : string
+  firstName           : string
+  lastName            : string
+  middleName?         : string
   status              : AdminUserStatus
   isActive            : boolean
   invitedById         : string | null
@@ -70,7 +72,7 @@ export interface AdminUserWithRole extends AdminUser {
 export interface AdminUserProfile extends AdminUser {
   role      : AdminRole | null
   scopes    : AdminUserScope[]
-  invitedBy : Pick<AdminUser, "id" | "fullName" | "email"> | null
+  invitedBy : Pick<AdminUser, "id" | "firstName" | "lastName" | "email"> | null
 }
 
 // ─── Scope context ────────────────────────────────────────────────────────────
@@ -99,5 +101,5 @@ export interface AuditLog {
 }
 
 export interface AuditLogWithAdmin extends AuditLog {
-  adminUser: Pick<AdminUser, "id" | "fullName" | "email">
+  adminUser: Pick<AdminUser, "id" | "firstName" | "lastName" | "email">
 }

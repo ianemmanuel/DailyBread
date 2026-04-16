@@ -18,16 +18,15 @@ import {
   listRoles,
 } from "../services/admin.user.service"
 
-// ─── List ─────────────────────────────────────────────────────────────────────
+//* ─── List ─────────────────
 
 export const handleListAdminUsers: RequestHandler = async (req, res, next) => {
   try {
-    const { adminScope }                          = req as unknown as AdminRequest
+    const { adminScope }                             = req as unknown as AdminRequest
     const { status, roleId, search, page, pageSize } = req.query
-
     const result = await listAdminUsers(
       {
-        status  : status   as AdminUserStatus | undefined,
+        status  : status   as string | undefined,
         roleId  : roleId   as string | undefined,
         search  : search   as string | undefined,
         page    : page     ? parseInt(page     as string) : undefined,
@@ -35,53 +34,54 @@ export const handleListAdminUsers: RequestHandler = async (req, res, next) => {
       },
       adminScope,
     )
-    return sendSuccess(res, result, "Admin users fetched successfully")
+    return sendSuccess(res, result, "Admin users fetched")
   } catch (err) { next(err) }
 }
 
-// ─── Get one ──────────────────────────────────────────────────────────────────
+//* ─── Get one ────────────────
 
 export const handleGetAdminUser: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
     const { id }         = req.params as { id: string }
     const user           = await getAdminUser(id, adminScope)
-    return sendSuccess(res, user, "Admin user fetched successfully")
+    return sendSuccess(res, user, "Admin user fetched")
   } catch (err) { next(err) }
 }
 
-// ─── Create ───────────────────────────────────────────────────────────────────
+//* ─── Create ────────────────
 
 export const handleCreateAdminUser: RequestHandler = async (req, res, next) => {
   try {
-    const { adminUser, adminScope }                            = req as unknown as AdminRequest
-    const { email, fullName, roleId, permissionKeys = [], scopes } = req.body
+    const { adminUser, adminScope }                               = req as unknown as AdminRequest
+    const { firstName, middleName, lastName, email, employeeId,
+            roleId, permissionKeys = [], scopes }                 = req.body
 
-    if (!email || !fullName || !roleId) {
-      throw new ApiError(400, "email, fullName, and roleId are required", "MISSING_FIELDS")
+    if (!firstName || !lastName || !email || !roleId) {
+      throw new ApiError(400, "firstName, lastName, email, and roleId are required", "MISSING_FIELDS")
     }
 
     const user = await createAdminUser(
-      { email, fullName, roleId, permissionKeys, scopes },
+      { firstName, middleName, lastName, email, employeeId, roleId, permissionKeys, scopes },
       adminUser.id,
       adminScope,
     )
-    return sendSuccess(res, user, "Admin user created successfully", 201)
+    return sendSuccess(res, user, "Admin user created", 201)
   } catch (err) { next(err) }
 }
 
-// ─── Send invitation ──────────────────────────────────────────────────────────
+//* ─── Send invitation ──────────
 
 export const handleSendInvitation: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
     const { id }                    = req.params as { id: string }
-    const result = await sendAdminInvitation({ adminUserId: id }, adminUser.id, adminScope)
-    return sendSuccess(res, result, "Invitation sent successfully")
+    const result = await sendAdminInvitation(id, adminUser.id, adminScope)
+    return sendSuccess(res, result, "Invitation sent")
   } catch (err) { next(err) }
 }
 
-// ─── Update permissions ───────────────────────────────────────────────────────
+//* ─── Update permissions ───────────
 
 export const handleUpdatePermissions: RequestHandler = async (req, res, next) => {
   try {
@@ -93,11 +93,11 @@ export const handleUpdatePermissions: RequestHandler = async (req, res, next) =>
       adminUser.id,
       adminScope,
     )
-    return sendSuccess(res, result, "Permissions updated successfully")
+    return sendSuccess(res, result, "Permissions updated")
   } catch (err) { next(err) }
 }
 
-// ─── Update role ──────────────────────────────────────────────────────────────
+//* ─── Update role ────────────────────
 
 export const handleUpdateRole: RequestHandler = async (req, res, next) => {
   try {
@@ -105,16 +105,12 @@ export const handleUpdateRole: RequestHandler = async (req, res, next) => {
     const { id }                    = req.params as { id: string }
     const { roleId }                = req.body
     if (!roleId) throw new ApiError(400, "roleId is required", "MISSING_FIELDS")
-    const result = await updateAdminUserRole(
-      { adminUserId: id, roleId },
-      adminUser.id,
-      adminScope,
-    )
-    return sendSuccess(res, result, "Role updated successfully")
+    const result = await updateAdminUserRole({ adminUserId: id, roleId }, adminUser.id, adminScope)
+    return sendSuccess(res, result, "Role updated")
   } catch (err) { next(err) }
 }
 
-// ─── Update scopes ────────────────────────────────────────────────────────────
+//* ─── Update scopes ──────────────
 
 export const handleUpdateScopes: RequestHandler = async (req, res, next) => {
   try {
@@ -124,16 +120,12 @@ export const handleUpdateScopes: RequestHandler = async (req, res, next) => {
     if (!Array.isArray(scopes) || scopes.length === 0) {
       throw new ApiError(400, "scopes array is required", "MISSING_FIELDS")
     }
-    const result = await updateAdminUserScopes(
-      { adminUserId: id, scopes },
-      adminUser.id,
-      adminScope,
-    )
-    return sendSuccess(res, result, "Scopes updated successfully")
+    const result = await updateAdminUserScopes({ adminUserId: id, scopes }, adminUser.id, adminScope)
+    return sendSuccess(res, result, "Scopes updated")
   } catch (err) { next(err) }
 }
 
-// ─── Suspend ──────────────────────────────────────────────────────────────────
+//* ─── Lifecycle ─────────────────
 
 export const handleSuspendAdminUser: RequestHandler = async (req, res, next) => {
   try {
@@ -142,22 +134,18 @@ export const handleSuspendAdminUser: RequestHandler = async (req, res, next) => 
     const { reason }                = req.body
     if (!reason) throw new ApiError(400, "reason is required", "MISSING_FIELDS")
     const result = await suspendAdminUser(id, reason, adminUser.id, adminScope)
-    return sendSuccess(res, result, "User suspended successfully")
+    return sendSuccess(res, result, "User suspended")
   } catch (err) { next(err) }
 }
-
-// ─── Reinstate ────────────────────────────────────────────────────────────────
 
 export const handleReinstateAdminUser: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
     const { id }                    = req.params as { id: string }
     const result = await reinstateAdminUser(id, adminUser.id, adminScope)
-    return sendSuccess(res, result, "User reinstated successfully")
+    return sendSuccess(res, result, "User reinstated")
   } catch (err) { next(err) }
 }
-
-// ─── Deactivate ───────────────────────────────────────────────────────────────
 
 export const handleDeactivateAdminUser: RequestHandler = async (req, res, next) => {
   try {
@@ -166,11 +154,11 @@ export const handleDeactivateAdminUser: RequestHandler = async (req, res, next) 
     const { reason }                = req.body
     if (!reason) throw new ApiError(400, "reason is required", "MISSING_FIELDS")
     const result = await deactivateAdminUser(id, reason, adminUser.id, adminScope)
-    return sendSuccess(res, result, "User deactivated successfully")
+    return sendSuccess(res, result, "User deactivated")
   } catch (err) { next(err) }
 }
 
-// ─── Meta: role permission pool ───────────────────────────────────────────────
+//* ─── Meta ──────────────
 
 export const handleGetRolePermissionPool: RequestHandler = async (req, res, next) => {
   try {
@@ -179,8 +167,6 @@ export const handleGetRolePermissionPool: RequestHandler = async (req, res, next
     return sendSuccess(res, pool, "Role permission pool fetched")
   } catch (err) { next(err) }
 }
-
-// ─── Meta: list roles ─────────────────────────────────────────────────────────
 
 export const handleListRoles: RequestHandler = async (req, res, next) => {
   try {

@@ -19,15 +19,13 @@ export default async function NewAdminUserPage() {
   const token = await getToken()
   const sessionRes = await fetch(
     `${process.env.BACKEND_API_URL}/admin/v1/auth/session`,
-    { 
-      headers: { Authorization: `Bearer ${token}` }, 
-      next: { revalidate: 300 } 
-    },
+    { headers: { Authorization: `Bearer ${token}` }, next: { revalidate: 300 } },
   )
   if (!sessionRes.ok) redirect("/sign-in")
   const { data: session }: ApiSuccess<AdminSessionData> = await sessionRes.json()
 
-  if (!session.permissions.includes(AdminPermissions.ADMIN_USERS_CREATE)) {
+  // Require create permission
+  if (!session.permissions.includes(AdminPermissions.ADMIN_USERS_ACCOUNTS_CREATE)) {
     redirect("/identity")
   }
 
@@ -48,12 +46,12 @@ export default async function NewAdminUserPage() {
           Add Admin User
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Creates a user record. Send the invitation in the next step.
+          Fill in the details. You'll review and send the invitation on the next screen.
         </p>
       </div>
 
-      {/* Form is a client component — handles posting and loading states */}
-      <CreateUserForm roles={roles} />
+      {/* Pass session so the form knows the actor's scope for the ScopeSelector */}
+      <CreateUserForm roles={roles} session={session} />
     </div>
   )
 }

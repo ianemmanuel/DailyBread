@@ -1,51 +1,59 @@
-import type { Metadata, Viewport } from "next";
-import "./globals.css";
-import { ClerkProvider } from "@clerk/nextjs";
-import { Toaster } from "@repo/ui/components/sonner";
-import { Inter, IBM_Plex_Mono, Playfair_Display } from "next/font/google";
+import type { Metadata, Viewport } from "next"
+import "./globals.css"
+import { ClerkProvider } from "@clerk/nextjs"
+import { Toaster }  from "@repo/ui/components/sonner"
+import {
+  Geist,
+  Geist_Mono,
+  DM_Serif_Display,
+  IBM_Plex_Mono,
+} from "next/font/google"
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-});
+
+const geist = Geist({
+  subsets : ["latin"],
+  variable: "--font-geist",
+  display : "swap",
+})
 
 const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
+  subsets : ["latin"],
   variable: "--font-ibm-mono",
-  weight: ["400", "500", "700"],
-  display: "swap",
-});
+  weight  : ["400", "500"],
+  display : "swap",
+})
 
-const playfair = Playfair_Display({
-  subsets: ["latin"],
-  variable: "--font-playfair",
-  weight: ["400", "500", "600", "700", "800", "900"],
-  style: ["normal", "italic"],
-  display: "swap",
-});
+const dmSerif = DM_Serif_Display({
+  subsets : ["latin"],
+  variable: "--font-dm-serif",
+  weight  : "400",
+  style   : ["normal", "italic"],
+  display : "swap",
+})
 
 export const metadata: Metadata = {
   title: {
-    default: "DailyBread Admin",
+    default : "DailyBread Admin",
     template: "%s | DailyBread Admin",
   },
   description: "DailyBread operations and administration dashboard",
-  robots: { index: false, follow: false },
-};
+  robots     : { index: false, follow: false },
+}
 
 export const viewport: Viewport = {
-  width: "device-width",
+  width       : "device-width",
   initialScale: 1,
-  themeColor: "#0e0f14",
-};
+  themeColor  : [
+    { media: "(prefers-color-scheme: light)", color: "#f9f9fb" },
+    { media: "(prefers-color-scheme: dark)",  color: "#111116" },
+  ],
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${ibmPlexMono.variable} ${playfair.variable}`}
+      className={`${geist.variable} ${ibmPlexMono.variable} ${dmSerif.variable}`}
       suppressHydrationWarning
     >
       <body className="font-sans antialiased bg-background text-foreground min-h-screen">
@@ -55,5 +63,5 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </ClerkProvider>
       </body>
     </html>
-  );
+  )
 }

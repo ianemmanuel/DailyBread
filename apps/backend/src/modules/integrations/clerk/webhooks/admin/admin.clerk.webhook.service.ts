@@ -13,7 +13,7 @@ import {
 
 const webhookLog = logger.child({ module: "webhook:admin" })
 
-// ─── Clerk client ─────────────────────────────────────────────────────────────
+//* ─── Clerk client ───────────────────
 
 function getAdminClerkClient() {
   const secretKey = process.env.CLERK_ADMIN_SECRET_KEY
@@ -21,7 +21,7 @@ function getAdminClerkClient() {
   return createClerkClient({ secretKey })
 }
 
-// ─── Entry point ──────────────────────────────────────────────────────────────
+//* ─── Entry point ──────────────
 
 export async function processAdminClerkWebhook(req: Request): Promise<void> {
   const secret = process.env.CLERK_ADMIN_WEBHOOK_SECRET
