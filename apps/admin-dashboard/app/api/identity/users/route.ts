@@ -2,10 +2,7 @@ import { auth } from "@clerk/nextjs/server"
 import { revalidateTag } from "next/cache"
 import { NextRequest, NextResponse } from "next/server"
 
-
 //* ─── POST /api/identity/users ────────────────────────────
-
-//? Creates a new user via the backend API. Expects { email, fullName, roleId } in body.
 
 export async function POST(req: NextRequest) {
   const { getToken } = await auth()
@@ -18,27 +15,57 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
 
-    if (!body.email || !body.fullName || !body.roleId) {
+    const {
+      firstName,
+      middleName,
+      lastName,
+      email,
+      employeeId,
+      roleId,
+      permissionKeys,
+      scopes,
+    } = body
+
+    // ✅ Updated validation
+    if (!firstName || !lastName || !email || !roleId) {
       return NextResponse.json(
-        { status: "error", message: "email, fullName, and roleId are required" },
+        {
+          status: "error",
+          message: "firstName, lastName, email, and roleId are required",
+        },
         { status: 400 }
       )
     }
 
-    const res = await fetch(`${process.env.BACKEND_API_URL}/admin/v1/users`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    })
+    // ✅ Normalize payload (match backend expectations exactly)
+    const payload = {
+      firstName : firstName.trim(),
+      middleName: middleName?.trim() || undefined,
+      lastName  : lastName.trim(),
+      email     : email.trim(),
+      employeeId: employeeId?.trim() || undefined,
+      roleId,
+      permissionKeys: permissionKeys ?? [],
+      scopes        : scopes ?? undefined,
+    }
+
+    const res = await fetch(
+      `${process.env.BACKEND_API_URL}/admin/v1/users`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    )
 
     const data = await res.json()
 
-    // ✅ revalidate the user list cache to include the new user
+    // ✅ Revalidate users list
     if (res.ok) {
-      revalidateTag("admin-users", "default")
+      revalidateTag("admin-users","default")
     }
 
     return NextResponse.json(data, { status: res.status })

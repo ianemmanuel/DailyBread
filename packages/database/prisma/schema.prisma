@@ -11,28 +11,19 @@ datasource db {
 // ADMIN INFRASTRUCTURE
 // ============================================================================
 
-///* Internal DailyBread team member.
-///  Auth is handled by a dedicated admin Clerk instance.
-///
-/// Lifecycle:
-///   1. Identity admin creates this row (clerkUserId=null, isActive=false)
-///   2. Identity admin assigns role + permissions + scope
-///   3. Identity admin sends Clerk invitation
-///   4. Employee accepts → webhook fires → clerkUserId populated, isActive=true
-///   5. Employee can now log in with full access immediately
-///
-/// Never deleted — deactivated via isActive=false to preserve audit history.
-
-
+//* Internal DailyBread team member.
 
 model AdminUser {
-  id                  String          @id @default(uuid())
-  clerkUserId         String?         @unique
+  id                  String    @id @default(uuid())
+  clerkUserId         String?   @unique
   roleId              String?
-  email               String          @unique
-  fullName            String
+  email               String    @unique
+  firstName           String
+  middleName          String?
+  lastName            String
+  employeeId          String?   @unique
   status              AdminUserStatus @default(pending)
-  isActive            Boolean         @default(false)  // true only when status = active
+  isActive            Boolean         @default(false)
   invitedById         String?
   invitationSentCount Int             @default(0)
   invitationSentAt    DateTime?
@@ -52,12 +43,12 @@ model AdminUser {
 
   @@index([clerkUserId])
   @@index([roleId])
-  @@index([status])           // replaces @@index([isActive]) — query by status
+  @@index([status])           
   @@index([email])
 }
 
-///* Roles define a permission pool — the ceiling of what a user in this role
-/// can ever be granted. Seeded via migration. Not editable at runtime.
+//* Roles define a permission pool — the ceiling of what a user in this role
+/// Seeded via migration. Not editable at runtime.
 model AdminRole {
   id          String   @id @default(uuid())
   name        String   @unique
@@ -69,7 +60,7 @@ model AdminRole {
   permissions AdminRolePermission[]
 }
 
-///* Every discrete action in the system is a permission key.
+//* Every discrete action in the system is a permission key.
 /// Seeded via migration. Never created at runtime.
 /// isActive=false means the permission is deprecated — cannot be newly granted,
 /// existing grants are preserved in history.

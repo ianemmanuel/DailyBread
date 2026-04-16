@@ -2,9 +2,9 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useTransition }  from "react"
-import { Search }         from "lucide-react"
-import { Input }          from "@repo/ui/components/input"
-import { Button }         from "@repo/ui/components/button"
+import { Search } from "lucide-react"
+import { Input } from "@repo/ui/components/input"
+import { Button } from "@repo/ui/components/button"
 import {
   Select,
   SelectContent,
@@ -18,10 +18,17 @@ interface Props {
   defaultStatus: string
 }
 
-/**
- * UsersTableFilters — client component so filters can update URL reactively
- * Pushes URL changes via router — triggers SSR re-fetch of the page.
- */
+const triggerStyle = {
+  backgroundColor: "var(--input)",
+  color          : "var(--foreground)",
+}
+
+const contentStyle = {
+  backgroundColor: "var(--popover)",
+  color          : "var(--popover-foreground)",
+  border         : "1px solid var(--border)",
+}
+
 export function UsersTableFilters({ defaultSearch, defaultStatus }: Props) {
   const router                       = useRouter()
   const pathname                     = usePathname()
@@ -31,13 +38,13 @@ export function UsersTableFilters({ defaultSearch, defaultStatus }: Props) {
   function applyFilters(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const data   = new FormData(e.currentTarget)
-    const search = (data.get("search") as string) ?? ""
-    const status = (data.get("status") as string) ?? ""
+    const search = (data.get("search") as string).trim()
+    const status = (data.get("status") as string).trim()
 
     const params = new URLSearchParams(searchParams.toString())
     params.set("page", "1")
-    search ? params.set("search", search) : params.delete("search")
-    status ? params.set("status", status) : params.delete("status")
+    search                            ? params.set("search", search) : params.delete("search")
+    status && status !== "all"        ? params.set("status", status) : params.delete("status")
 
     startTransition(() => router.push(`${pathname}?${params.toString()}`))
   }
@@ -46,7 +53,7 @@ export function UsersTableFilters({ defaultSearch, defaultStatus }: Props) {
     startTransition(() => router.push(pathname))
   }
 
-  const hasFilters = defaultSearch || defaultStatus
+  const hasFilters = defaultSearch || (defaultStatus && defaultStatus !== "all")
 
   return (
     <form onSubmit={applyFilters} className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -55,28 +62,26 @@ export function UsersTableFilters({ defaultSearch, defaultStatus }: Props) {
         <Input
           name="search"
           defaultValue={defaultSearch}
-          placeholder="Search by name or email…"
+          placeholder="Search by name, email, or employee ID…"
           className="pl-9"
         />
       </div>
 
       <Select name="status" defaultValue={defaultStatus || "all"}>
-        <SelectTrigger className="w-full sm:w-44">
+        <SelectTrigger className="w-full sm:w-44" style={triggerStyle}>
           <SelectValue placeholder="All statuses" />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent style={contentStyle}>
           <SelectItem value="all">All statuses</SelectItem>
-          <SelectItem value="pending">Pending</SelectItem>
-          <SelectItem value="invited">Invited</SelectItem>
+          <SelectItem value="pending">Pending invitation</SelectItem>
+          <SelectItem value="invited">Invited — awaiting</SelectItem>
           <SelectItem value="active">Active</SelectItem>
           <SelectItem value="suspended">Suspended</SelectItem>
           <SelectItem value="deactivated">Deactivated</SelectItem>
         </SelectContent>
       </Select>
 
-      <Button type="submit" variant="secondary" size="sm" disabled={isPending}>
-        Filter
-      </Button>
+      <Button type="submit" variant="secondary" size="sm" disabled={isPending}>Filter</Button>
       {hasFilters && (
         <Button type="button" variant="ghost" size="sm" onClick={clearFilters} disabled={isPending}>
           Clear

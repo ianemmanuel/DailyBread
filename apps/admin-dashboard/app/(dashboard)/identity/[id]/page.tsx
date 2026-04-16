@@ -29,7 +29,7 @@ export default async function UserDetailPage({ params }: Props) {
   if (!sessionRes.ok) redirect("/sign-in")
   const { data: session }: ApiSuccess<AdminSessionData> = await sessionRes.json()
 
-  if (!session.permissions.includes(AdminPermissions.ADMIN_USERS_READ)) {
+  if (!session.permissions.includes(AdminPermissions.ADMIN_USERS_PROFILES_READ)) {
     redirect("/identity")
   }
 
@@ -43,11 +43,18 @@ export default async function UserDetailPage({ params }: Props) {
     throw err
   }
 
-  const canInvite    = session.permissions.includes(AdminPermissions.ADMIN_USERS_INVITE)
-  const canEditPerms = session.permissions.includes(AdminPermissions.ADMIN_USERS_PERMISSIONS)
-  const canManage    = session.permissions.includes(AdminPermissions.ADMIN_USERS_DEACTIVATE)
+  // Pending/invited users belong on the review page
+  if (user.status === "pending" || user.status === "invited") {
+    redirect(`/identity/${id}/review`)
+  }
+
+  const canInvite    = session.permissions.includes(AdminPermissions.ADMIN_USERS_INVITATIONS_SEND)
+  const canEditPerms = session.permissions.includes(AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE)
+  const canManage    = session.permissions.includes(AdminPermissions.ADMIN_USERS_ACCOUNTS_SUSPEND)
   const currentKeys  = user.permissions?.map((p: any) => p.permission.key) ?? []
-  const initials     = user.fullName.split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase()
+
+  const displayName = [user.firstName, user.middleName, user.lastName].filter(Boolean).join(" ")
+  const initials    = [user.firstName[0], user.lastName[0]].join("").toUpperCase()
 
   return (
     <div className="page-content animate-slide-up">
@@ -63,16 +70,17 @@ export default async function UserDetailPage({ params }: Props) {
             {initials}
           </div>
           <div>
-            <h1 className="font-display text-xl font-semibold text-foreground">{user.fullName}</h1>
+            <h1 className="font-display text-xl font-semibold text-foreground">{displayName}</h1>
             <p className="text-sm text-muted-foreground">{user.email}</p>
+            {user.employeeId && (
+              <p className="font-mono text-xs text-muted-foreground">ID: {user.employeeId}</p>
+            )}
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <UserStatusBadge status={user.status} />
               {user.role && <span className="badge-neutral">{user.role.displayName}</span>}
             </div>
           </div>
         </div>
-
-        {/* Action buttons — client component */}
         <UserDetailActions
           userId={id}
           userStatus={user.status}
@@ -81,12 +89,15 @@ export default async function UserDetailPage({ params }: Props) {
         />
       </div>
 
-      {/* Metadata */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      {/* Metadata grid */}
+      <div className="grid gap-4 sm:grid-cols-4">
         {[
-          { label: "Invited by",  value: (user.invitedBy as any)?.fullName ?? "System" },
-          { label: "Created",     value: new Date(user.createdAt).toLocaleDateString() },
-          { label: "Last active", value: user.lastSeenAt ? new Date(user.lastSeenAt).toLocaleDateString() : "Never" },
+          { label: "Invited by",   value: user.invitedBy
+              ? [user.invitedBy.firstName, user.invitedBy.lastName].join(" ")
+              : "System" },
+          { label: "Created",      value: new Date(user.createdAt).toLocaleDateString() },
+          { label: "Last active",  value: user.lastSeenAt ? new Date(user.lastSeenAt).toLocaleDateString() : "Never" },
+          { label: "Employee ID",  value: user.employeeId ?? "—" },
         ].map(({ label, value }) => (
           <div key={label} className="admin-card">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
@@ -95,7 +106,23 @@ export default async function UserDetailPage({ params }: Props) {
         ))}
       </div>
 
-      {/* Permissions — client form component */}
+      {/* Scope */}
+      {user.scopes && user.scopes.length > 0 && (
+        <div className="admin-card space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">Geographic Scope</h2>
+          <div className="flex flex-wrap gap-2">
+            {(user.scopes as any[]).map((s: any) => (
+              <span key={s.id} className="badge-info">
+                {s.scopeType === "GLOBAL" ? "🌍 Global"
+                  : s.scopeType === "COUNTRY" ? (s.country?.name ?? s.countryId)
+                  : `${s.city?.name ?? s.cityId}, ${s.country?.name ?? ""}`}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Permissions */}
       {canEditPerms && user.role && user.roleId && (
         <div className="admin-card space-y-4">
           <div>

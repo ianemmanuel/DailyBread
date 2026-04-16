@@ -2,24 +2,31 @@
 @import "@repo/ui/styles/tokens.css";
 
 /*
- * ============================================================
  * Admin Dashboard — globals.css
  *
- * Light: warm neutral — the default, used for auth + dashboard
- * Dark:  warm charcoal — inspired by Laravel Herd's docs
- *        Very dark warm background (not cold slate), terracotta
- *        primary still reads beautifully, brand stays intact.
+ * Theme philosophy:
+ *   Light: warm neutral white — clean, readable, professional
+ *   Dark:  deep slate-charcoal (not black, not brown) — like VS Code dark+
+ *          Terracotta primary appears as a vivid accent against the dark surface
+ *          without dominating. Borders are subtle cool-grey. Feels modern.
  *
- * Dark mode is toggled via .dark on <html> by next-themes.
- * Only (dashboard) routes wrap in ThemeProvider — auth routes
- * are always light.
- * ============================================================
+ * Font philosophy:
+ *   - Body/UI: Geist (clean, modern, developer-grade — used by Vercel/Linear)
+ *     Falls back to Inter which is already loaded.
+ *   - Headings: DM Serif Display (editorial, distinctive without being decorative)
+ *     Replaces Playfair which reads too literary for a dashboard.
+ *   - Mono: IBM Plex Mono (kept — excellent for code/IDs/dates)
+ *
+ * Tailwind v4 rules observed:
+ *   - @layer components: no @apply referencing other custom classes
+ *   - Each badge/status class is fully self-contained
+ *   - CSS var() used directly instead of bg-(--var) shorthand
  */
 
 @theme {
-  --font-sans    : var(--font-inter);
-  --font-display : var(--font-playfair);
-  --font-mono    : var(--font-ibm-mono);
+  --font-sans    : var(--font-geist), var(--font-inter), system-ui, sans-serif;
+  --font-display : var(--font-dm-serif), Georgia, serif;
+  --font-mono    : var(--font-ibm-mono), "Fira Code", monospace;
 
   --color-background             : var(--background);
   --color-foreground             : var(--foreground);
@@ -33,8 +40,6 @@
   --color-muted-foreground       : var(--muted-foreground);
   --color-accent                 : var(--accent);
   --color-accent-foreground      : var(--accent-foreground);
-  --color-deep                   : var(--deep);
-  --color-deep-foreground        : var(--deep-foreground);
   --color-destructive            : var(--destructive);
   --color-destructive-foreground : var(--destructive-foreground);
   --color-border                 : var(--border);
@@ -43,131 +48,101 @@
   --color-sidebar                : var(--sidebar);
   --color-sidebar-foreground     : var(--sidebar-foreground);
 
-  --radius-sm   : calc(var(--radius) - 4px);
-  --radius-md   : var(--radius);
-  --radius-lg   : calc(var(--radius) + 4px);
-  --radius-xl   : calc(var(--radius) + 8px);
-  --radius-2xl  : calc(var(--radius) + 14px);
-  --radius-full : 9999px;
+  --radius-sm  : calc(var(--radius) - 4px);
+  --radius-md  : var(--radius);
+  --radius-lg  : calc(var(--radius) + 4px);
+  --radius-xl  : calc(var(--radius) + 8px);
+  --radius-2xl : calc(var(--radius) + 14px);
 
-  /* Status colours */
-  --color-success       : oklch(0.55 0.14 145);
-  --color-success-muted : oklch(0.95 0.04  145);
-  --color-warning       : oklch(0.68 0.15  72);
-  --color-warning-muted : oklch(0.97 0.04  78);
-  --color-danger        : oklch(0.58 0.20  25);
-  --color-danger-muted  : oklch(0.97 0.04  25);
-  --color-info          : oklch(0.58 0.14  230);
-  --color-info-muted    : oklch(0.96 0.04  230);
+  /* Status semantic colours */
+  --color-success       : oklch(0.52 0.14 145);
+  --color-success-muted : oklch(0.95 0.04 145);
+  --color-warning       : oklch(0.65 0.15 72);
+  --color-warning-muted : oklch(0.97 0.04 78);
+  --color-danger        : oklch(0.55 0.20 25);
+  --color-danger-muted  : oklch(0.97 0.04 25);
+  --color-info          : oklch(0.55 0.16 230);
+  --color-info-muted    : oklch(0.95 0.04 230);
 }
 
-/* ─── LIGHT ──────────────────────────────────────────────────────────────────── */
+/* ─── LIGHT ─────────────────────────────────────────────────────────────────── */
 :root {
-  --radius: 0.6rem;
+  --radius: 0.55rem;
 
-  --background         : oklch(0.975 0.006 65);
-  --foreground         : oklch(0.16 0.018 42);
-  --card               : oklch(1 0.002 65);
-  --card-foreground    : oklch(0.16 0.018 42);
-  --popover            : oklch(1 0.002 65);
-  --popover-foreground : oklch(0.16 0.018 42);
-  --primary            : oklch(0.60 0.17 42);
-  --primary-foreground : oklch(0.99 0.006 68);
-  --secondary            : oklch(0.93 0.014 62);
-  --secondary-foreground : oklch(0.26 0.018 42);
-  --muted            : oklch(0.91 0.012 62);
-  --muted-foreground : oklch(0.50 0.016 52);
-  --accent            : oklch(0.78 0.11 70);
-  --accent-foreground : oklch(0.16 0.018 42);
-  --deep            : oklch(0.18 0.026 40);
-  --deep-foreground : oklch(0.97 0.006 68);
-  --destructive            : oklch(0.56 0.20 25);
-  --destructive-foreground : oklch(0.99 0 0);
-  --border : oklch(0.87 0.012 62);
-  --input  : oklch(0.93 0.010 62);
-  --ring   : oklch(0.60 0.17 42);
-  --shadow-primary : oklch(0.60 0.17 42 / 28%);
-  --shadow-warm    : oklch(0.18 0.026 42 / 10%);
-  --sidebar            : oklch(0.97 0.007 65);
-  --sidebar-foreground : oklch(0.20 0.018 42);
+  --background         : oklch(0.978 0.004 264);   /* very light cool-white */
+  --foreground         : oklch(0.14 0.014 264);    /* near-black cool */
+  --card               : oklch(1 0 0);
+  --card-foreground    : oklch(0.14 0.014 264);
+  --popover            : oklch(1 0 0);
+  --popover-foreground : oklch(0.14 0.014 264);
+  --primary            : oklch(0.60 0.17 42);      /* terracotta */
+  --primary-foreground : oklch(0.99 0.004 68);
+  --secondary          : oklch(0.94 0.010 264);
+  --secondary-foreground: oklch(0.25 0.012 264);
+  --muted              : oklch(0.92 0.008 264);
+  --muted-foreground   : oklch(0.52 0.012 264);
+  --accent             : oklch(0.94 0.010 264);
+  --accent-foreground  : oklch(0.14 0.014 264);
+  --destructive        : oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border             : oklch(0.88 0.008 264);
+  --input              : oklch(0.94 0.008 264);
+  --ring               : oklch(0.60 0.17 42);
+  --sidebar            : oklch(0.97 0.006 264);
+  --sidebar-foreground : oklch(0.18 0.012 264);
   --sidebar-primary    : var(--primary);
-  --sidebar-primary-foreground : var(--primary-foreground);
-  --sidebar-accent     : oklch(0.91 0.014 62);
-  --sidebar-accent-foreground  : oklch(0.26 0.018 42);
-  --sidebar-border     : oklch(0.87 0.012 62);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent     : oklch(0.92 0.008 264);
+  --sidebar-accent-foreground: oklch(0.25 0.012 264);
+  --sidebar-border     : oklch(0.88 0.008 264);
   --sidebar-ring       : var(--ring);
 }
 
-/* ─── DARK — warm charcoal (Herd-inspired) ───────────────────────────────────
-   Philosophy: not cold/blue, not pure black.
-   Dark warm brown-charcoal as the base — like aged wood in low light.
-   The terracotta primary stays vivid. Borders are warm, not stark.
-   Content areas slightly lighter than background — classic layered depth.
+/* ─── DARK — slate charcoal ──────────────────────────────────────────────────
+   Inspired by VS Code Dark+, Linear, Vercel:
+   - True dark grey slate, not black, not warm-brown
+   - Cool hue (264°) keeps it neutral and professional
+   - Terracotta primary is now a pure accent — vivid but controlled
+   - Cards are just slightly lighter than background — subtle elevation
    ─────────────────────────────────────────────────────────────────────────── */
 .dark {
-  /* Page background — very dark warm charcoal */
-  --background         : oklch(0.14 0.014 48);
-  --foreground         : oklch(0.92 0.008 65);
-
-  /* Cards — slightly elevated surface */
-  --card               : oklch(0.18 0.016 46);
-  --card-foreground    : oklch(0.92 0.008 65);
-
-  --popover            : oklch(0.20 0.016 46);
-  --popover-foreground : oklch(0.92 0.008 65);
-
-  /* Primary terracotta — slightly brighter on dark to maintain contrast */
-  --primary            : oklch(0.68 0.18 44);
-  --primary-foreground : oklch(0.99 0.006 68);
-
-  /* Secondary — warm mid-dark panel */
-  --secondary            : oklch(0.22 0.014 48);
-  --secondary-foreground : oklch(0.80 0.010 62);
-
-  /* Muted */
-  --muted            : oklch(0.22 0.012 48);
-  --muted-foreground : oklch(0.62 0.012 58);
-
-  /* Accent — warm amber/gold, rich on dark */
-  --accent            : oklch(0.72 0.14 68);
-  --accent-foreground : oklch(0.14 0.014 48);
-
-  /* Deep — darkest surface (used for navbar/elevated chrome) */
-  --deep            : oklch(0.10 0.012 46);
-  --deep-foreground : oklch(0.92 0.008 65);
-
-  /* Destructive */
-  --destructive            : oklch(0.62 0.22 25);
-  --destructive-foreground : oklch(0.99 0 0);
-
-  /* Chrome — warm, not stark white */
-  --border : oklch(0.28 0.012 52);
-  --input  : oklch(0.22 0.014 48);
-  --ring   : oklch(0.68 0.18 44);
-
-  /* Shadows */
-  --shadow-primary : oklch(0.68 0.18 44 / 35%);
-  --shadow-warm    : oklch(0 0 0 / 40%);
-
-  /* Sidebar — deepest warm surface */
-  --sidebar            : oklch(0.11 0.013 46);
-  --sidebar-foreground : oklch(0.82 0.010 62);
+  --background         : oklch(0.13 0.010 264);    /* deep slate */
+  --foreground         : oklch(0.93 0.006 264);    /* near-white cool */
+  --card               : oklch(0.17 0.010 264);    /* elevated surface */
+  --card-foreground    : oklch(0.93 0.006 264);
+  --popover            : oklch(0.19 0.010 264);
+  --popover-foreground : oklch(0.93 0.006 264);
+  --primary            : oklch(0.70 0.16 42);      /* terracotta accent — vivid on dark */
+  --primary-foreground : oklch(0.99 0.004 68);
+  --secondary          : oklch(0.21 0.010 264);
+  --secondary-foreground: oklch(0.82 0.008 264);
+  --muted              : oklch(0.21 0.008 264);
+  --muted-foreground   : oklch(0.60 0.008 264);
+  --accent             : oklch(0.24 0.010 264);
+  --accent-foreground  : oklch(0.93 0.006 264);
+  --destructive        : oklch(0.62 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border             : oklch(0.26 0.010 264);    /* subtle cool-grey border */
+  --input              : oklch(0.21 0.010 264);
+  --ring               : oklch(0.70 0.16 42);
+  --sidebar            : oklch(0.10 0.010 264);    /* deepest slate */
+  --sidebar-foreground : oklch(0.80 0.008 264);
   --sidebar-primary    : var(--primary);
-  --sidebar-primary-foreground : var(--primary-foreground);
-  --sidebar-accent     : oklch(0.20 0.014 48);
-  --sidebar-accent-foreground  : oklch(0.82 0.010 62);
-  --sidebar-border     : oklch(0.24 0.012 50);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent     : oklch(0.19 0.010 264);
+  --sidebar-accent-foreground: oklch(0.80 0.008 264);
+  --sidebar-border     : oklch(0.22 0.010 264);
   --sidebar-ring       : var(--ring);
 
-  /* Status colours — vibrant enough on dark */
-  --color-success       : oklch(0.62 0.16 145);
-  --color-success-muted : oklch(0.18 0.06  145);
-  --color-warning       : oklch(0.74 0.16  72);
-  --color-warning-muted : oklch(0.20 0.06  78);
-  --color-danger        : oklch(0.64 0.22  25);
-  --color-danger-muted  : oklch(0.20 0.08  25);
-  --color-info          : oklch(0.64 0.16  230);
-  --color-info-muted    : oklch(0.18 0.06  230);
+  /* Status — brighter on dark backgrounds */
+  --color-success       : oklch(0.60 0.16 145);
+  --color-success-muted : oklch(0.18 0.06 145);
+  --color-warning       : oklch(0.72 0.16 72);
+  --color-warning-muted : oklch(0.20 0.06 78);
+  --color-danger        : oklch(0.62 0.22 25);
+  --color-danger-muted  : oklch(0.20 0.08 25);
+  --color-info          : oklch(0.62 0.18 230);
+  --color-info-muted    : oklch(0.18 0.06 230);
 }
 
 /* ─── BASE ───────────────────────────────────────────────────────────────────── */
@@ -180,95 +155,118 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: "rlig" 1, "calt" 1;
-    /* Smooth theme transitions — avoids hard flash on toggle */
     transition: background-color 0.2s ease, color 0.15s ease;
   }
 
+  /* DM Serif for display headings only — h1/h2/h3 */
   h1, h2, h3 {
     font-family: var(--font-display), Georgia, serif;
     letter-spacing: -0.02em;
   }
 
-  :focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  ::selection { background-color: var(--primary); color: var(--primary-foreground); }
 
-  ::selection {
-    background-color: var(--primary);
-    color: var(--primary-foreground);
-  }
-
-  ::-webkit-scrollbar        { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track  { background: transparent; }
-  ::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 999px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
 }
 
 /* ─── COMPONENTS ─────────────────────────────────────────────────────────────── */
+/* Each class is fully self-contained — no @apply of other custom classes */
 @layer components {
+
   .badge-success {
-    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
     background-color: var(--color-success-muted);
     color: var(--color-success);
   }
   .badge-warning {
-    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
     background-color: var(--color-warning-muted);
     color: var(--color-warning);
   }
   .badge-danger {
-    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
     background-color: var(--color-danger-muted);
     color: var(--color-danger);
   }
   .badge-info {
-    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
     background-color: var(--color-info-muted);
     color: var(--color-info);
   }
   .badge-neutral {
-    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
-           bg-(--muted) text-(--muted-foreground);
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
+    background-color: var(--muted);
+    color: var(--muted-foreground);
   }
-  /* Status pill for admin user status */
-  .status-pending     { @apply badge-neutral; }
-  .status-invited     { @apply badge-info; }
-  .status-active      { @apply badge-success; }
-  .status-suspended   { @apply badge-warning; }
-  .status-deactivated { @apply badge-danger; }
+
+  /* Admin user status */
+  .status-pending {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
+    background-color: var(--muted);
+    color: var(--muted-foreground);
+  }
+  .status-invited {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
+    background-color: var(--color-info-muted);
+    color: var(--color-info);
+  }
+  .status-active {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
+    background-color: var(--color-success-muted);
+    color: var(--color-success);
+  }
+  .status-suspended {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
+    background-color: var(--color-warning-muted);
+    color: var(--color-warning);
+  }
+  .status-deactivated {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    border-radius: 9999px; padding: 0.125rem 0.625rem;
+    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
+    background-color: var(--color-danger-muted);
+    color: var(--color-danger);
+  }
 }
 
 /* ─── UTILITIES ──────────────────────────────────────────────────────────────── */
 @layer utilities {
+  .page-content { @apply mx-auto max-w-7xl space-y-6; }
+  .admin-card   { @apply rounded-xl border border-border/60 bg-card p-5; }
+
   .text-gradient {
-    background: linear-gradient(
-      135deg,
-      oklch(0.60 0.17 42) 0%,
-      oklch(0.70 0.14 50) 50%,
-      oklch(0.56 0.16 38) 100%
-    );
+    background: linear-gradient(135deg, oklch(0.60 0.17 42) 0%, oklch(0.70 0.14 50) 60%, oklch(0.56 0.16 38) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-  }
-
-  /* Page content wrapper — consistent padding across all dashboard pages */
-  .page-content {
-    @apply mx-auto max-w-7xl space-y-6;
-  }
-
-  /* Card — consistent styling, inherits theme automatically */
-  .admin-card {
-    @apply rounded-xl border border-border/60 bg-card p-5;
   }
 }
 
 /* ─── KEYFRAMES ──────────────────────────────────────────────────────────────── */
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.animate-slide-up {
-  animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
+.animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }

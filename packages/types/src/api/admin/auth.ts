@@ -2,9 +2,7 @@
 //
 // Wire types for GET /api/admin/v1/auth/session.
 // These are what actually travels over HTTP as JSON.
-//
-// Key rule: any DateTime field in domain/admin.ts (Date) becomes string here
-// because JSON.stringify serialises Date objects to ISO strings.
+
 
 import type { AdminPermissionKey } from "../../enums/admin"
 
@@ -39,7 +37,9 @@ export interface SessionScopeContext {
 export interface AdminSessionData {
   id          : string
   email       : string
-  fullName    : string
+  firstName   : string
+  lastName    : string
+  middleName? : string
   role        : SessionRole | null
   permissions : AdminPermissionKey[]
   scope       : SessionScopeContext

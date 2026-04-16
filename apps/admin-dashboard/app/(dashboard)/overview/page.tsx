@@ -1,22 +1,12 @@
-import type { Metadata }         from "next"
-import { auth }                  from "@clerk/nextjs/server"
-import { redirect }              from "next/navigation"
-import { headers }               from "next/headers"
+import type { Metadata } from "next"
+import { auth } from "@clerk/nextjs/server"
+import { redirect } from "next/navigation"
 import { ShieldCheck, KeyRound } from "lucide-react"
-import { ScopeDisplay }          from "@/components/dashboard/overview/ScopedDisplay"
-import type { AdminSessionData, ApiSuccess  } from "@repo/types/admin-app"
+import { ScopeDisplay } from "@/components/dashboard/overview/ScopedDisplay"
+import type { AdminSessionData, ApiSuccess } from "@repo/types/admin-app"
 
 export const metadata: Metadata = { title: "Overview" }
 
-/**
- * Overview page — the first page a user lands on after login.
- *
- * Fetches session data server-side (same pattern as the layout,
- * but the layout already fetched it — Next.js deduplicates the request
- * automatically when the URL and headers match).
- *
- * Displays: identity card, role, scope, permission summary.
- */
 export default async function OverviewPage() {
   const { getToken, userId } = await auth()
   if (!userId) redirect("/sign-in")
@@ -27,29 +17,42 @@ export default async function OverviewPage() {
     `${process.env.BACKEND_API_URL}/admin/v1/auth/session`,
     {
       headers: { Authorization: `Bearer ${token}` },
-      next   : { revalidate: 300 },
-    },
+      next: { revalidate: 300 },
+    }
   )
 
   if (!res.ok) redirect("/sign-in")
 
   const { data: session }: ApiSuccess<AdminSessionData> = await res.json()
 
-  const initials = session.fullName
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase()
+  const first = session.firstName?.trim() ?? ""
+  const last = session.lastName?.trim() ?? ""
+  console.log("Session data:", session)
+  // Full display name
+  const displayName = [
+    session.firstName,
+    session.middleName,
+    session.lastName,
+  ]
+    .filter(Boolean)
+    .join(" ")
 
-  // Group permissions by module prefix for the summary view
+  // Initials (FIRST + LAST)
+  const initials = (
+    (first[0] ?? "") + (last[0] ?? "") || first[0] || "?"
+  ).toUpperCase()
+
+  // First name for greeting
+  const greetingName = first || "there"
+
+  // Group permissions
   const permissionsByModule = session.permissions.reduce<Record<string, string[]>>(
     (acc, p) => {
       const module = p.split(":")[0] ?? "other"
       ;(acc[module] ??= []).push(p)
       return acc
     },
-    {},
+    {}
   )
 
   return (
@@ -61,7 +64,7 @@ export default async function OverviewPage() {
           Dashboard
         </p>
         <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-          Good day, {session.fullName.split(" ")[0]}
+          Good day, {greetingName}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Here&apos;s an overview of your access and permissions.
@@ -78,8 +81,12 @@ export default async function OverviewPage() {
               {initials}
             </div>
             <div className="min-w-0">
-              <p className="font-semibold text-foreground truncate">{session.fullName}</p>
-              <p className="text-sm text-muted-foreground truncate">{session.email}</p>
+              <p className="font-semibold text-foreground truncate">
+                {displayName || "—"}
+              </p>
+              <p className="text-sm text-muted-foreground truncate">
+                {session.email}
+              </p>
               {session.role && (
                 <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
                   {session.role.displayName}
@@ -104,7 +111,7 @@ export default async function OverviewPage() {
           </p>
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary">
-              <KeyRound className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+              <KeyRound className="h-5 w-5 text-muted-foreground" />
             </div>
             <div>
               <p className="text-2xl font-semibold tabular-nums text-foreground">
@@ -122,8 +129,10 @@ export default async function OverviewPage() {
       {/* Permissions breakdown */}
       <div className="rounded-xl border border-border/60 bg-card p-5">
         <div className="mb-4 flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          <h2 className="text-sm font-semibold text-foreground">Permission Breakdown</h2>
+          <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold text-foreground">
+            Permission Breakdown
+          </h2>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -135,13 +144,10 @@ export default async function OverviewPage() {
               <p className="mb-2 text-xs font-semibold capitalize text-muted-foreground">
                 {module.replace(/_/g, " ")}
               </p>
-              <ul className="space-y-1" aria-label={`${module} permissions`}>
+              <ul className="space-y-1">
                 {perms.map((p) => (
                   <li key={p} className="flex items-center gap-1.5">
-                    <span
-                      className="h-1 w-1 rounded-full bg-primary shrink-0"
-                      aria-hidden="true"
-                    />
+                    <span className="h-1 w-1 rounded-full bg-primary shrink-0" />
                     <span className="font-mono text-[11px] text-muted-foreground/80">
                       {p.split(":").slice(1).join(":")}
                     </span>
