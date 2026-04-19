@@ -4,18 +4,9 @@ import Link                      from "next/link"
 import { auth }                  from "@clerk/nextjs/server"
 import { ArrowLeft }             from "lucide-react"
 import { Button }                from "@repo/ui/components/button"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@repo/ui/components/table"
 import { adminFetch, ApiCallError } from "@/lib/api"
 import { VendorApplicationStatusBadge } from "@/components/vendors/VendorApplicationStatusBadge"
-import { ApplicationActions }    from "@/components/vendors/ApplicationActions"
-import { DocumentViewer }        from "@/components/vendors/DocumentViewer"
+import { DocumentsSection }      from "@/components/vendors/DocumentsSection"
 import type { AdminSessionData, ApiSuccess } from "@repo/types/admin-app"
 import { AdminPermissions }      from "@repo/types/admin-app"
 
@@ -36,7 +27,7 @@ export default async function ApplicationDetailPage({ params }: Props) {
   if (!sessionRes.ok) redirect("/sign-in")
   const { data: session }: ApiSuccess<AdminSessionData> = await sessionRes.json()
 
-  if (!session.permissions.includes(AdminPermissions.VENDORS_READ)) redirect("/vendors")
+  if (!session.permissions.includes(AdminPermissions.VENDORS_APPLICATIONS_READ)) redirect("/vendors")
 
   let application: any
   try {
@@ -48,7 +39,7 @@ export default async function ApplicationDetailPage({ params }: Props) {
     throw err
   }
 
-  const canApprove = session.permissions.includes(AdminPermissions.VENDORS_APPROVE)
+  const canApprove = session.permissions.includes(AdminPermissions.VENDORS_APPLICATIONS_APPROVE)
 
   return (
     <div className="page-content animate-slide-up">
@@ -57,8 +48,7 @@ export default async function ApplicationDetailPage({ params }: Props) {
         <Link href="/vendors"><ArrowLeft className="mr-1.5 h-4 w-4" />Back to Vendors</Link>
       </Button>
 
-      {/* Header card */}
-      <div className="admin-card flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="admin-card">
         <div>
           <h1 className="font-display text-xl font-semibold text-foreground">
             {application.legalBusinessName}
@@ -70,9 +60,6 @@ export default async function ApplicationDetailPage({ params }: Props) {
             <span className="badge-neutral">{application.country?.name}</span>
           </div>
         </div>
-        {canApprove && (
-          <ApplicationActions applicationId={id} currentStatus={application.status} />
-        )}
       </div>
 
       {/* Rejection banner */}
@@ -98,7 +85,9 @@ export default async function ApplicationDetailPage({ params }: Props) {
             ["Registration No.",  application.registrationNumber ?? "—"],
             ["Tax ID",            application.taxId ?? "—"],
             ["Address",           application.businessAddress],
-            ["Submitted",         application.submittedAt ? new Date(application.submittedAt).toLocaleDateString() : "Not submitted"],
+            ["Submitted",         application.submittedAt
+              ? new Date(application.submittedAt).toLocaleDateString()
+              : "Not submitted"],
             ["Revisions",         String(application.revisionCount ?? 0)],
           ] as [string, string][]).map(([label, value]) => (
             <div key={label}>
@@ -108,53 +97,14 @@ export default async function ApplicationDetailPage({ params }: Props) {
           ))}
         </div>
       </div>
-
-      {/* Documents table */}
+      
       {application.documents?.length > 0 && (
-        <div className="admin-card overflow-hidden p-0">
-          <div className="border-b border-border/60 px-5 py-3">
-            <h2 className="text-sm font-semibold text-foreground">
-              Documents ({application.documents.length})
-            </h2>
-          </div>
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30 hover:bg-muted/30">
-                <TableHead className="text-xs uppercase tracking-wide">Document</TableHead>
-                <TableHead className="hidden text-xs uppercase tracking-wide sm:table-cell">Expiry</TableHead>
-                <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
-                <TableHead className="text-xs uppercase tracking-wide text-right">Preview</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {application.documents.map((doc: any) => (
-                <TableRow key={doc.id} className="hover:bg-muted/10">
-                  <TableCell>
-                    <p className="text-sm font-medium text-foreground">{doc.documentType?.name}</p>
-                    {doc.documentName && (
-                      <p className="text-xs text-muted-foreground truncate max-w-[180px]">{doc.documentName}</p>
-                    )}
-                  </TableCell>
-                  <TableCell className="hidden text-xs text-muted-foreground sm:table-cell">
-                    {doc.expiryDate ? new Date(doc.expiryDate).toLocaleDateString() : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <span className={
-                      doc.status === "APPROVED" ? "badge-success" :
-                      doc.status === "REJECTED" ? "badge-danger"  :
-                      doc.status === "EXPIRED"  ? "badge-warning" : "badge-neutral"
-                    }>
-                      {doc.status}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DocumentViewer document={doc} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <DocumentsSection
+          docs={application.documents}
+          applicationId={id}
+          currentStatus={application.status}
+          canApprove={canApprove}
+        />
       )}
 
     </div>

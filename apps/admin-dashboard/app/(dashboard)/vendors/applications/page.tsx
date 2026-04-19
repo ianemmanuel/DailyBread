@@ -8,11 +8,11 @@ import { VendorApplicationsTable } from "@/components/vendors/VendorApplications
 import { VendorApplicationFilters } from "@/components/vendors/VendorApplicationFilter"
 import type { AdminSessionData, ApiSuccess } from "@repo/types/admin-app"
 import { AdminPermissions } from "@repo/types/admin-app"
-import type { ListAdminUsersResult  } from "@/types"
+import type { ApplicationListResult } from "@/types"   // ← was ListAdminUsersResult
 
 export const metadata: Metadata = { title: "Vendor Applications" }
 export const revalidate = 60
-
+ 
 interface PageProps {
   searchParams: Promise<{
     page?     : string
@@ -67,11 +67,11 @@ export default async function VendorApplicationsPage({ searchParams }: PageProps
 
   // Fetch count per status for overview cards + main list in parallel
   const [result, ...statusCounts] = await Promise.all([
-    adminFetch<ListAdminUsersResult>(`/admin/v1/vendors/applications?${qs}`, {
+    adminFetch<ApplicationListResult>(`/admin/v1/vendors/applications?${qs}`, {
       next: { revalidate: 60, tags: ["vendor-applications"] },
     }).catch(() => null),
     ...STATUS_CARDS.map(({ status: s }) =>
-      adminFetch<ListAdminUsersResult>(`/admin/v1/vendors/applications?status=${s}&pageSize=1`, {
+      adminFetch<ApplicationListResult>(`/admin/v1/vendors/applications?status=${s}&pageSize=1`, {
         next: { revalidate: 60, tags: ["vendor-applications"] },
       }).catch(() => ({ total: 0 }))
     ),

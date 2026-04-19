@@ -2,21 +2,16 @@ import { auth }     from "@clerk/nextjs/server"
 import { NextRequest, NextResponse } from "next/server"
 
 /**
- * GET /api/admin/vendors/documents/[id]/view
- *
- * Issues a short-lived signed URL for a vendor document stored in R2.
- *
- * Security:
- *   1. Requires valid Clerk session (auth())
- *   2. Forwards to backend which checks VENDORS_READ permission
- *   3. Backend calls R2 presign (15-min TTL)
- *   4. Returns only the signed URL — client never sees storage keys
- *
- * The signed URL expires in 15 minutes.
- * No document is ever publicly accessible.
+
+ * Proxies to backend to generate a short-lived R2 signed URL.
+ * The backend handler (vendor.document.controller.ts):
+ *   - Checks VENDORS_DOCUMENTS_VIEW permission
+ *   - Checks actor scope against the document's country
+ *   - Calls R2Service.generateViewUrl(doc.storageKey)
+ *   - Returns { data: { url: string } }
  */
 export async function GET(
-  _req   : NextRequest,
+  _req    : NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -43,14 +38,12 @@ export async function GET(
 
     const data = await res.json()
 
-    // Forward only what the client needs — not the raw storage key
-    return NextResponse.json({ url: data.data.url }, {
-      headers: {
-        // Prevent caching of the signed URL response
-        "Cache-Control": "no-store, no-cache, must-revalidate",
-      },
-    })
-  } catch {
+    return NextResponse.json(
+      { url: data.data.url },
+      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } },
+    )
+  } catch (err) {
+    console.error("[document-view]", err)
     return NextResponse.json({ message: "Internal error." }, { status: 500 })
   }
 }

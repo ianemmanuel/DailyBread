@@ -5,7 +5,7 @@ export const rejectApplicationSchema = z.object({
   revisionNotes  : z.string(),
 })
 
-export type RejectApplicationInput = z.infer<typeof rejectApplicationSchema>
+export type RejectApplicationFormValues = z.output<typeof rejectApplicationSchema>
 
 export const suspendVendorSchema = z.object({
   reason: z.string().min(5, "Please provide a reason"),

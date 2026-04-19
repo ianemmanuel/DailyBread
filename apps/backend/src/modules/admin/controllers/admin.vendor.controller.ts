@@ -1,8 +1,11 @@
-import { RequestHandler }         from "express"
-import { VendorApplicationStatus, VendorStatus } from "@repo/db"
-import type { AdminRequest }      from "@repo/types/backend"
-import { sendSuccess }            from "@/helpers/api-response/response"
-import { ApiError }               from "@/middleware/error"
+import { RequestHandler } from "express"
+import { 
+  VendorApplicationStatus, 
+  VendorStatus 
+} from "@repo/db"
+import type { AdminRequest } from "@repo/types/backend"
+import { sendSuccess } from "@/helpers/api-response/response"
+import { ApiError } from "@/middleware/error"
 import {
   listApplications,
   getApplication,
@@ -16,11 +19,16 @@ import {
   banVendor,
 } from "../services/admin.vendor.service"
 
-//* ─── Applications ────────────────────────────────────────
+import {
+  approveDocument,
+  rejectDocument,
+} from "../services/admin.vendor.service"
+
+//* ─── Applications ─────────────
 
 export const handleListApplications: RequestHandler = async (req, res, next) => {
   try {
-    const { adminScope }                      = req as unknown as AdminRequest
+    const { adminScope } = req as unknown as AdminRequest
     const { status, countryId, search, page, pageSize } = req.query
 
     const result = await listApplications(
@@ -39,9 +47,9 @@ export const handleListApplications: RequestHandler = async (req, res, next) => 
 
 export const handleGetApplication: RequestHandler = async (req, res, next) => {
   try {
-    const { adminScope }   = req as unknown as AdminRequest
-    const { id }           = req.params as { id: string }
-    const application      = await getApplication(id, adminScope)
+    const { adminScope } = req as unknown as AdminRequest
+    const { id }         = req.params as { id: string }
+    const application    = await getApplication(id, adminScope)
     return sendSuccess(res, application, "Application fetched")
   } catch (err) { next(err) }
 }
@@ -57,8 +65,8 @@ export const handleApproveApplication: RequestHandler = async (req, res, next) =
 
 export const handleRejectApplication: RequestHandler = async (req, res, next) => {
   try {
-    const { adminUser, adminScope } = req as unknown as AdminRequest
-    const { id }                    = req.params as { id: string }
+    const { adminUser, adminScope }          = req as unknown as AdminRequest
+    const { id }                             = req.params as { id: string }
     const { rejectionReason, revisionNotes } = req.body
 
     if (!rejectionReason) throw new ApiError(400, "rejectionReason is required", "MISSING_FIELDS")
@@ -77,11 +85,44 @@ export const handleMarkUnderReview: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err) }
 }
 
-// ─── Vendor accounts ──────────────────────────────────────────────────────────
+//* ─── Vendor documents ────────────────
+
+export const handleApproveDocument: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser, adminScope } = req as unknown as AdminRequest
+    const { id } = req.params as { id: string }
+
+    const result = await approveDocument(id, adminUser.id, adminScope)
+    return sendSuccess(res, result, "Document approved")
+  } catch (err) { next(err) }
+}
+
+export const handleRejectDocument: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser, adminScope } = req as unknown as AdminRequest
+    const { id } = req.params as { id: string }
+    const { rejectionReason, revisionNotes } = req.body
+
+    if (!rejectionReason) {
+      throw new ApiError(400, "rejectionReason is required", "MISSING_FIELDS")
+    }
+
+    const result = await rejectDocument(
+      id,
+      rejectionReason,
+      revisionNotes,
+      adminUser.id,
+      adminScope,
+    )
+    return sendSuccess(res, result, "Document rejected")
+  } catch (err) { next(err) }
+}
+
+//* ─── Vendor accounts ────────────────
 
 export const handleListVendorAccounts: RequestHandler = async (req, res, next) => {
   try {
-    const { adminScope }                = req as unknown as AdminRequest
+    const { adminScope }  = req as unknown as AdminRequest
     const { status, countryId, search, page, pageSize } = req.query
 
     const result = await listVendorAccounts(
