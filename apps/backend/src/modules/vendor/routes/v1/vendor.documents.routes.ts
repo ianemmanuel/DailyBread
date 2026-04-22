@@ -5,7 +5,7 @@ import {
   getApplicationDocuments,
   previewDocument,
   presignUpload,
-} from "../../controllers/applications/document.controller"
+} from "../../controllers/vendor.document.controller"
 
 const documentRouter:Router = Router()
 

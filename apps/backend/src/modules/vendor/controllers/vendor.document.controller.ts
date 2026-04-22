@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import { prisma, VendorApplicationStatus, DocumentStatus } from "@repo/db"
 import { getVendorUser } from "@/helpers/auth/vendorAuth"
-import { DocumentRequirementService } from "@/modules/vendor/services/documents"
+import { DocumentRequirementService } from "../services/vendor.document.service"
 import { R2Service } from "@/lib/r2"
 import { ApiError } from "@/middleware/error/error.middleware"
 import path from "path"

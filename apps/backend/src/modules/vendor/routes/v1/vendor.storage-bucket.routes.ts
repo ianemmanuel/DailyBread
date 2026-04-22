@@ -1,5 +1,5 @@
 import { Router } from "express"
-import { generateFileUploadUrl } from "../../controllers/storageBucket"
+import { generateFileUploadUrl } from "../../controllers/vendor.storageBucket.controller"
 
 const storageBucketRouter: Router = Router()
 

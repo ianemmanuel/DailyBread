@@ -1,7 +1,7 @@
 import { Request, Response, Router } from "express"
-import applicationRouter from './application.routes'
-import documentRouter from './documents.routes'
-import storageBucketRouter from "./storage-bucket.routes"
+import applicationRouter from './vendor.application.routes'
+import documentRouter from './vendor.documents.routes'
+import storageBucketRouter from "./vendor.storage-bucket.routes"
 
 const v1Router: Router = Router()
 

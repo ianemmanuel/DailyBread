@@ -4,7 +4,7 @@ import {
   upsertApplication,
   submitApplication,
   previewApplication,
-} from "../../controllers/applications"
+} from "../../controllers/vendor.application.controller"
 
 const applicationRouter: Router = Router()
 

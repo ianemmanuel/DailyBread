@@ -11,7 +11,7 @@ import { sendSuccess } from "@/helpers/api-response/response"
  *
  * The `scopes` field on the scope object carries the raw AdminUserScope rows
  * so the frontend can display country/city names and build the scope picker.
- */
+ */ 
 export const getAdminSession: RequestHandler = (req, res) => {
   const { adminUser, adminPermissions, adminScope } = req as unknown as AdminRequest
 

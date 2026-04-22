@@ -6,7 +6,7 @@ import type { AdminScopeContext } from "@repo/types/backend"
 
 const serviceLog = logger.child({ module: "vendor-ops-service" })
 
-//* ─── Scope helper ───────────────────────
+//* Scope helper
 
 function buildVendorScopeFilter(scope: AdminScopeContext, requestedCountryId?: string) {
   if (scope.isGlobal) {
@@ -18,7 +18,7 @@ function buildVendorScopeFilter(scope: AdminScopeContext, requestedCountryId?: s
   return { countryId: { in: allowedCountries } }
 }
 
-//* ─── List applications ────────────────────
+//* List applications
 
 const ALLOWED_SORT_COLUMNS: Record<string, string> = {
   submittedAt      : "submittedAt",
@@ -81,7 +81,7 @@ export async function listApplications(
   return { applications, total, page, pageSize, totalPages: Math.ceil(total / pageSize) }
 }
 
-//* ─── Get one application ──────────────
+//* Get one application
 
 export async function getApplication(applicationId: string, actorScope: AdminScopeContext) {
   const application = await prisma.vendorApplication.findUnique({
@@ -107,10 +107,7 @@ export async function getApplication(applicationId: string, actorScope: AdminSco
   return application
 }
 
-//* ─── Mark under review ──────────────────
-// NOTE: VendorApplication does NOT have a reviewedById column in the schema.
-// Do NOT include reviewedById in the update — it will cause Prisma to throw.
-// The actorId is recorded in the audit log instead.
+//* Mark under review
 
 export async function markUnderReview(
   applicationId: string,
@@ -136,7 +133,6 @@ export async function markUnderReview(
 
   const updated = await prisma.vendorApplication.update({
     where: { id: applicationId },
-    // reviewedAt exists in schema; reviewedById does NOT — never add it here
     data : {
       status    : VendorApplicationStatus.UNDER_REVIEW,
       reviewedAt: new Date(),
@@ -159,7 +155,7 @@ export async function markUnderReview(
   return updated
 }
 
-//* ─── Approve ────────────────────────
+//* Approve Application
 
 export async function approveApplication(
   applicationId: string,
@@ -198,24 +194,24 @@ export async function approveApplication(
 
     const account = await tx.vendorAccount.create({
       data: {
-        applicationId       : applicationId,
-        userId              : application.userId,
-        vendorTypeId        : application.vendorTypeId,
-        otherVendorType     : application.otherVendorType,
-        countryId           : application.countryId,
-        legalBusinessName   : application.legalBusinessName,
-        businessEmail       : application.businessEmail,
-        businessPhone       : application.businessPhone ?? "",
-        companyRegNumber    : application.registrationNumber,
+        applicationId        : applicationId,
+        userId               : application.userId,
+        vendorTypeId         : application.vendorTypeId,
+        otherVendorType      : application.otherVendorType,
+        countryId            : application.countryId,
+        legalBusinessName    : application.legalBusinessName,
+        businessEmail        : application.businessEmail,
+        businessPhone        : application.businessPhone ?? "",
+        companyRegNumber     : application.registrationNumber,
         taxRegistrationNumber: application.taxId,
-        ownerFirstName      : application.ownerFirstName,
-        ownerLastName       : application.ownerLastName,
-        ownerPhone          : application.ownerPhone,
-        ownerEmail          : application.ownerEmail,
-        businessAddress     : application.businessAddress,
-        addressLine2        : application.addressLine2,
-        postalCode          : application.postalCode,
-        status              : VendorStatus.ACTIVE,
+        ownerFirstName       : application.ownerFirstName,
+        ownerLastName        : application.ownerLastName,
+        ownerPhone           : application.ownerPhone,
+        ownerEmail           : application.ownerEmail,
+        businessAddress      : application.businessAddress,
+        addressLine2         : application.addressLine2,
+        postalCode           : application.postalCode,
+        status               : VendorStatus.ACTIVE,
       },
     })
 
@@ -248,7 +244,7 @@ export async function approveApplication(
   return { application: updatedApplication, vendorAccount }
 }
 
-//* ─── Reject ───────────────────────────
+//* Reject Application
 
 export async function rejectApplication(
   applicationId  : string,
@@ -305,15 +301,13 @@ export async function rejectApplication(
   return updated
 }
 
-
-//* ─── Approve a vendor document ───────────
+//* Approve a vendor document
 
 export async function approveDocument(
   documentId: string,
   actorId   : string,
   actorScope: AdminScopeContext,
 ) {
-  // Fetch doc with its parent application (for scope check + country access)
   const doc = await prisma.vendorDocument.findUnique({
     where  : { id: documentId },
     include: {
@@ -327,7 +321,6 @@ export async function approveDocument(
     throw new ApiError(400, "Document is already approved", "ALREADY_APPROVED")
   }
 
-  // Resolve countryId from whichever parent exists
   const countryId = doc.application?.countryId ?? doc.vendor?.countryId
   if (!countryId) throw new ApiError(400, "Document has no parent scope", "SCOPE_MISSING")
 
@@ -338,9 +331,9 @@ export async function approveDocument(
   const updated = await prisma.vendorDocument.update({
     where: { id: documentId },
     data : {
-      status        : DocumentStatus.APPROVED,
-      approvedAt    : new Date(),
-      reviewedAt    : new Date(),
+      status         : DocumentStatus.APPROVED,
+      approvedAt     : new Date(),
+      reviewedAt     : new Date(),
       rejectionReason: null,
       revisionNotes  : null,
     },
@@ -363,7 +356,7 @@ export async function approveDocument(
   return updated
 }
 
-//* ─── Reject a vendor document ─────────────────
+//* Reject a vendor document
 
 export async function rejectDocument(
   documentId     : string,
@@ -421,7 +414,8 @@ export async function rejectDocument(
 
   return updated
 }
-//* ─── List vendor accounts ─────────────
+
+//* List vendor accounts
 
 export async function listVendorAccounts(
   filters: {
@@ -466,7 +460,7 @@ export async function listVendorAccounts(
   return { accounts, total, page, pageSize, totalPages: Math.ceil(total / pageSize) }
 }
 
-//* ─── Get one vendor account ───────────────
+//* Get one vendor account
 
 export async function getVendorAccount(vendorId: string, actorScope: AdminScopeContext) {
   const account = await prisma.vendorAccount.findUnique({
@@ -478,17 +472,25 @@ export async function getVendorAccount(vendorId: string, actorScope: AdminScopeC
       outlets    : {
         where  : { deletedAt: null },
         select : {
-          id         : true,
-          name       : true,
-          adminStatus: true,
-          cityId     : true,
-          city       : { select: { name: true } },
+          id          : true,
+          name        : true,
+          adminStatus : true,
+          reviewStatus: true,
+          cityId      : true,
         },
       },
       documents: {
         where  : { supersededAt: null },
         include: { documentType: { select: { id: true, name: true } } },
         orderBy: { uploadedAt: "desc" },
+      },
+      payoutAccounts: {
+        where  : { deletedAt: null },
+        include: {
+          countryPaymentMethod: {
+            include: { paymentMethod: { select: { name: true, type: true, code: true } } },
+          },
+        },
       },
     },
   })
@@ -502,27 +504,65 @@ export async function getVendorAccount(vendorId: string, actorScope: AdminScopeC
   return account
 }
 
-//* ─── Suspend ──────────────
+//* Suspend 
+// Also deactivates all payout accounts — vendor should not receive payouts while suspended.
 
-export async function suspendVendor(vendorId: string, reason: string, actorId: string, actorScope: AdminScopeContext) {
+export async function suspendVendor(
+  vendorId  : string,
+  reason    : string,
+  actorId   : string,
+  actorScope: AdminScopeContext,
+) {
   const account = await prisma.vendorAccount.findUnique({ where: { id: vendorId } })
   if (!account || account.deletedAt) throw new ApiError(404, "Vendor account not found", "NOT_FOUND")
   if (!actorScope.isGlobal && !actorScope.countryIds.includes(account.countryId)) throw new ApiError(403, "Outside your scope", "SCOPE_FORBIDDEN")
   if (account.status === VendorStatus.SUSPENDED) throw new ApiError(400, "Vendor is already suspended", "ALREADY_SUSPENDED")
-  if (account.status === VendorStatus.BANNED) throw new ApiError(400, "Cannot suspend a banned vendor", "INVALID_STATUS")
+  if (account.status === VendorStatus.BANNED)    throw new ApiError(400, "Cannot suspend a banned vendor", "INVALID_STATUS")
 
-  await prisma.vendorAccount.update({
-    where: { id: vendorId },
-    data : { status: VendorStatus.SUSPENDED, suspensionReason: reason, suspendedAt: new Date() },
+  // Count active payout accounts before deactivating — include in audit
+  const activePayoutCount = await prisma.vendorPayoutAccount.count({
+    where: { vendorId, isActive: true, deletedAt: null },
   })
 
+  await prisma.$transaction([
+    prisma.vendorAccount.update({
+      where: { id: vendorId },
+      data : { status: VendorStatus.SUSPENDED, suspensionReason: reason, suspendedAt: new Date() },
+    }),
+    // Deactivate all payout accounts — vendor cannot receive payouts while suspended
+    prisma.vendorPayoutAccount.updateMany({
+      where: { vendorId, deletedAt: null },
+      data : { isActive: false, isDefault: false },
+    }),
+  ])
+
   serviceLog.warn({ vendorId, actorId, reason }, "Vendor suspended")
-  auditService.log({ adminUserId: actorId, action: "vendor_account.suspended", entityType: "VendorAccount", entityId: vendorId, changes: { before: { status: account.status }, after: { status: "SUSPENDED" } }, metadata: { reason } })
+
+  auditService.log({
+    adminUserId: actorId,
+    action     : "vendor_account.suspended",
+    entityType : "VendorAccount",
+    entityId   : vendorId,
+    changes    : {
+      before: { status: account.status },
+      after : { status: "SUSPENDED" },
+    },
+    metadata: { reason, payoutAccountsDeactivated: activePayoutCount },
+  })
+
   return { success: true }
 }
 
 //* ─── Reinstate ──────────────────
-export async function reinstateVendor(vendorId: string, actorId: string, actorScope: AdminScopeContext) {
+// Note: payout accounts remain inactive after reinstatement.
+// The vendor must re-add and re-verify their payout accounts.
+// This is intentional — account details may have changed during suspension.
+
+export async function reinstateVendor(
+  vendorId  : string,
+  actorId   : string,
+  actorScope: AdminScopeContext,
+) {
   const account = await prisma.vendorAccount.findUnique({ where: { id: vendorId } })
   if (!account || account.deletedAt) throw new ApiError(404, "Vendor account not found", "NOT_FOUND")
   if (!actorScope.isGlobal && !actorScope.countryIds.includes(account.countryId)) throw new ApiError(403, "Outside your scope", "SCOPE_FORBIDDEN")
@@ -534,24 +574,67 @@ export async function reinstateVendor(vendorId: string, actorId: string, actorSc
   })
 
   serviceLog.info({ vendorId, actorId }, "Vendor reinstated")
-  auditService.log({ adminUserId: actorId, action: "vendor_account.reinstated", entityType: "VendorAccount", entityId: vendorId, changes: { before: { status: "SUSPENDED" }, after: { status: "ACTIVE" } } })
+
+  auditService.log({
+    adminUserId: actorId,
+    action     : "vendor_account.reinstated",
+    entityType : "VendorAccount",
+    entityId   : vendorId,
+    changes    : {
+      before: { status: "SUSPENDED" },
+      after : { status: "ACTIVE" },
+    },
+    metadata: { note: "Payout accounts remain inactive — vendor must re-add and verify" },
+  })
+
   return { success: true }
 }
 
 //* ─── Ban ─────────────────────────
+// Also soft-deletes all payout accounts — permanent, no reinstatement.
 
-export async function banVendor(vendorId: string, reason: string, actorId: string, actorScope: AdminScopeContext) {
+export async function banVendor(
+  vendorId  : string,
+  reason    : string,
+  actorId   : string,
+  actorScope: AdminScopeContext,
+) {
   const account = await prisma.vendorAccount.findUnique({ where: { id: vendorId } })
   if (!account || account.deletedAt) throw new ApiError(404, "Vendor account not found", "NOT_FOUND")
   if (!actorScope.isGlobal && !actorScope.countryIds.includes(account.countryId)) throw new ApiError(403, "Outside your scope", "SCOPE_FORBIDDEN")
   if (account.status === VendorStatus.BANNED) throw new ApiError(400, "Vendor is already banned", "ALREADY_BANNED")
 
-  await prisma.vendorAccount.update({
-    where: { id: vendorId },
-    data : { status: VendorStatus.BANNED, suspensionReason: reason, deactivatedAt: new Date() },
+  const activePayoutCount = await prisma.vendorPayoutAccount.count({
+    where: { vendorId, deletedAt: null },
   })
 
+  const now = new Date()
+
+  await prisma.$transaction([
+    prisma.vendorAccount.update({
+      where: { id: vendorId },
+      data : { status: VendorStatus.BANNED, suspensionReason: reason, deactivatedAt: now },
+    }),
+    // Hard soft-delete all payout accounts — vendor is permanently banned
+    prisma.vendorPayoutAccount.updateMany({
+      where: { vendorId, deletedAt: null },
+      data : { isActive: false, isDefault: false, deletedAt: now },
+    }),
+  ])
+
   serviceLog.warn({ vendorId, actorId, reason }, "Vendor banned")
-  auditService.log({ adminUserId: actorId, action: "vendor_account.banned", entityType: "VendorAccount", entityId: vendorId, changes: { before: { status: account.status }, after: { status: "BANNED" } }, metadata: { reason } })
+
+  auditService.log({
+    adminUserId: actorId,
+    action     : "vendor_account.banned",
+    entityType : "VendorAccount",
+    entityId   : vendorId,
+    changes    : {
+      before: { status: account.status },
+      after : { status: "BANNED" },
+    },
+    metadata: { reason, payoutAccountsDeleted: activePayoutCount },
+  })
+
   return { success: true }
 }

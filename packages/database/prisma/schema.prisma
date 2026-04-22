@@ -7,11 +7,8 @@ datasource db {
   provider = "postgresql"
 }
 
-// ============================================================================
-// ADMIN INFRASTRUCTURE
-// ============================================================================
 
-//* Internal DailyBread team member.
+//* ==============ADMIN INFRASTRUCTURE====================
 
 model AdminUser {
   id                  String    @id @default(uuid())
@@ -23,9 +20,9 @@ model AdminUser {
   lastName            String
   employeeId          String?   @unique
   status              AdminUserStatus @default(pending)
-  isActive            Boolean         @default(false)
+  isActive            Boolean    @default(false)
   invitedById         String?
-  invitationSentCount Int             @default(0)
+  invitationSentCount Int        @default(0)
   invitationSentAt    DateTime?
   lastSeenAt          DateTime?
   deactivatedAt       DateTime?
@@ -33,13 +30,13 @@ model AdminUser {
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
-  role        AdminRole?              @relation(fields: [roleId], references: [id])
-  invitedBy   AdminUser?              @relation("AdminInvitedBy", fields: [invitedById], references: [id])
-  invitees    AdminUser[]             @relation("AdminInvitedBy")
-  scopes      AdminUserScope[]
-  permissions AdminUserPermission[]   @relation("UserPermissions")
-  granted     AdminUserPermission[]   @relation("PermissionGrantedBy")
-  auditLogs   AuditLog[]
+  role                AdminRole?      @relation(fields: [roleId], references: [id])
+  invitedBy           AdminUser?      @relation("AdminInvitedBy", fields: [invitedById], references: [id])
+  invitees            AdminUser[]     @relation("AdminInvitedBy")
+  scopes              AdminUserScope[]
+  permissions         AdminUserPermission[] @relation("UserPermissions")
+  granted             AdminUserPermission[] @relation("PermissionGrantedBy")
+  auditLogs           AuditLog[]
 
   @@index([clerkUserId])
   @@index([roleId])
@@ -47,8 +44,6 @@ model AdminUser {
   @@index([email])
 }
 
-//* Roles define a permission pool — the ceiling of what a user in this role
-/// Seeded via migration. Not editable at runtime.
 model AdminRole {
   id          String   @id @default(uuid())
   name        String   @unique
@@ -60,10 +55,6 @@ model AdminRole {
   permissions AdminRolePermission[]
 }
 
-//* Every discrete action in the system is a permission key.
-/// Seeded via migration. Never created at runtime.
-/// isActive=false means the permission is deprecated — cannot be newly granted,
-/// existing grants are preserved in history.
 model AdminPermission {
   id          String   @id @default(uuid())
   key         String   @unique
@@ -75,23 +66,17 @@ model AdminPermission {
   users AdminUserPermission[]
 }
 
-///* Defines the permission POOL for a role.
-/// This is the ceiling — what CAN be granted to a user with this role.
-/// What IS granted to a specific user lives in AdminUserPermission.
 model AdminRolePermission {
-  roleId       String
-  permissionId String
+  roleId        String
+  permissionId  String
 
-  role       AdminRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission AdminPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role          AdminRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    AdminPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@id([roleId, permissionId])
   @@index([permissionId])
 }
 
-///* Individual permission grants for a specific admin user.
-/// Every grant must be within the user's role pool — validated at service layer.
-/// grantedById is the identity admin who assigned this permission.
 model AdminUserPermission {
   id           String   @id @default(uuid())
   adminUserId  String
@@ -137,9 +122,8 @@ model AdminUserScope {
   @@index([cityId])
 }
 
-//* Append-only audit log across all models.
-/// Written asynchronously — never blocks a request.
-/// No UPDATE or DELETE ever issued against this table.
+//* Append-only audit log across all models. Written asynchronously — never blocks a request.
+
 model AuditLog {
   id          String   @id @default(uuid())
   adminUserId String
@@ -150,7 +134,7 @@ model AuditLog {
   metadata    Json?
   createdAt   DateTime @default(now())
 
-  adminUser AdminUser @relation(fields: [adminUserId], references: [id])
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id])
 
   @@index([adminUserId, createdAt])
   @@index([action, createdAt])
@@ -205,30 +189,28 @@ model DashboardStat {
   metadata  Json?
 }
 
-// ============================================================================
-// GEOGRAPHY & CONFIGURATION
-// ============================================================================
+
+//* =========GEOGRAPHY & CONFIGURATION=============
 
 model Country {
-  id               String    @id @default(uuid())
-  name             String    @unique
-  code             String    @unique
-  currency         String
-  currencySymbol   String?
-  phoneCode        String
-  timezones        String[]
-  status           GeoStatus @default(ACTIVE)
-  createdByAdminId String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                 String    @id @default(uuid())
+  name               String    @unique
+  code               String    @unique
+  currency           String
+  currencySymbol     String?
+  phoneCode          String
+  timezones          String[]
+  status             GeoStatus @default(ACTIVE)
+  createdByAdminId   String?
+  createdAt          DateTime  @default(now())
 
   cities             City[]
-  payoutTypes        CountryPayoutType[]
   documentTypes      DocumentTypeConfig[]
   vendors            VendorAccount[]
   vendorApplications VendorApplication[]
   vendorTypes        VendorTypeCountry[]
   adminScopes        AdminUserScope[]
+
 
   @@index([status])
 }
@@ -243,12 +225,15 @@ model City {
   longitude        Float?
   status           GeoStatus @default(ACTIVE)
   createdByAdminId String?
+  boundingBoxNorth Float?
+  boundingBoxSouth Float?
+  boundingBoxEast  Float?
+  boundingBoxWest  Float?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   country       Country              @relation(fields: [countryId], references: [id])
   documentTypes DocumentTypeConfig[]
-  outlets       Outlet[]
   serviceAreas  ServiceArea[]
   adminScopes   AdminUserScope[]
 
@@ -286,9 +271,64 @@ model OutletServiceArea {
   @@index([serviceAreaId])
 }
 
-// ============================================================================
-// VENDOR TYPES & DOCUMENT CONFIGURATION
-// ============================================================================
+
+//* =========PAYMENT CONFIGURATION==========
+
+model PaymentMethod {
+  id               String            @id @default(uuid())
+  code             String            @unique  // "MPESA", "BANK_TRANSFER", "PAYPAL", "AIRTEL_MONEY"
+  name             String          
+  type             PaymentMethodType   // MOBILE_MONEY | BANK | DIGITAL_WALLET | CARD
+  direction        PaymentDirection[]  // [INBOUND, OUTBOUND] — can it collect? can it pay out?
+  logoUrl          String?
+  description      String?
+  createdByAdminId String?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+
+  countryConfigs CountryPaymentMethod[]
+}
+
+model CountryPaymentMethod {
+  id                String     @id @default(uuid())
+  countryId         String
+  paymentMethodId   String
+  direction         PaymentDirection     // INBOUND or OUTBOUND
+  status            CountryPaymentMethodStatus   @default(ACTIVE)
+  
+  // Our own collection/disbursement account details for this method in this country
+  // Stored as JSON because M-Pesa needs a paybill, bank needs account+branch, PayPal needs email
+  ourAccountDetails     Json?
+  
+  // Verification provider config for vendor account validation
+  verificationProvider  String?   // "AFRICASTALKING", "SAFARICOM_DARAJA", "MANUAL"
+  verificationConfig    Json?     // provider-specific config, API keys stored in env but config here
+  displayOrder          Int       @default(0)
+
+  createdByAdminId      String?
+  createdAt             DateTime  @default(now())
+
+  paymentMethod         PaymentMethod  @relation(fields: [paymentMethodId], references: [id])
+  vendorPayoutAccounts  VendorPayoutAccount[]
+
+  @@unique([countryId, paymentMethodId, direction])
+  @@index([countryId])
+  @@index([paymentMethodId])
+  @@index([status])
+}
+
+model VendorCommissionConfig {
+  id               String   @id @default(uuid())
+  countryId        String   @unique   // country-level default
+  rate             Float               // 0.15 = 15%
+  effectiveFrom    DateTime @default(now())
+  createdByAdminId String?
+  createdAt        DateTime @default(now())
+
+  @@index([countryId])
+}
+
+//* ==========VENDORS==============
 
 model VendorType {
   id               String           @id @default(uuid())
@@ -298,7 +338,6 @@ model VendorType {
   createdByAdminId String?
   deletedAt        DateTime?
   createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
 
   documentTypeConfigs DocumentTypeVendorType[]
   vendorAccounts      VendorAccount[]
@@ -315,7 +354,6 @@ model VendorTypeCountry {
   status           GeoStatus @default(ACTIVE)
   createdByAdminId String?
   createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
 
   country    Country    @relation(fields: [countryId], references: [id])
   vendorType VendorType @relation(fields: [vendorTypeId], references: [id])
@@ -373,53 +411,6 @@ model DocumentTypeVendorType {
   @@index([vendorTypeId])
 }
 
-// ============================================================================
-// PAYOUT CONFIGURATION
-// ============================================================================
-
-model PayoutType {
-  id               String           @id @default(uuid())
-  code             String           @unique
-  name             String
-  description      String?
-  status           PayoutTypeStatus @default(ACTIVE)
-  createdByAdminId String?
-  deletedAt        DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-
-  countries CountryPayoutType[]
-
-  @@index([status])
-}
-
-model CountryPayoutType {
-  id               String    @id @default(uuid())
-  countryId        String
-  payoutTypeId     String
-  status           GeoStatus @default(ACTIVE)
-  currency         String?
-  minPayoutAmount  Float?
-  maxPayoutAmount  Float?
-  processingDays   Int?
-  createdByAdminId String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  country              Country               @relation(fields: [countryId], references: [id])
-  payoutType           PayoutType            @relation(fields: [payoutTypeId], references: [id])
-  vendorPayoutAccounts VendorPayoutAccount[]
-
-  @@unique([countryId, payoutTypeId])
-  @@index([countryId])
-  @@index([payoutTypeId])
-  @@index([status])
-}
-
-// ============================================================================
-// VENDORS
-// ============================================================================
-
 model VendorUser {
   id        String   @id @default(uuid())
   clerkId   String   @unique
@@ -457,6 +448,9 @@ model VendorAccount {
   businessAddress       String
   addressLine2          String?
   postalCode            String?
+  commissionRate        Float?              // null = falls back to country default
+  payoutSchedule        PayoutSchedule  @default(BIWEEKLY)
+  nextPayoutDate        DateTime?
   addressVerified       Boolean      @default(false)
   suspensionReason      String?
   suspendedAt           DateTime?
@@ -466,14 +460,14 @@ model VendorAccount {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
 
-  country        Country               @relation(fields: [countryId], references: [id])
-  user           VendorUser?           @relation(fields: [userId], references: [id])
-  vendorType     VendorType            @relation(fields: [vendorTypeId], references: [id])
-  application    VendorApplication?    @relation("ApplicationToAccount", fields: [applicationId], references: [id])
-  outlets        Outlet[]
-  documents      VendorDocument[]
-  payoutAccounts VendorPayoutAccount[]
-  vendorProfile  VendorProfile?
+  country               Country               @relation(fields: [countryId], references: [id])
+  user                  VendorUser?           @relation(fields: [userId], references: [id])
+  vendorType            VendorType            @relation(fields: [vendorTypeId], references: [id])
+  application           VendorApplication?    @relation("ApplicationToAccount", fields: [applicationId], references: [id])
+  outlets               Outlet[]
+  documents             VendorDocument[]
+  payoutAccounts        VendorPayoutAccount[]
+  vendorProfile         VendorProfile?
 
   @@unique([userId, countryId])
   @@unique([companyRegNumber, countryId])
@@ -608,50 +602,59 @@ model VendorDocument {
   @@index([expiryDate])
 }
 
-model VendorPayoutAccount {
-  id                  String   @id @default(uuid())
-  vendorId            String
-  countryPayoutTypeId String
-  isDefault           Boolean  @default(false)
-  bankName            String?
-  branchName          String?
-  bankCode            String?
-  accountNumber       String?
-  accountName         String?
-  swiftCode           String?
-  iban                String?
-  routingNumber       String?
-  mobileNetwork       String?
-  mobileNumber        String?
-  mobileWallet        String?
-  paypalEmail         String?
-  stripeAccountId     String?
-  isVerified          Boolean  @default(false)
-  verifiedAt          DateTime?
-  verificationSource  String?
-  isActive            Boolean  @default(true)
-  deletedAt           DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
 
-  countryPayoutType CountryPayoutType @relation(fields: [countryPayoutTypeId], references: [id])
-  vendor            VendorAccount     @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+model VendorPayoutAccount {
+  id                     String         @id @default(uuid())
+  vendorId               String
+  countryPaymentMethodId String        // points to CountryPaymentMethod (OUTBOUND direction)
+  isDefault              Boolean        @default(false)
+  isActive               Boolean        @default(true)
+  
+  // Account details — kept flat for query performance
+  accountHolderName      String?
+  bankName               String?
+  branchName             String?
+  bankCode               String?
+  accountNumber          String?
+  swiftCode              String?
+  iban                   String?
+  routingNumber          String?
+  mobileNetwork          String?
+  mobileNumber           String?
+  paypalEmail            String?
+  stripeAccountId        String?
+  
+  // Verification
+  verificationStatus     PayoutVerificationStatus  @default(PENDING)
+  verificationMethod     String?                   // "API" | "MANUAL"
+  verificationRef        String?                   // external reference from verification API
+  verificationMeta       Json?                     // full API response, for audit
+  verifiedAt             DateTime?
+  verifiedBy             String?                   // adminUserId if MANUAL
+  failureReason          String?
+  
+  deletedAt              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  vendor               VendorAccount          @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  countryPaymentMethod CountryPaymentMethod   @relation(fields: [countryPaymentMethodId], references: [id])
 
   @@index([vendorId])
-  @@index([countryPayoutTypeId])
+  @@index([countryPaymentMethodId])
   @@index([isActive])
+  @@index([verificationStatus])
 }
 
-// ============================================================================
-// OUTLETS
-// ============================================================================
+
+//* ===================OUTLETS===================
 
 model Outlet {
-  id                String            @id @default(uuid())
+  id                String     @id @default(uuid())
   vendorId          String
   cityId            String
   name              String
-  slug              String?           @unique
+  slug              String?     @unique
   avatar            String?
   bio               String?
   coverBanner       String?
@@ -668,11 +671,20 @@ model Outlet {
   minimumOrder      Float?
   phone             String?
   email             String?
-  isMainStore       Boolean           @default(false)
-  ratings           Float             @default(0)
-  totalReviews      Int               @default(0)
-  isFeatured        Boolean           @default(false)
-  adminStatus       OutletAdminStatus @default(ACTIVE)
+  reviewStatus      OutletReviewStatus  @default(AUTO_APPROVED)
+  isMainOutlet      Boolean             @default(false)
+  ratings           Float               @default(0)
+  totalReviews      Int                 @default(0)
+  isFeatured        Boolean             @default(false)
+  adminStatus       OutletAdminStatus   @default(ACTIVE)
+  flagReasons       String[]           // populated by the flagging checks on creation
+  flaggedAt         DateTime?
+  reviewedAt        DateTime?
+
+  isTemporarilyClosed    Boolean   @default(false)
+  temporarilyClosedUntil DateTime?
+
+  adminReviewedBy   String?
   adminSuspendedAt  DateTime?
   adminSuspendUntil DateTime?
   adminBannedAt     DateTime?
@@ -680,16 +692,14 @@ model Outlet {
   deletedAt         DateTime?
   vendorUpdatedAt   DateTime?
   createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
 
-  city                     City                        @relation(fields: [cityId], references: [id])
-  vendor                   VendorAccount               @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  meals                    Meal[]
-  mealPlans                MealPlan[]
-  cuisines                 OutletCuisine[]
-  documents                OutletDocument[]
-  operatingHours           OutletOperatingHours[]
-  serviceAreas             OutletServiceArea[]
+  vendor            VendorAccount      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  meals             Meal[]
+  mealPlans         MealPlan[]
+  cuisines          OutletCuisine[]
+  documents         OutletDocument[]
+  operatingHours    OutletOperatingHours[]
+  serviceAreas      OutletServiceArea[]
   inheritedVendorDocuments OutletDocumentInheritance[]
 
   @@unique([vendorId, name])
@@ -771,9 +781,7 @@ model OutletDocumentInheritance {
   @@index([documentTypeId])
 }
 
-// ============================================================================
-// MENU & MEALS
-// ============================================================================
+//* ==================MEALS & MENU =============================
 
 model Cuisine {
   id               String        @id @default(uuid())
@@ -824,9 +832,9 @@ model Meal {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  outlet    Outlet         @relation(fields: [outletId], references: [id], onDelete: Cascade)
-  cuisines  MealCuisine[]
-  mealPlans MealPlanMeal[]
+  outlet           Outlet  @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  cuisines         MealCuisine[]
+  mealPlans        MealPlanMeal[]
 
   @@unique([outletId, name])
   @@index([outletId])
@@ -839,8 +847,8 @@ model MealCuisine {
   mealId    String
   cuisineId String
 
-  cuisine Cuisine @relation(fields: [cuisineId], references: [id], onDelete: Cascade)
-  meal    Meal    @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  cuisine   Cuisine @relation(fields: [cuisineId], references: [id], onDelete: Cascade)
+  meal      Meal    @relation(fields: [mealId], references: [id], onDelete: Cascade)
 
   @@id([mealId, cuisineId])
   @@index([cuisineId])
@@ -863,8 +871,8 @@ model MealPlan {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  outlet Outlet         @relation(fields: [outletId], references: [id], onDelete: Cascade)
-  meals  MealPlanMeal[]
+  outlet           Outlet  @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  meals            MealPlanMeal[]
 
   @@unique([outletId, name])
   @@index([outletId])
@@ -874,19 +882,18 @@ model MealPlan {
 }
 
 model MealPlanMeal {
-  mealPlanId String
-  mealId     String
+  mealPlanId  String
+  mealId      String
 
-  meal     Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
-  mealPlan MealPlan @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  meal        Meal     @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  mealPlan    MealPlan @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
 
   @@id([mealPlanId, mealId])
   @@index([mealId])
 }
 
-// ============================================================================
-// CUSTOMERS
-// ============================================================================
+
+//* ==================CUSTOMERS====================
 
 model ConsumerAccount {
   id               String         @id @default(uuid())
@@ -930,16 +937,14 @@ model ConsumerAddress {
   @@index([consumerAccountId, isDefault])
 }
 
-// ============================================================================
-// ENUMS
-// ============================================================================
+
+//* ================ENUMS=====================
 
 enum AdminScopeType {
   GLOBAL
   COUNTRY
   CITY
 }
-
 
 enum ConsumerStatus {
   ACTIVE
@@ -1007,11 +1012,29 @@ enum CuisineStatus {
   DEPRECATED
 }
 
-enum PayoutMethod {
-  BANK_TRANSFER
+enum PaymentMethodType {
   MOBILE_MONEY
-  PAYPAL
-  STRIPE
+  BANK
+  DIGITAL_WALLET
+  CARD
+}
+
+enum PaymentDirection {
+  INBOUND   // customer pays us via this method
+  OUTBOUND  // we pay vendor via this method
+}
+
+enum CountryPaymentMethodStatus {
+  ACTIVE
+  INACTIVE
+  DEPRECATED
+}
+
+enum PayoutVerificationStatus {
+  PENDING
+  VERIFIED
+  FAILED
+  REQUIRES_REVIEW
 }
 
 enum PayoutTypeStatus {
@@ -1041,9 +1064,22 @@ enum StaffRole {
 }
 
 enum AdminUserStatus {
-  pending     // Row created, invitation not yet sent
-  invited     // Invitation sent, user has not accepted yet
-  active      // Invitation accepted — user can log in
-  suspended   // Temporarily blocked (investigation, disciplinary action)
-  deactivated // Permanently offboarded (left company, fired, access revoked)
+  pending     
+  invited     
+  active     
+  suspended 
+  deactivated
+}
+
+enum PayoutSchedule {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum OutletReviewStatus {
+  AUTO_APPROVED      // Passed all coded checks — live immediately
+  FLAGGED            // Failed one or more coded checks — in admin queue
+  MANUALLY_APPROVED  // Admin reviewed and approved
+  MANUALLY_REJECTED  // Admin reviewed and rejected
 }
