@@ -2,12 +2,14 @@ import { Request, Response, Router } from "express"
 import applicationRouter from './vendor.application.routes'
 import documentRouter from './vendor.documents.routes'
 import storageBucketRouter from "./vendor.storage-bucket.routes"
+import outletRouter from "./vendor.outlet.routes"
 
 const v1Router: Router = Router()
 
 v1Router.use('/application', applicationRouter)
 v1Router.use('/documents', documentRouter)
 v1Router.use('/storage-bucket',storageBucketRouter)
+v1Router.use('/outlets',outletRouter)
 
 // Vendor module info endpoint (optional)
 v1Router.get('/', (req: Request, res: Response) => {
@@ -23,6 +25,10 @@ v1Router.get('/', (req: Request, res: Response) => {
       documents: {
         POST: '/documents',
         DELETE: '/documents/:id'
+      },
+      outlets: {
+        GET: '/outlets',
+        POST: '/outlets'
       }
     }
   })

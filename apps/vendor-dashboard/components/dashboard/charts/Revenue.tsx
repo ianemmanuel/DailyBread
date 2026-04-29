@@ -51,12 +51,11 @@ export function RevenueChart() {
   const isUp = growth >= 0
 
   return (
-    // min-w-0: critical — prevents recharts from overflowing flex parent
-    <Card className="min-w-0 border-border/60 shadow-sm">
+    <Card className="dash-card min-w-0 border-0">
       <CardHeader className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
               <Banknote className="h-5 w-5 text-primary" />
             </div>
             <CardTitle className="text-base font-semibold">Revenue & Orders</CardTitle>
@@ -66,17 +65,18 @@ export function RevenueChart() {
             <span className="text-2xl font-bold tracking-tight text-foreground">
               KSh {(totalRevenue / 1000).toFixed(1)}k
             </span>
-            <span className={`flex items-center gap-1 text-sm font-semibold ${isUp ? 'text-emerald-600' : 'text-destructive'}`}>
+            <span className={`flex items-center gap-1 text-sm font-semibold ${isUp ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
               {isUp ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
               {Math.abs(growth).toFixed(1)}%
             </span>
           </div>
         </div>
+
         <Select value={timeRange} onValueChange={setTimeRange}>
-          <SelectTrigger className="w-35 shrink-0 rounded-lg border-border/70 text-sm" aria-label="Time range">
+          <SelectTrigger className="w-36 shrink-0 rounded-xl border-border/70 text-sm" aria-label="Time range">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="rounded-xl">
             <SelectItem value="12m">Last 12 months</SelectItem>
             <SelectItem value="6m">Last 6 months</SelectItem>
             <SelectItem value="3m">Last 3 months</SelectItem>
@@ -85,20 +85,24 @@ export function RevenueChart() {
       </CardHeader>
 
       <CardContent className="px-2 pb-4 sm:px-6">
-        {/* w-full + overflow-hidden on ChartContainer prevents SVG blowout */}
-        <ChartContainer config={chartConfig} className="h-60 w-full sm:h-70">
+        <ChartContainer config={chartConfig} className="h-60 w-full sm:h-64">
           <AreaChart data={filteredData} margin={{ left: 0, right: 0 }}>
             <defs>
               <linearGradient id="fillRevenue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="var(--chart-2)" stopOpacity={0.25} />
+                <stop offset="5%"  stopColor="var(--chart-2)" stopOpacity={0.22} />
                 <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0.02} />
               </linearGradient>
               <linearGradient id="fillOrders" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="var(--chart-1)" stopOpacity={0.2} />
+                <stop offset="5%"  stopColor="var(--chart-1)" stopOpacity={0.18} />
                 <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 3" opacity={0.6} />
+            <CartesianGrid
+              vertical={false}
+              stroke="var(--border)"
+              strokeDasharray="4 4"
+              opacity={0.5}
+            />
             <XAxis
               dataKey="date"
               tickLine={false}

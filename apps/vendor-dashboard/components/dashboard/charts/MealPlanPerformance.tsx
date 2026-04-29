@@ -7,19 +7,19 @@ import {
 } from '@repo/ui/components/card'
 import { ChartConfig, ChartContainer } from '@repo/ui/components/chart'
 
-const chartData = [{ metric: 'adoption', value: 68, fill: 'var(--chart-3)' }]
+const chartData = [{ metric: 'adoption', value: 68, fill: 'var(--chart-1)' }]
 
 const chartConfig = {
   value:    { label: 'Meal Plan Adoption' },
-  adoption: { label: 'Adoption Rate', color: 'var(--chart-3)' },
+  adoption: { label: 'Adoption Rate', color: 'var(--chart-1)' },
 } satisfies ChartConfig
 
 export function MealPlanPerformance() {
   return (
-    <Card className="flex min-w-0 flex-col border-border/60 shadow-sm">
+    <Card className="dash-card flex min-w-0 flex-col border-0">
       <CardHeader className="items-center pb-0">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
             <Users className="h-5 w-5 text-primary" />
           </div>
           <CardTitle className="text-base font-semibold">Meal Plans</CardTitle>
@@ -30,7 +30,7 @@ export function MealPlanPerformance() {
       </CardHeader>
 
       <CardContent className="flex-1 pb-0">
-        <ChartContainer config={chartConfig} className="mx-auto aspect-square w-full max-h-55">
+        <ChartContainer config={chartConfig} className="mx-auto aspect-square w-full max-h-52">
           <RadialBarChart data={chartData} endAngle={180} innerRadius={70} outerRadius={130}>
             <PolarGrid
               gridType="circle"
@@ -46,10 +46,18 @@ export function MealPlanPerformance() {
                   if (viewBox && 'cx' in viewBox && 'cy' in viewBox) {
                     return (
                       <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle">
-                        <tspan x={viewBox.cx} y={viewBox.cy} className="fill-foreground text-3xl font-bold">
+                        <tspan
+                          x={viewBox.cx}
+                          y={viewBox.cy}
+                          className="fill-foreground text-3xl font-bold"
+                        >
                           {chartData[0].value}%
                         </tspan>
-                        <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 24} className="fill-muted-foreground text-sm">
+                        <tspan
+                          x={viewBox.cx}
+                          y={(viewBox.cy ?? 0) + 24}
+                          className="fill-muted-foreground text-sm"
+                        >
                           Adoption
                         </tspan>
                       </text>
@@ -63,7 +71,7 @@ export function MealPlanPerformance() {
       </CardContent>
 
       <CardFooter className="flex-col gap-1.5 pb-5 text-sm">
-        <div className="flex items-center gap-2 font-medium leading-none text-emerald-600">
+        <div className="flex items-center gap-2 font-medium leading-none text-emerald-600 dark:text-emerald-400">
           <TrendingUp className="h-4 w-4" />
           +24% growth this quarter
         </div>

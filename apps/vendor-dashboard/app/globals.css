@@ -1,221 +1,195 @@
 @import "tailwindcss";
 @import "@repo/ui/styles/tokens.css";
 
-/* ============================================================
-   Vendor Landing — globals.css
-   Personality layer. Overrides skeleton values, sets fonts,
-   and defines the few utility classes Tailwind cannot express.
-   ============================================================ */
 
 @theme {
-  /* Fonts — all three loaded in root layout.tsx */
   --font-sans:    var(--font-inter);
   --font-display: var(--font-playfair);
   --font-mono:    var(--font-ibm-mono);
 
-  /* Wire token vars into Tailwind color utilities */
-  --color-background:               var(--background);
-  --color-foreground:               var(--foreground);
-  --color-card:                     var(--card);
-  --color-card-foreground:          var(--card-foreground);
-  --color-primary:                  var(--primary);
-  --color-primary-foreground:       var(--primary-foreground);
-  --color-secondary:                var(--secondary);
-  --color-secondary-foreground:     var(--secondary-foreground);
-  --color-muted:                    var(--muted);
-  --color-muted-foreground:         var(--muted-foreground);
-  --color-accent:                   var(--accent);
-  --color-accent-foreground:        var(--accent-foreground);
-  --color-deep:                     var(--deep);
-  --color-deep-foreground:          var(--deep-foreground);
-  --color-destructive:              var(--destructive);
-  --color-destructive-foreground:   var(--destructive-foreground);
-  --color-border:                   var(--border);
-  --color-input:                    var(--input);
-  --color-ring:                     var(--ring);
-  --color-sidebar:                  var(--sidebar);
-  --color-sidebar-foreground:       var(--sidebar-foreground);
+  --color-background:                var(--background);
+  --color-foreground:                var(--foreground);
+  --color-card:                      var(--card);
+  --color-card-foreground:           var(--card-foreground);
+  --color-primary:                   var(--primary);
+  --color-primary-foreground:        var(--primary-foreground);
+  --color-secondary:                 var(--secondary);
+  --color-secondary-foreground:      var(--secondary-foreground);
+  --color-muted:                     var(--muted);
+  --color-muted-foreground:          var(--muted-foreground);
+  --color-accent:                    var(--accent);
+  --color-accent-foreground:         var(--accent-foreground);
+  --color-deep:                      var(--deep);
+  --color-deep-foreground:           var(--deep-foreground);
+  --color-destructive:               var(--destructive);
+  --color-destructive-foreground:    var(--destructive-foreground);
+  --color-border:                    var(--border);
+  --color-input:                     var(--input);
+  --color-ring:                      var(--ring);
+  --color-sidebar:                   var(--sidebar);
+  --color-sidebar-foreground:        var(--sidebar-foreground);
+  --color-sidebar-accent:            var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-primary:           var(--sidebar-primary);
+  --color-sidebar-border:            var(--sidebar-border);
+  --color-success:                   var(--success);
+  --color-warning:                   var(--warning);
+  --color-info:                      var(--info);
 
   /* Radius scale */
-  --radius-sm:   calc(var(--radius) - 4px);
+  --radius-sm:   calc(var(--radius) - 6px);
   --radius-md:   var(--radius);
   --radius-lg:   calc(var(--radius) + 4px);
   --radius-xl:   calc(var(--radius) + 8px);
   --radius-2xl:  calc(var(--radius) + 14px);
   --radius-full: 9999px;
-
-  /* Vendor extended palette */
-  --color-cream-50:         oklch(0.99 0.008 72);
-  --color-cream-100:        oklch(0.97 0.014 68);
-  --color-cream-200:        oklch(0.93 0.022 65);
-  --color-terracotta:       oklch(0.72 0.12 48);
-  --color-terracotta-light: oklch(0.83 0.08 52);
-  --color-terracotta-dark:  oklch(0.58 0.14 42);
-  --color-terracotta-muted: oklch(0.93 0.04 55);
-  --color-chocolate:        oklch(0.22 0.028 42);
-  --color-chocolate-light:  oklch(0.32 0.032 44);
-  --color-gold:             oklch(0.80 0.13 72);
-  --color-gold-light:       oklch(0.90 0.09 78);
-  --color-gold-dark:        oklch(0.65 0.14 68);
 }
 
-/* ------------------------------------------------ */
-/* VENDOR PERSONALITY OVERRIDES                     */
-/* ------------------------------------------------ */
-:root {
-  --background: oklch(0.985 0.009 72);
-  --primary:    oklch(0.60 0.17 42);
-  --deep:       oklch(0.20 0.030 40);
-}
 
-/* ------------------------------------------------ */
-/* COMPONENTS -- multi-property composites          */
-/* Named classes for complex element-specific       */
-/* styles that are too long to read inline.         */
-/* ------------------------------------------------ */
+/* ----COMPONENTS ------*/
 @layer components {
 
-  /* Navbar */
-  .nav-link-desktop {
-    @apply relative text-sm font-medium text-muted-foreground transition-colors duration-200
-           hover:text-foreground
-           after:absolute after:-bottom-0.5 after:left-0 after:h-px after:w-0
-           after:bg-primary after:transition-all after:duration-300 hover:after:w-full;
+  /* ── Sidebar nav item ── */
+  .sidebar-item {
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
+           transition-all duration-200;
+    color: var(--muted-foreground);
+  }
+  .sidebar-item:hover {
+    background-color: var(--sidebar-accent);
+    color: var(--foreground);
   }
 
-  .btn-outline {
-    @apply rounded-full px-5 py-2 text-sm font-semibold text-foreground ring-1 ring-border
-           transition-all duration-200 hover:ring-primary hover:text-primary;
+  .sidebar-item-active {
+    @apply font-semibold;
+    background-color: color-mix(in oklch, var(--primary) 12%, transparent);
+    color: var(--primary);
+  }
+  .sidebar-item-active:hover {
+    background-color: color-mix(in oklch, var(--primary) 16%, transparent);
+    color: var(--primary);
   }
 
-  .btn-primary {
-    @apply rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground
-           shadow-[0_4px_14px_var(--shadow-primary)] transition-all duration-200
-           hover:brightness-110 hover:shadow-[0_6px_20px_var(--shadow-primary)] active:scale-95;
+  /* ── Stat card ── */
+  .stat-card {
+    @apply relative overflow-hidden rounded-2xl border transition-all duration-300
+           hover:-translate-y-1;
+    background-color: var(--card);
+    border-color: color-mix(in oklch, var(--border) 50%, transparent);
+    box-shadow: 0 2px 12px var(--shadow-card);
+  }
+  .stat-card:hover {
+    box-shadow: 0 8px 30px var(--shadow-card);
+  }
+
+  /* ── Generic dashboard card (charts, tables) ── */
+  .dash-card {
+    @apply rounded-2xl border;
+    background-color: var(--card);
+    border-color: color-mix(in oklch, var(--border) 50%, transparent);
+    box-shadow: 0 2px 12px var(--shadow-card);
+  }
+
+  /* ── Quick action tile ── */
+  .quick-action-tile {
+    @apply flex items-center gap-3.5 rounded-xl border p-3.5
+           transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm;
+    border-color: var(--border);
+    background-color: var(--card);
   }
 
 
-  /* Mobile menu */
-  .mobile-nav-link {
-    @apply block rounded-2xl px-4 py-4 text-lg font-medium text-foreground
-           transition-all duration-200 hover:bg-secondary hover:text-primary;
+/* ── Badge base shape ── */
+
+  .badge-primary {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+    background-color: color-mix(in oklch, var(--primary) 12%, transparent);
+    color: var(--primary);
   }
 
-  .mobile-btn-outline {
-    @apply w-full rounded-2xl py-3.5 text-center text-base font-semibold text-foreground
-           ring-1 ring-border transition-all duration-200 hover:ring-primary hover:text-primary;
+  .badge-success {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold
+          border border-emerald-200 bg-emerald-50 text-emerald-700
+          dark:border-emerald-800/40 dark:bg-emerald-900/20 dark:text-emerald-400;
   }
 
-  .mobile-btn-primary {
-    @apply w-full rounded-2xl bg-primary py-3.5 text-center text-base font-semibold
-           text-primary-foreground shadow-[0_4px_14px_var(--shadow-primary)]
-           transition-all duration-200 hover:brightness-110 active:scale-95;
+  .badge-danger {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold
+          border border-red-200 bg-red-50 text-red-600
+          dark:border-red-800/40 dark:bg-red-900/20 dark:text-red-400;
+  }
+
+  .badge-warning {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold
+          border border-amber-200 bg-amber-50 text-amber-700
+          dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-400;
+  }
+
+  .badge-info {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold
+          border border-blue-200 bg-blue-50 text-blue-600
+          dark:border-blue-800/40 dark:bg-blue-900/20 dark:text-blue-400;
   }
 }
 
-/* ------------------------------------------------ */
-/* UTILITIES — only what Tailwind cannot do inline  */
-/* ------------------------------------------------ */
+/* -------UTILITIES  ------------- */
+
 @layer utilities {
 
-  .text-gradient {
-    background: linear-gradient(
-      135deg,
-      oklch(0.62 0.17 42) 0%,
-      oklch(0.72 0.15 52) 50%,
-      oklch(0.58 0.16 38) 100%
+  /* Ambient wheat glow — top-center (page hero areas) */
+  .glow-primary {
+    background: radial-gradient(
+      ellipse at 50% 0%,
+      oklch(0.78 0.10 72 / 10%) 0%,
+      transparent 70%
     );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
   }
 
-  .text-gradient-cream {
-    background: linear-gradient(
-      135deg,
-      oklch(0.97 0.014 68) 0%,
-      oklch(0.88 0.09 72) 60%,
-      oklch(0.82 0.12 68) 100%
+  /* Left-anchored glow (sidebar logo area) */
+  .glow-left {
+    background: radial-gradient(
+      ellipse at 0% 50%,
+      oklch(0.78 0.10 72 / 8%) 0%,
+      transparent 60%
     );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
   }
 
-  /* Content width + horizontal padding — applied inside every full-bleed section.
-     Sections are full-bleed (edge to edge backgrounds), this constrains the content. */
-  .section-wrapper {
-    @apply mx-auto w-full max-w-7xl px-5 md:px-10 lg:px-16;
+  .scroll-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
+  .scroll-hidden::-webkit-scrollbar { display: none; }
 
-  .grain-overlay {
-    position: relative;
-    isolation: isolate;
-  }
-  .grain-overlay::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-    pointer-events: none;
-    z-index: 0;
-    border-radius: inherit;
-  }
-
-  .card-lift {
-    transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
-                box-shadow 0.28s ease;
-  }
-  .card-lift:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 20px 48px var(--shadow-warm), 0 4px 12px var(--shadow-warm);
-  }
-
-  .shimmer {
-    background: linear-gradient(
-      105deg,
-      transparent 35%,
-      oklch(1 0 0 / 15%) 50%,
-      transparent 65%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.8s ease infinite;
+  .fade-up {
+    animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 }
 
-/* ------------------------------------------------ */
-/* KEYFRAMES                                        */
-/* ------------------------------------------------ */
-@keyframes shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
+/* --------KEYFRAMES------------- */
 
-@keyframes float {
-  0%, 100% { transform: translateY(0px) rotate(0deg); }
-  33%       { transform: translateY(-10px) rotate(1deg); }
-  66%       { transform: translateY(-4px) rotate(-1deg); }
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0);    }
 }
 
 @keyframes grain-shift {
-  0%, 100% { transform: translate(0, 0); }
-  20%       { transform: translate(-1.5%, -2%); }
-  40%       { transform: translate(2%, 1.5%); }
-  60%       { transform: translate(-1%, 3%); }
-  80%       { transform: translate(3%, -1%); }
+  0%, 100% { transform: translate(0, 0);       }
+  20%       { transform: translate(-1%, -1.5%); }
+  40%       { transform: translate(1.5%, 1%);   }
+  60%       { transform: translate(-0.5%, 2%);  }
+  80%       { transform: translate(2%, -0.5%);  }
 }
 
-/* ------------------------------------------------ */
-/* GLOBAL GRAIN OVERLAY                             */
-/* ------------------------------------------------ */
+/* --------- GLOBAL GRAIN — very faint on a dashboard  --------------- */
+
 body::after {
   content: '';
   position: fixed;
   inset: -50%;
   width: 200%;
   height: 200%;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.028'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.018'/%3E%3C/svg%3E");
   pointer-events: none;
   z-index: 9999;
-  animation: grain-shift 9s steps(10) infinite;
+  animation: grain-shift 10s steps(10) infinite;
 }

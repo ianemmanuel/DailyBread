@@ -24,18 +24,22 @@ export function SidebarItem({ item }: SidebarItemProps) {
     <Link
       href={item.href!}
       className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-150',
-        isActive
-          ? 'bg-primary/8 text-primary'
-          : 'text-muted-foreground hover:bg-secondary/70 hover:text-foreground'
+        'sidebar-item',
+        isActive && 'sidebar-item-active'
       )}
     >
       <Icon className={cn(
-        'h-4 w-4 shrink-0',
-        isActive ? 'text-primary' : 'text-muted-foreground/70'
+        'h-4 w-4 shrink-0 transition-colors duration-200',
+        isActive ? 'text-primary' : 'text-muted-foreground/60'
       )} />
       <span className="flex-1">{item.label}</span>
-      {isActive && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+      {/* Active indicator dot */}
+      {isActive && (
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+        </span>
+      )}
     </Link>
   )
 }

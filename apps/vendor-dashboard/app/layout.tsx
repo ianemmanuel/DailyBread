@@ -4,6 +4,7 @@ import { Toaster } from "@repo/ui/components/sonner"
 import "./globals.css"
 
 import { Inter, IBM_Plex_Mono, Playfair_Display } from 'next/font/google'
+import { ThemeProvider } from "@/components/themes/theme-provider"
 
 const inter = Inter({
   subsets: ['latin'],
@@ -45,13 +46,20 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <body className="font-sans antialiased">
-          {children}
-          <Toaster
-            position="top-right"
-            richColors
-            closeButton
-            duration={4000}
-          />
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            {children}
+            <Toaster
+              position="top-right"
+              richColors
+              closeButton
+              duration={4000}
+            /> 
+          </ThemeProvider>
         </body>
       </html>
     </ClerkProvider>
