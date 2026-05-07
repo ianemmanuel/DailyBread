@@ -221,56 +221,130 @@ model City {
   name             String
   code             String?
   timezone         String
-  latitude         Float?
-  longitude        Float?
+  latitude         Float?            // centroid — Mapbox fly-to only
+  longitude        Float?            // centroid — Mapbox fly-to only
   status           GeoStatus @default(ACTIVE)
   createdByAdminId String?
-  boundingBoxNorth Float?
-  boundingBoxSouth Float?
-  boundingBoxEast  Float?
-  boundingBoxWest  Float?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  country       Country              @relation(fields: [countryId], references: [id])
-  documentTypes DocumentTypeConfig[]
-  serviceAreas  ServiceArea[]
-  adminScopes   AdminUserScope[]
-
+ 
+  boundary         Json?     // GeoJSON Polygon | MultiPolygon — city operational boundary
+  boundingBox      Json?     // { north, south, east, west }   — derived cache, never manual
+  osmId            String?   // OSM relation ID (numeric string) stored after OSM search
+  boundarySource   String?   // "OSM" | "MANUAL"
+  boundarySetAt    DateTime?
+  boundarySetById  String?
+ 
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+ 
+  country          Country              @relation(fields: [countryId], references: [id])
+  documentTypes    DocumentTypeConfig[]
+  serviceAreas     ServiceArea[]
+  deliveryZones    DeliveryZone[]
+  adminScopes      AdminUserScope[]
+ 
   @@unique([countryId, name])
   @@index([countryId])
   @@index([status])
 }
 
+
+// Added: mode ServiceAreaMode — what level of service applies in this polygon.
+//
+// All four modes are stored as distinct ServiceArea records.
+// The admin draws a polygon and assigns it a mode — all on the same page.
+// EXCLUDED areas are stored but never returned by vendor/customer APIs.
+//
+// Any outlet location inside the city boundary but not covered by any
+// ServiceArea polygon is treated as WAITLIST by the resolver (not UNZONED).
+ 
 model ServiceArea {
+  id               String          @id @default(uuid())
+  cityId           String
+  name             String
+  boundaries       Json            // GeoJSON Polygon | MultiPolygon
+  mode             ServiceAreaMode @default(WAITLIST)
+  status           GeoStatus       @default(ACTIVE)
+  createdByAdminId String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+ 
+  city    City                @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  outlets OutletServiceArea[]
+ 
+  @@unique([cityId, name])
+  @@index([cityId])
+  @@index([status])
+  @@index([mode])
+}
+
+
+// Permanent logistics zones — drawn by courier_ops on a SEPARATE admin page.
+// Only valid inside FULL_SERVICE areas.
+// No overlaps allowed within a city (backend warns, does not block).
+
+model DeliveryZone {
   id               String    @id @default(uuid())
   cityId           String
   name             String
-  boundaries       Json
+  boundaries       Json      // GeoJSON Polygon | MultiPolygon
   status           GeoStatus @default(ACTIVE)
+  maxCourierCount  Int?
   createdByAdminId String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
-
-  city    City                @relation(fields: [cityId], references: [id], onDelete: Cascade)
-  outlets OutletServiceArea[]
-
+ 
+  city       City                @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  batchZones MealPlanBatchZone[]
+ 
   @@unique([cityId, name])
   @@index([cityId])
   @@index([status])
 }
 
+
+// Ephemeral zone — computed ONCE after subscription window closes.
+// Groups geographically close subscribers of a single meal plan.
+// The same courier covers this zone for the ENTIRE meal plan lifecycle,
+// delivering a different meal each day in the same time window.
+// Individual daily delivery records are tracked elsewhere (order/delivery layer).
+model MealPlanBatchZone {
+  id             String          @id @default(uuid())
+  code           String          @unique  // auto-generated: "MP-{planId[:8]}-Z{n}"
+  mealPlanId     String
+  deliveryZoneId String?         // nearest permanent zone — nullable, reference only
+  cityId         String          // denormalised for queries
+  boundaries     Json            // GeoJSON Polygon — convex hull of subscriber cluster
+  windowStart    String          // "18:00" HH:MM — same every delivery day
+  windowEnd      String          // "19:00" HH:MM
+  subscriberCount Int            @default(0)
+  status         BatchZoneStatus @default(PENDING)
+  computedAt     DateTime        @default(now())
+  assignedAt     DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+ 
+  mealPlan     MealPlan      @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  deliveryZone DeliveryZone? @relation(fields: [deliveryZoneId], references: [id])
+ 
+  @@index([mealPlanId])
+  @@index([deliveryZoneId])
+  @@index([cityId])
+  @@index([status])
+}
+
+
+
 model OutletServiceArea {
   outletId      String
   serviceAreaId String
-
+ 
   outlet      Outlet      @relation(fields: [outletId], references: [id], onDelete: Cascade)
   serviceArea ServiceArea @relation(fields: [serviceAreaId], references: [id], onDelete: Cascade)
-
+ 
   @@id([outletId, serviceAreaId])
   @@index([serviceAreaId])
 }
-
 
 //* =========PAYMENT CONFIGURATION==========
 
@@ -668,6 +742,8 @@ model Outlet {
   deliveryRadius    Float?
   deliveryZones     Json?
   deliveryFee       Float?
+  serviceMode       OutletServiceMode   @default(INACTIVE) // serviceMode is computed at outlet-creation and updated when service areas change.
+  isUnzoned         Boolean             @default(false) // isUnzoned = true means inside city boundary but matched no service area polygon.
   minimumOrder      Float?
   phone             String?
   email             String?
@@ -855,24 +931,29 @@ model MealCuisine {
 }
 
 model MealPlan {
-  id               String     @id @default(uuid())
-  outletId         String
-  name             String
-  description      String?
-  price            Float?
-  images           String[]
-  isPublished      Boolean    @default(false)
-  isFeatured       Boolean    @default(false)
-  adminStatus      MealStatus @default(ACTIVE)
-  adminSuspendedAt DateTime?
-  adminBannedAt    DateTime?
-  deletedAt        DateTime?
-  vendorUpdatedAt  DateTime?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  id                    String     @id @default(uuid())
+  outletId              String
+  name                  String
+  description           String?
+  price                 Float?
+  images                String[]
+  isPublished           Boolean    @default(false)
+  isFeatured            Boolean    @default(false)
+  adminStatus           MealStatus @default(ACTIVE)
+  adminSuspendedAt      DateTime?
+  adminBannedAt         DateTime?
+  deletedAt             DateTime?
+  subscriptionWindowEnd DateTime?   // no new subs after this timestamp
+  startsAt              DateTime?   // first delivery day
+  endsAt                DateTime?   // last delivery day
+  batchZones            MealPlanBatchZone[]
+  subscriptions         MealPlanSubscription[]
+  vendorUpdatedAt       DateTime?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
 
-  outlet           Outlet  @relation(fields: [outletId], references: [id], onDelete: Cascade)
-  meals            MealPlanMeal[]
+  outlet                Outlet  @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  meals                 MealPlanMeal[]
 
   @@unique([outletId, name])
   @@index([outletId])
@@ -891,6 +972,36 @@ model MealPlanMeal {
   @@id([mealPlanId, mealId])
   @@index([mealId])
 }
+
+ 
+// One record per subscriber per meal plan.
+// Delivery address (lat/lng) is locked at subscription time — never changes.
+// This is the source of truth for batch zone computation.
+// batchZoneId is populated after the system computes zones post-window-close.
+model MealPlanSubscription {
+  id           String                     @id @default(uuid())
+  mealPlanId   String
+  consumerId   String
+  batchZoneId  String?
+  addressLine1 String
+  addressLine2 String?
+  latitude     Float
+  longitude    Float
+  status       MealPlanSubscriptionStatus @default(ACTIVE)
+  subscribedAt DateTime                   @default(now())
+  cancelledAt  DateTime?
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+ 
+  mealPlan MealPlan @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+ 
+  @@unique([mealPlanId, consumerId])
+  @@index([mealPlanId])
+  @@index([consumerId])
+  @@index([batchZoneId])
+  @@index([status])
+}
+ 
 
 
 //* ==================CUSTOMERS====================
@@ -1082,4 +1193,30 @@ enum OutletReviewStatus {
   FLAGGED            // Failed one or more coded checks — in admin queue
   MANUALLY_APPROVED  // Admin reviewed and approved
   MANUALLY_REJECTED  // Admin reviewed and rejected
+}
+
+enum ServiceAreaMode {
+  FULL_SERVICE    // platform dispatches couriers
+  SELF_DELIVERY   // vendor handles own delivery
+  WAITLIST        // pre-onboarding; not yet live
+  EXCLUDED        // not serviceable — never surfaced to vendors or customers
+}
+ 
+enum OutletServiceMode {
+  FULL_SERVICE    // inside a FULL_SERVICE polygon
+  SELF_DELIVERY   // inside SELF_DELIVERY polygon OR unzoned within city boundary
+  INACTIVE        // inside WAITLIST or EXCLUDED polygon
+}
+
+enum BatchZoneStatus {
+  PENDING     // computed, awaiting courier assignment
+  ACTIVE      // courier assigned, deliveries ongoing for the plan's full duration
+  COMPLETED   // meal plan ended successfully
+  CANCELLED   // meal plan or zone cancelled
+}
+ 
+enum MealPlanSubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  PAUSED
 }

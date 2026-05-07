@@ -19,6 +19,7 @@
     "@logtail/pino": "^0.5.8",
     "@repo/db": "workspace:*",
     "@repo/types": "workspace:*",
+    "@repo/geo": "workspace:*",
     "@types/node": "^25.0.10",
     "bad-words": "^4.0.0",
     "cookie-parser": "^1.4.7",
