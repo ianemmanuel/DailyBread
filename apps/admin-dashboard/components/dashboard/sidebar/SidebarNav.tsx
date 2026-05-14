@@ -1,81 +1,225 @@
 "use client"
 
-import Link            from "next/link"
+import { useState } from "react"
+import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { cn }          from "@repo/ui/lib/utils"
+import { ChevronDown } from "lucide-react"
+import { cn } from "@repo/ui/lib/utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@repo/ui/components/tooltip"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@repo/ui/components/popover"
 import { navSections } from "@/utils/constants/nav-items"
 
+interface SidebarNavProps {
+  collapsed?: boolean
+  /** Pass true from MobileSidebar — always expanded, no tooltips/popovers */
+  isMobile?: boolean
+}
+
 /**
- * SidebarNav — renders all nav sections and items.
- * Used by both SidebarDesktop and MobileSidebar Sheet — zero duplication.
+ * SidebarNav — shared nav tree for desktop sidebar + mobile Sheet.
  *
- * Active detection: exact match OR starts-with for nested routes
- * (e.g. /identity/new and /identity/abc are both "active" under /identity).
- *
- * Dark theme: uses CSS variables from globals.css so light/dark works
- * automatically across ALL dashboard pages without any extra class toggling.
+ * Behaviour:
+ * • Desktop expanded  → collapsible section groups (chevron accordion)
+ * • Desktop collapsed → each section becomes a Popover icon-button that
+ *                       floats a mini-menu to the right — links still clickable
+ * • Mobile Sheet      → always expanded, collapsible groups, no popovers
  */
-export function SidebarNav() {
+export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavProps) {
   const pathname = usePathname()
 
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(navSections.map((s) => [s.title, true]))
+  )
+
+  const toggleSection = (title: string) =>
+    setOpenSections((prev) => ({ ...prev, [title]: !prev[title] }))
+
+  const isItemActive = (href: string) =>
+    href === "/overview"
+      ? pathname === "/overview" || pathname === "/"
+      : pathname.startsWith(href)
+
+  const isCollapsed = collapsed && !isMobile
+
   return (
-    <nav className="h-full overflow-y-auto px-3 py-4" aria-label="Main navigation">
-      <div className="space-y-5">
-        {navSections.map((section) => (
-          <div key={section.title}>
-            <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-widest select-none text-(--muted-foreground) opacity-50">
-              {section.title}
-            </p>
-            <ul className="space-y-0.5" role="list">
-              {section.items.map((item) => {
-                const isActive =
-                  pathname === item.href ||
-                  (item.href !== "/" && pathname?.startsWith(item.href + "/")) ||
-                  (item.href !== "/" && pathname === item.href)
+    <nav className="flex h-full flex-col overflow-y-auto overflow-x-hidden px-3 py-4">
+      <div className="flex flex-col gap-5">
+        {navSections.map((section) => {
+          const sectionOpen = openSections[section.title] ?? true
+          const sectionHasActive = section.items.some((item) => isItemActive(item.href))
+          const GroupIcon = section.items[0]?.icon
 
-                const Icon = item.icon
+          return (
+            <div key={section.title}>
 
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      aria-current={isActive ? "page" : undefined}
-                      className={cn(
-                        // Base — uses CSS vars so light AND dark both work
-                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-150",
-                        isActive
-                          ? // Active: terracotta bg tint + primary text
-                            "bg-primary/10 text-primary dark:bg-primary/15 dark:text-primary"
-                          : // Inactive: muted foreground, hover lifts slightly
-                            "text-(--sidebar-foreground) opacity-70 hover:opacity-100 hover:bg-(--sidebar-accent) hover:text-(--sidebar-foreground)",
-                      )}
+              {/* ── Collapsed desktop: popover per section ────── */}
+              {isCollapsed ? (
+                GroupIcon && (
+                  <Popover>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <PopoverTrigger asChild>
+                          <button
+                            className={cn(
+                              "mb-1 flex w-full items-center justify-center rounded-lg py-2.5",
+                              "transition-colors duration-150",
+                              sectionHasActive
+                                ? "text-[var(--sidebar-active-icon)]"
+                                : "text-[var(--sidebar-icon)] hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--foreground)]"
+                            )}
+                            style={sectionHasActive ? { backgroundColor: "var(--sidebar-active-bg)" } : undefined}
+                            aria-label={`Open ${section.title}`}
+                          >
+                            <GroupIcon className="h-4 w-4 shrink-0" />
+                          </button>
+                        </PopoverTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" sideOffset={10} className="text-xs font-medium">
+                        {section.title}
+                      </TooltipContent>
+                    </Tooltip>
+
+                    <PopoverContent
+                      side="right"
+                      sideOffset={12}
+                      align="start"
+                      className="w-52 p-1.5"
+                      style={{
+                        backgroundColor: "var(--popover)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius)",
+                        boxShadow: "var(--shadow-dropdown)",
+                      }}
                     >
-                      <Icon
-                        className={cn(
-                          "h-4 w-4 shrink-0",
-                          isActive ? "text-primary" : "opacity-60",
-                        )}
-                        aria-hidden="true"
-                      />
-                      <span className="flex-1 truncate">{item.label}</span>
-                      {item.badge && (
-                        <span className="badge-info text-[10px] px-1.5 py-0">
-                          {item.badge}
-                        </span>
-                      )}
-                      {isActive && (
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
-                          aria-hidden="true"
-                        />
-                      )}
-                    </Link>
-                  </li>
+                      <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        {section.title}
+                      </p>
+                      <ul className="space-y-0.5">
+                        {section.items.map((item) => {
+                          const isActive = isItemActive(item.href)
+                          const Icon = item.icon
+                          return (
+                            <li key={item.href}>
+                              <Link
+                                href={item.href}
+                                className={cn(
+                                  "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium",
+                                  "transition-colors duration-150",
+                                  isActive
+                                    ? "text-[var(--sidebar-active-fg)]"
+                                    : "text-[var(--popover-foreground)] hover:bg-[var(--accent)]"
+                                )}
+                                style={isActive ? { backgroundColor: "var(--sidebar-active-bg)" } : undefined}
+                              >
+                                <Icon className={cn(
+                                  "h-3.5 w-3.5 shrink-0",
+                                  isActive ? "text-[var(--sidebar-active-icon)]" : "text-muted-foreground"
+                                )} />
+                                <span className="flex-1 truncate">{item.label}</span>
+                                {item.badge && (
+                                  <span
+                                    className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+                                    style={{ backgroundColor: "var(--primary-subtle)", color: "var(--primary)" }}
+                                  >
+                                    {item.badge}
+                                  </span>
+                                )}
+                              </Link>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </PopoverContent>
+                  </Popover>
                 )
-              })}
-            </ul>
-          </div>
-        ))}
+
+              ) : (
+                /* ── Expanded (desktop + mobile): accordion ───── */
+                <>
+                  <button
+                    onClick={() => toggleSection(section.title)}
+                    className={cn(
+                      "mb-1.5 flex w-full items-center justify-between rounded-md px-2 py-1",
+                      "transition-colors duration-150 hover:bg-[var(--sidebar-hover-bg)]"
+                    )}
+                    aria-expanded={sectionOpen}
+                  >
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      {section.title}
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3 w-3 text-muted-foreground transition-transform duration-200",
+                        sectionOpen ? "rotate-0" : "-rotate-90"
+                      )}
+                    />
+                  </button>
+
+                  <div
+                    className={cn(
+                      "overflow-hidden transition-all duration-250 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                      sectionOpen ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0"
+                    )}
+                  >
+                    <ul className="space-y-0.5">
+                      {section.items.map((item) => {
+                        const isActive = isItemActive(item.href)
+                        const Icon = item.icon
+                        return (
+                          <li key={item.href}>
+                            <Link
+                              href={item.href}
+                              className={cn(
+                                "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium",
+                                "transition-all duration-150",
+                                isActive
+                                  ? "text-[var(--sidebar-active-fg)]"
+                                  : "text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--foreground)]"
+                              )}
+                              style={isActive ? { backgroundColor: "var(--sidebar-active-bg)" } : undefined}
+                            >
+                              {isActive && (
+                                <span
+                                  className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full"
+                                  style={{ backgroundColor: "var(--primary)" }}
+                                />
+                              )}
+                              <Icon
+                                className={cn(
+                                  "h-4 w-4 shrink-0 transition-colors duration-150",
+                                  isActive
+                                    ? "text-[var(--sidebar-active-icon)]"
+                                    : "text-[var(--sidebar-icon)] group-hover:text-[var(--foreground)]"
+                                )}
+                              />
+                              <span className="flex-1 truncate">{item.label}</span>
+                              {item.badge && (
+                                <span
+                                  className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+                                  style={{ backgroundColor: "var(--primary-subtle)", color: "var(--primary)" }}
+                                >
+                                  {item.badge}
+                                </span>
+                              )}
+                            </Link>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })}
       </div>
     </nav>
   )

@@ -9,7 +9,7 @@ import { Button } from "@repo/ui/components/button"
 import { Label } from "@repo/ui/components/label"
 import { Textarea } from "@repo/ui/components/textarea"
 import { getFieldError } from "@/lib/forms/form-helpers"
-import { suspendVendorSchema } from "@/lib/validations/vendor"
+import { suspendVendorSchema } from "@/lib/zod/vendor"
 
 interface Props {
   vendorId     : string

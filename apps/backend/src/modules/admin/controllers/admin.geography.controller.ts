@@ -45,7 +45,7 @@ import {
 
 const VALID_MODES = ["FULL_SERVICE", "SELF_DELIVERY", "WAITLIST", "EXCLUDED"] as const
 
-// ─── Countries ────────────────────────────────────────────────────────────────
+//*Countries 
 
 export const handleListCountries: RequestHandler = async (req, res, next) => {
   try {
@@ -320,7 +320,7 @@ export const handleDeleteServiceArea: RequestHandler = async (req, res, next) =>
   } catch (err) { next(err) }
 }
 
-// ─── Delivery zones ───────────────────────────────────────────────────────────
+//*Delivery zones
 
 export const handleListDeliveryZones: RequestHandler = async (req, res, next) => {
   try {

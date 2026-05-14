@@ -56,9 +56,8 @@
     "typescript": "^5.9.2"
   },
   "exports": {
-    "./styles/tokens.css": "./src/styles/tokens.css",
-    "./styles/base.css": "./src/styles/base.css",
-    "./styles/utilities.css": "./src/styles/utilities.css",
+    "./styles/tokens.css": "./src/styles/primitives/tokens.css",
+    "./styles/base.css": "./src/styles/themes/base.css",
     "./postcss.config": "./postcss.config.mjs",
     "./lib/*": "./src/lib/*.ts",
     "./components/*": "./src/components/*.tsx",

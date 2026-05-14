@@ -1,0 +1,255 @@
+/* ============================================================
+   @repo/ui — base.css  (SEMANTICS / DESIGN DNA)
+   Maps primitives → UI meaning. shadcn-compatible naming.
+   Inherited by all apps. Apps override in their globals.css.
+   ============================================================ */
+
+
+/* ── LIGHT MODE ─────────────────────────────────────────────── */
+/*
+   What the light image tells us:
+   - Background: neutral light grey — NOT cream, NOT white. ~#f4f4f3
+   - Sidebar:    pure white. Clear separation from bg.
+   - Cards:      pure white. They "pop" against the grey bg.
+   - Primary:    amber/orange — used on chart line, active nav
+                 icon + text, a few % indicators. That's it.
+   - Nav active: very soft warm tint bg, amber text+icon.
+   - Borders:    barely visible. Light grey. Let the white cards
+                 contrast against grey bg to define edges.
+   - Text:       dark neutral. No warmth.
+*/
+:root {
+  /* Surfaces */
+  --background:             var(--color-neutral-100); /* light grey page bg            */
+  --foreground:             var(--color-neutral-800); /* main body text                */
+
+  --card:                   var(--color-neutral-0);   /* pure white cards              */
+  --card-foreground:        var(--color-neutral-800);
+
+  --popover:                var(--color-neutral-0);
+  --popover-foreground:     var(--color-neutral-800);
+
+  /* Sidebar — white, distinct from grey background */
+  --sidebar:                var(--color-neutral-0);
+  --sidebar-foreground:     var(--color-neutral-600);
+  --sidebar-border:         var(--color-neutral-150);
+  --sidebar-icon:           var(--color-neutral-400);
+  /* Active nav item: very soft amber tint bg, amber text */
+  --sidebar-active-bg:      var(--color-brand-50);
+  --sidebar-active-fg:      var(--color-brand-600);
+  --sidebar-active-icon:    var(--color-brand-500);
+  --sidebar-hover-bg:       var(--color-neutral-50);
+
+  /* Primary — warm amber. Used minimally. */
+  --primary:                var(--color-brand-500);
+  --primary-foreground:     var(--color-neutral-0);
+  --primary-hover:          var(--color-brand-600);
+  --primary-subtle:         var(--color-brand-50);    /* soft tint for bg              */
+  --primary-subtle-fg:      var(--color-brand-600);   /* text on subtle bg             */
+
+  /* Secondary — neutral action (ghost buttons, secondary nav) */
+  --secondary:              var(--color-neutral-100);
+  --secondary-foreground:   var(--color-neutral-700);
+  --secondary-hover:        var(--color-neutral-150);
+
+  /* Muted — de-emphasised areas */
+  --muted:                  var(--color-neutral-100);
+  --muted-foreground:       var(--color-neutral-500);
+
+  /* Accent — hover states, subtle highlights */
+  --accent:                 var(--color-neutral-50);
+  --accent-foreground:      var(--color-neutral-700);
+
+  /* Borders */
+  --border:                 var(--color-neutral-200);
+  --border-strong:          var(--color-neutral-300);
+
+  /* Inputs */
+  --input:                  var(--color-neutral-0);
+  --input-border:           var(--color-neutral-200);
+  --input-placeholder:      var(--color-neutral-400);
+
+  /* Focus ring */
+  --ring:                   var(--color-brand-500);
+
+  /* Topbar */
+  --topbar:                 var(--color-neutral-0);
+  --topbar-border:          var(--color-neutral-150);
+
+  /* Stat card icon container (see image: muted circle, grey icon) */
+  --icon-bg:                var(--color-neutral-100);
+  --icon-fg:                var(--color-neutral-500);
+
+  /* Status */
+  --success:                var(--color-success);
+  --success-foreground:     var(--color-neutral-0);
+  --success-bg:             var(--color-success-bg);
+  --warning:                var(--color-warning);
+  --warning-foreground:     var(--color-neutral-900);
+  --warning-bg:             var(--color-warning-bg);
+  --info:                   var(--color-info);
+  --info-foreground:        var(--color-neutral-0);
+  --info-bg:                var(--color-info-bg);
+  --destructive:            var(--color-danger);
+  --destructive-foreground: var(--color-neutral-0);
+  --destructive-bg:         var(--color-danger-bg);
+
+  /* Order status */
+  --status-completed:       var(--color-status-completed);
+  --status-preparing:       var(--color-status-preparing);
+  --status-delivery:        var(--color-status-delivery);
+  --status-cancelled:       var(--color-status-cancelled);
+
+  /* Charts */
+  --chart-1:                var(--color-brand-500);   /* primary series — amber line   */
+  --chart-2:                var(--color-neutral-300); /* comparison series — grey      */
+  --chart-grid:             var(--color-neutral-150);
+  --chart-label:            var(--color-neutral-400);
+  --chart-tooltip-bg:       var(--color-neutral-0);
+  --chart-tooltip-border:   var(--color-neutral-200);
+
+  /* Shadows */
+  --shadow-card:            var(--shadow-sm);
+  --shadow-dropdown:        var(--shadow-md);
+  --shadow-modal:           var(--shadow-lg);
+
+  /* Radius */
+  --radius:                 var(--radius-base);
+}
+
+
+/* ── DARK MODE ───────────────────────────────────────────────── */
+/*
+   What the dark image tells us:
+   - Background:  dark grey #222  — NOT black, NOT warm
+   - Sidebar:     darker grey #1a1a1a — slightly darker than bg
+   - Cards:       lighter grey #2b2b2b — lift above bg
+   - Primary:     amber #f5a623-ish — ONLY on: checked checkboxes,
+                  the main chart line, tooltip tag. That's it.
+   - Borders:     very subtle, ~#3b3b3b
+   - Card icons:  dark circle bg, grey icon — zero primary
+   - Text:        off-white #dcdcdc body, #f3f3f3 headings
+   - Everything else: shades of grey. Clean. No colour noise.
+*/
+.dark {
+  /* Surfaces */
+  --background:             var(--color-dark-bg);
+  --foreground:             var(--color-dark-text);
+
+  --card:                   var(--color-dark-card);
+  --card-foreground:        var(--color-dark-text);
+
+  --popover:                var(--color-dark-card-2);
+  --popover-foreground:     var(--color-dark-text);
+
+  /* Sidebar — darker than main bg, like the image */
+  --sidebar:                var(--color-dark-sidebar);
+  --sidebar-foreground:     var(--color-dark-muted);
+  --sidebar-border:         var(--color-dark-border);
+  --sidebar-icon:           var(--color-dark-muted);
+  /* Active nav: slightly lighter card bg, white text — NO amber fill */
+  --sidebar-active-bg:      var(--color-dark-card-2);
+  --sidebar-active-fg:      var(--color-dark-text-2);
+  --sidebar-active-icon:    var(--color-dark-text-2);
+  --sidebar-hover-bg:       var(--color-dark-card);
+
+  /* Primary — amber, used minimally */
+  --primary:                var(--color-brand-500);
+  --primary-foreground:     var(--color-neutral-900);
+  --primary-hover:          var(--color-brand-400);
+  --primary-subtle:         oklch(0.700 0.155 52 / 12%); /* translucent — for hover glow */
+  --primary-subtle-fg:      var(--color-brand-400);
+
+  /* Secondary */
+  --secondary:              var(--color-dark-card-2);
+  --secondary-foreground:   var(--color-dark-text);
+  --secondary-hover:        var(--color-dark-input);
+
+  /* Muted */
+  --muted:                  var(--color-dark-card);
+  --muted-foreground:       var(--color-dark-muted);
+
+  /* Accent — hover on rows, list items */
+  --accent:                 var(--color-dark-card-2);
+  --accent-foreground:      var(--color-dark-text);
+
+  /* Borders */
+  --border:                 var(--color-dark-border);
+  --border-strong:          var(--color-dark-border-2);
+
+  /* Inputs */
+  --input:                  var(--color-dark-input);
+  --input-border:           var(--color-dark-border);
+  --input-placeholder:      var(--color-dark-muted);
+
+  /* Focus ring */
+  --ring:                   var(--color-brand-500);
+
+  /* Topbar */
+  --topbar:                 var(--color-dark-card);
+  --topbar-border:          var(--color-dark-border);
+
+  /* Stat card icon container (dark image: dark circle, grey icon) */
+  --icon-bg:                var(--color-dark-card-2);
+  --icon-fg:                var(--color-dark-muted);
+
+  /* Status — same hues, muted bg versions for dark */
+  --success:                oklch(0.640 0.150 148);
+  --success-foreground:     var(--color-dark-bg);
+  --success-bg:             oklch(0.640 0.150 148 / 14%);
+  --warning:                oklch(0.750 0.135 72);
+  --warning-foreground:     var(--color-dark-bg);
+  --warning-bg:             oklch(0.750 0.135 72 / 14%);
+  --info:                   oklch(0.640 0.130 240);
+  --info-foreground:        var(--color-dark-bg);
+  --info-bg:                oklch(0.640 0.130 240 / 14%);
+  --destructive:            oklch(0.630 0.190 22);
+  --destructive-foreground: var(--color-dark-bg);
+  --destructive-bg:         oklch(0.630 0.190 22 / 14%);
+
+  /* Charts — amber primary line, lighter neutral comparison */
+  --chart-1:                var(--color-brand-500);
+  --chart-2:                var(--color-dark-text);   /* off-white line for "last year" */
+  --chart-grid:             var(--color-dark-border);
+  --chart-label:            var(--color-dark-muted);
+  --chart-tooltip-bg:       var(--color-brand-500);   /* image: filled amber tooltip    */
+  --chart-tooltip-border:   var(--color-brand-600);
+
+  /* Shadows — borders carry the work in dark mode */
+  --shadow-card:            none;
+  --shadow-dropdown:        var(--shadow-dark-dropdown);
+  --shadow-modal:           var(--shadow-dark-modal);
+}
+
+
+/* ── BASELINE ELEMENT WIRING ─────────────────────────────────── */
+/*
+   Minimal. Font stacks come from each app's globals.css.
+   Just wire tokens to the DOM and keep things smooth.
+*/
+*, *::before, *::after {
+  border-color: var(--border);
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme switch: only transition colour properties.
+   Keeps layout and transform animations unaffected. */
+body, body * {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+/* Opt-out for anything that shouldn't transition */
+img, video, svg, canvas,
+[data-no-transition],
+[data-no-transition] * {
+  transition: none !important;
+}

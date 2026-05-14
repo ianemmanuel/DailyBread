@@ -1,272 +1,257 @@
 @import "tailwindcss";
 @import "@repo/ui/styles/tokens.css";
+@import "@repo/ui/styles/base.css";
 
-/*
- * Admin Dashboard — globals.css
- *
- * Theme philosophy:
- *   Light: warm neutral white — clean, readable, professional
- *   Dark:  deep slate-charcoal (not black, not brown) — like VS Code dark+
- *          Terracotta primary appears as a vivid accent against the dark surface
- *          without dominating. Borders are subtle cool-grey. Feels modern.
- *
- * Font philosophy:
- *   - Body/UI: Geist (clean, modern, developer-grade — used by Vercel/Linear)
- *     Falls back to Inter which is already loaded.
- *   - Headings: DM Serif Display (editorial, distinctive without being decorative)
- *     Replaces Playfair which reads too literary for a dashboard.
- *   - Mono: IBM Plex Mono (kept — excellent for code/IDs/dates)
- *
- * Tailwind v4 rules observed:
- *   - @layer components: no @apply referencing other custom classes
- *   - Each badge/status class is fully self-contained
- *   - CSS var() used directly instead of bg-(--var) shorthand
- */
+/* ============================================================
+   ADMIN DASHBOARD — globals.css  (APP PERSONALITY)
+   Character: data-dense, professional, clean.
+   Overrides what differs from the base system defaults.
+   Does NOT redefine primitives. Does NOT break token naming.
+   ============================================================ */
 
-@theme {
-  --font-sans    : var(--font-geist), var(--font-inter), system-ui, sans-serif;
-  --font-display : var(--font-dm-serif), Georgia, serif;
-  --font-mono    : var(--font-ibm-mono), "Fira Code", monospace;
 
-  --color-background             : var(--background);
-  --color-foreground             : var(--foreground);
-  --color-card                   : var(--card);
-  --color-card-foreground        : var(--card-foreground);
-  --color-primary                : var(--primary);
-  --color-primary-foreground     : var(--primary-foreground);
-  --color-secondary              : var(--secondary);
-  --color-secondary-foreground   : var(--secondary-foreground);
-  --color-muted                  : var(--muted);
-  --color-muted-foreground       : var(--muted-foreground);
-  --color-accent                 : var(--accent);
-  --color-accent-foreground      : var(--accent-foreground);
-  --color-destructive            : var(--destructive);
-  --color-destructive-foreground : var(--destructive-foreground);
-  --color-border                 : var(--border);
-  --color-input                  : var(--input);
-  --color-ring                   : var(--ring);
-  --color-sidebar                : var(--sidebar);
-  --color-sidebar-foreground     : var(--sidebar-foreground);
-
-  --radius-sm  : calc(var(--radius) - 4px);
-  --radius-md  : var(--radius);
-  --radius-lg  : calc(var(--radius) + 4px);
-  --radius-xl  : calc(var(--radius) + 8px);
-  --radius-2xl : calc(var(--radius) + 14px);
-
-  /* Status semantic colours */
-  --color-success       : oklch(0.52 0.14 145);
-  --color-success-muted : oklch(0.95 0.04 145);
-  --color-warning       : oklch(0.65 0.15 72);
-  --color-warning-muted : oklch(0.97 0.04 78);
-  --color-danger        : oklch(0.55 0.20 25);
-  --color-danger-muted  : oklch(0.97 0.04 25);
-  --color-info          : oklch(0.55 0.16 230);
-  --color-info-muted    : oklch(0.95 0.04 230);
-}
-
-/* ─── LIGHT ─────────────────────────────────────────────────────────────────── */
+/* ── APP-LEVEL TOKEN OVERRIDES ───────────────────────────────── */
 :root {
-  --radius: 0.55rem;
+  /* Slightly tighter radius for a more structured data-dashboard
+     feel vs customer app (which can keep the default 0.75rem) */
+  --radius:                 0.625rem;
 
-  --background         : oklch(0.978 0.004 264);   /* very light cool-white */
-  --foreground         : oklch(0.14 0.014 264);    /* near-black cool */
-  --card               : oklch(1 0 0);
-  --card-foreground    : oklch(0.14 0.014 264);
-  --popover            : oklch(1 0 0);
-  --popover-foreground : oklch(0.14 0.014 264);
-  --primary            : oklch(0.60 0.17 42);      /* terracotta */
-  --primary-foreground : oklch(0.99 0.004 68);
-  --secondary          : oklch(0.94 0.010 264);
-  --secondary-foreground: oklch(0.25 0.012 264);
-  --muted              : oklch(0.92 0.008 264);
-  --muted-foreground   : oklch(0.52 0.012 264);
-  --accent             : oklch(0.94 0.010 264);
-  --accent-foreground  : oklch(0.14 0.014 264);
-  --destructive        : oklch(0.55 0.22 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border             : oklch(0.88 0.008 264);
-  --input              : oklch(0.94 0.008 264);
-  --ring               : oklch(0.60 0.17 42);
-  --sidebar            : oklch(0.97 0.006 264);
-  --sidebar-foreground : oklch(0.18 0.012 264);
-  --sidebar-primary    : var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent     : oklch(0.92 0.008 264);
-  --sidebar-accent-foreground: oklch(0.25 0.012 264);
-  --sidebar-border     : oklch(0.88 0.008 264);
-  --sidebar-ring       : var(--ring);
+  /* Layout dimensions — consumed by layout components */
+  --sidebar-width:          240px;
+  --sidebar-width-collapsed: 68px;
+  --topbar-height:          60px;
 }
 
-/* ─── DARK — slate charcoal ──────────────────────────────────────────────────
-   Inspired by VS Code Dark+, Linear, Vercel:
-   - True dark grey slate, not black, not warm-brown
-   - Cool hue (264°) keeps it neutral and professional
-   - Terracotta primary is now a pure accent — vivid but controlled
-   - Cards are just slightly lighter than background — subtle elevation
-   ─────────────────────────────────────────────────────────────────────────── */
+/* Dark mode layout overrides (radius stays the same) */
 .dark {
-  --background         : oklch(0.13 0.010 264);    /* deep slate */
-  --foreground         : oklch(0.93 0.006 264);    /* near-white cool */
-  --card               : oklch(0.17 0.010 264);    /* elevated surface */
-  --card-foreground    : oklch(0.93 0.006 264);
-  --popover            : oklch(0.19 0.010 264);
-  --popover-foreground : oklch(0.93 0.006 264);
-  --primary            : oklch(0.70 0.16 42);      /* terracotta accent — vivid on dark */
-  --primary-foreground : oklch(0.99 0.004 68);
-  --secondary          : oklch(0.21 0.010 264);
-  --secondary-foreground: oklch(0.82 0.008 264);
-  --muted              : oklch(0.21 0.008 264);
-  --muted-foreground   : oklch(0.60 0.008 264);
-  --accent             : oklch(0.24 0.010 264);
-  --accent-foreground  : oklch(0.93 0.006 264);
-  --destructive        : oklch(0.62 0.22 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border             : oklch(0.26 0.010 264);    /* subtle cool-grey border */
-  --input              : oklch(0.21 0.010 264);
-  --ring               : oklch(0.70 0.16 42);
-  --sidebar            : oklch(0.10 0.010 264);    /* deepest slate */
-  --sidebar-foreground : oklch(0.80 0.008 264);
-  --sidebar-primary    : var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent     : oklch(0.19 0.010 264);
-  --sidebar-accent-foreground: oklch(0.80 0.008 264);
-  --sidebar-border     : oklch(0.22 0.010 264);
-  --sidebar-ring       : var(--ring);
-
-  /* Status — brighter on dark backgrounds */
-  --color-success       : oklch(0.60 0.16 145);
-  --color-success-muted : oklch(0.18 0.06 145);
-  --color-warning       : oklch(0.72 0.16 72);
-  --color-warning-muted : oklch(0.20 0.06 78);
-  --color-danger        : oklch(0.62 0.22 25);
-  --color-danger-muted  : oklch(0.20 0.08 25);
-  --color-info          : oklch(0.62 0.18 230);
-  --color-info-muted    : oklch(0.18 0.06 230);
+  /* No colour overrides needed — base.css dark handles everything.
+     Only add here if the admin dashboard dark deviates from base. */
 }
 
-/* ─── BASE ───────────────────────────────────────────────────────────────────── */
+
+/* ── TAILWIND THEME BRIDGE ───────────────────────────────────── */
+@theme {
+  /* Fonts
+     DM Sans: geometric, clean, excellent at 13–14px data density.
+     Fraunces: has warmth and personality for h1/h2 without being
+               editorial — good food-product character in headings. */
+  --font-sans:    var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  --font-display: var(--font-fraunces), "Fraunces", Georgia, serif;
+  --font-mono:    var(--font-ibm-mono), "IBM Plex Mono", monospace;
+
+  /* Core surfaces */
+  --color-background:           var(--background);
+  --color-foreground:           var(--foreground);
+  --color-card:                 var(--card);
+  --color-card-foreground:      var(--card-foreground);
+  --color-popover:              var(--popover);
+  --color-popover-foreground:   var(--popover-foreground);
+
+  /* Brand */
+  --color-primary:              var(--primary);
+  --color-primary-foreground:   var(--primary-foreground);
+  --color-primary-subtle:       var(--primary-subtle);
+  --color-primary-subtle-fg:    var(--primary-subtle-fg);
+
+  /* Neutral actions */
+  --color-secondary:            var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:                var(--muted);
+  --color-muted-foreground:     var(--muted-foreground);
+  --color-accent:               var(--accent);
+  --color-accent-foreground:    var(--accent-foreground);
+
+  /* Structural */
+  --color-border:               var(--border);
+  --color-border-strong:        var(--border-strong);
+  --color-input:                var(--input);
+  --color-ring:                 var(--ring);
+
+  /* Navigation */
+  --color-sidebar:              var(--sidebar);
+  --color-sidebar-foreground:   var(--sidebar-foreground);
+  --color-sidebar-border:       var(--sidebar-border);
+  --color-sidebar-active-bg:    var(--sidebar-active-bg);
+  --color-sidebar-active-fg:    var(--sidebar-active-fg);
+  --color-topbar:               var(--topbar);
+  --color-topbar-border:        var(--topbar-border);
+
+  /* Icon containers */
+  --color-icon-bg:              var(--icon-bg);
+  --color-icon-fg:              var(--icon-fg);
+
+  /* Status */
+  --color-success:              var(--success);
+  --color-success-bg:           var(--success-bg);
+  --color-warning:              var(--warning);
+  --color-warning-bg:           var(--warning-bg);
+  --color-info:                 var(--info);
+  --color-info-bg:              var(--info-bg);
+  --color-destructive:          var(--destructive);
+  --color-destructive-bg:       var(--destructive-bg);
+
+  /* Order status */
+  --color-status-completed:     var(--status-completed);
+  --color-status-preparing:     var(--status-preparing);
+  --color-status-delivery:      var(--status-delivery);
+  --color-status-cancelled:     var(--status-cancelled);
+
+  /* Charts */
+  --color-chart-1:              var(--chart-1);
+  --color-chart-2:              var(--chart-2);
+  --color-chart-grid:           var(--chart-grid);
+  --color-chart-label:          var(--chart-label);
+  --color-chart-tooltip-bg:     var(--chart-tooltip-bg);
+
+  /* Layout sizing as Tailwind values */
+  --width-sidebar:              var(--sidebar-width);
+  --width-sidebar-collapsed:    var(--sidebar-width-collapsed);
+  --height-topbar:              var(--topbar-height);
+
+  /* Radius */
+  --radius-xs:   var(--radius-xs);
+  --radius-sm:   var(--radius-sm);
+  --radius-md:   var(--radius);
+  --radius-lg:   var(--radius-lg);
+  --radius-full: var(--radius-full);
+}
+
+
+/* ── BASE LAYER ──────────────────────────────────────────────── */
 @layer base {
-  * { border-color: var(--border); }
-
   body {
-    background-color: var(--background);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;       /* 14px default — data dashboards run dense */
+    line-height: 1.5;
+  }
+
+  /* Page-level headings get the display font for warmth */
+  h1 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
     color: var(--foreground);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    font-feature-settings: "rlig" 1, "calt" 1;
-    transition: background-color 0.2s ease, color 0.15s ease;
   }
 
-  /* DM Serif for display headings only — h1/h2/h3 */
-  h1, h2, h3 {
-    font-family: var(--font-display), Georgia, serif;
-    letter-spacing: -0.02em;
+  h2 {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
   }
 
-  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-  ::selection { background-color: var(--primary); color: var(--primary-foreground); }
-
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 9999px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
-}
-
-/* ─── COMPONENTS ─────────────────────────────────────────────────────────────── */
-/* Each class is fully self-contained — no @apply of other custom classes */
-@layer components {
-
-  .badge-success {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--color-success-muted);
-    color: var(--color-success);
-  }
-  .badge-warning {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--color-warning-muted);
-    color: var(--color-warning);
-  }
-  .badge-danger {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--color-danger-muted);
-    color: var(--color-danger);
-  }
-  .badge-info {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--color-info-muted);
-    color: var(--color-info);
-  }
-  .badge-neutral {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--muted);
-    color: var(--muted-foreground);
+  /* Section titles, card headers — stay sans for density */
+  h3, h4, h5, h6 {
+    font-family: var(--font-sans);
+    font-weight: 500;
+    line-height: 1.4;
   }
 
-  /* Admin user status */
-  .status-pending {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--muted);
-    color: var(--muted-foreground);
-  }
-  .status-invited {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--color-info-muted);
-    color: var(--color-info);
-  }
-  .status-active {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--color-success-muted);
-    color: var(--color-success);
-  }
-  .status-suspended {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--color-warning-muted);
-    color: var(--color-warning);
-  }
-  .status-deactivated {
-    display: inline-flex; align-items: center; gap: 0.25rem;
-    border-radius: 9999px; padding: 0.125rem 0.625rem;
-    font-size: 0.75rem; font-weight: 500; line-height: 1.25rem;
-    background-color: var(--color-danger-muted);
-    color: var(--color-danger);
+  /* Ensure numbers align in tables and stat cards */
+  [data-tabular], .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
   }
 }
 
-/* ─── UTILITIES ──────────────────────────────────────────────────────────────── */
-@layer utilities {
-  .page-content { @apply mx-auto max-w-7xl space-y-6; }
-  .admin-card   { @apply rounded-xl border border-border/60 bg-card p-5; }
 
-  .text-gradient {
-    background: linear-gradient(135deg, oklch(0.60 0.17 42) 0%, oklch(0.70 0.14 50) 60%, oklch(0.56 0.16 38) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-}
+/* ── ANIMATIONS ──────────────────────────────────────────────── */
 
-/* ─── KEYFRAMES ──────────────────────────────────────────────────────────────── */
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0);   }
 }
-.animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+/* Dropdown / popover entrance — subtle upward drift + fade.
+   Referenced by name in ThemeToggle and any other dropdown. */
+@keyframes dropdownEnter {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+
+@keyframes dropdownExit {
+  from { opacity: 1; transform: translateY(0)    scale(1);    }
+  to   { opacity: 0; transform: translateY(-4px) scale(0.97); }
+}
+
+/*
+ * Radix data-[state] hooks — apply animation to the actual visible surface
+ * (not the portal wrapper). Works for DropdownMenuContent, TooltipContent,
+ * PopoverContent — anything Radix renders with data-state="open/closed".
+ *
+ * We do NOT need !important here because these are data-attribute selectors
+ * which have higher specificity than shadcn's base classes.
+ */
+[data-radix-popper-content-wrapper] [data-state="open"] {
+  animation: dropdownEnter 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+[data-radix-popper-content-wrapper] [data-state="closed"] {
+  animation: dropdownExit 140ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/*
+ * Solid background fix for ALL Radix popper surfaces.
+ * Targets the rendered content element directly — not the portal wrapper.
+ * Covers: DropdownMenu, Tooltip, Popover, Select, ContextMenu.
+ */
+[data-radix-popper-content-wrapper] > * {
+  background-color: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border-color: var(--border) !important;
+}
+
+/* ── UTILITY CLASSES ─────────────────────────────────────────── */
+
+.animate-slide-up {
+  animation: slideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease both;
+}
+
+/* Stagger entrance for sibling cards/rows */
+.animate-stagger > * { animation: slideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-stagger > *:nth-child(1) { animation-delay:   0ms; }
+.animate-stagger > *:nth-child(2) { animation-delay:  55ms; }
+.animate-stagger > *:nth-child(3) { animation-delay: 110ms; }
+.animate-stagger > *:nth-child(4) { animation-delay: 165ms; }
+.animate-stagger > *:nth-child(5) { animation-delay: 220ms; }
+.animate-stagger > *:nth-child(6) { animation-delay: 275ms; }
+
+/* Loading skeleton — wire to --muted and --border */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 25%,
+    var(--border) 50%,
+    var(--muted) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease infinite;
+  border-radius: var(--radius-sm);
+  color: transparent;
+}
+
+/* ── SCROLLBAR ───────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  {
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }

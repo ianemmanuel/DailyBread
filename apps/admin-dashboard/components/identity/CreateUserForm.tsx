@@ -12,7 +12,7 @@ import { ScopeSelector } from "@/components/identity/ScopeSelector"
 import {
   createAdminUserSchema,
   type CreateAdminUserFormValues,
-} from "@/lib/validations/identity"
+} from "@/lib/zod/identity"
 import { getFieldError } from "@/lib/forms/form-helpers"
 import type { AdminRole, AdminSessionData } from "@/types"
 
