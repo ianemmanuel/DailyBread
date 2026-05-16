@@ -7,7 +7,7 @@ import type { Country, ApiSuccess } from "@repo/types/admin-app"
 
 export const metadata = { title: "Countries" }
 
-/* ── Data fetching ────────────────────────────────────────────── */
+/* Data fetching */
 async function getCountries(token: string): Promise<Country[]> {
   const res = await fetch(
     `${process.env.BACKEND_API_URL}/admin/v1/geography/countries`,
@@ -21,7 +21,7 @@ async function getCountries(token: string): Promise<Country[]> {
   return data
 }
 
-/* ── Page ─────────────────────────────────────────────────────── */
+
 export default async function CountriesPage() {
   const { getToken, userId } = await auth()
   if (!userId) redirect("/sign-in")
@@ -33,16 +33,14 @@ export default async function CountriesPage() {
   const inactiveCount = countries.length - activeCount
 
   return (
-    <div className="space-y-8 animate-slide-up">
+    <>
 
-      {/* ── Page header ───────────────────────────────────────── */}
       <PageHeader
         title="Countries"
         description="Manage operational countries and their delivery cities."
         icon={Globe}
       />
 
-      {/* ── Summary strip ─────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
         <SummaryTile label="Total" value={countries.length} />
         <SummaryTile label="Active" value={activeCount}   accent />
@@ -53,9 +51,8 @@ export default async function CountriesPage() {
         />
       </div>
 
-      {/* ── Country grid + pagination ──────────────────────────── */}
       <CountryGrid countries={countries} pageSize={9} />
-    </div>
+    </>
   )
 }
 
