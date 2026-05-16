@@ -11,7 +11,7 @@ import { Textarea } from "@repo/ui/components/textarea"
 import {
   rejectApplicationSchema,
   type RejectApplicationFormValues,
-} from "@/lib/validations/vendor"
+} from "@/lib/zod/vendor"
 import { getFieldError } from "@/lib/forms/form-helpers"
 
 interface Props {

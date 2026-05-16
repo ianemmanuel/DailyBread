@@ -3,32 +3,30 @@ import "./globals.css"
 import { ClerkProvider } from "@clerk/nextjs"
 import { Toaster }  from "@repo/ui/components/sonner"
 import {
-  Geist,
-  Geist_Mono,
-  DM_Serif_Display,
+  DM_Sans,
+  Fraunces,
   IBM_Plex_Mono,
 } from "next/font/google"
+import { TooltipProvider } from "@repo/ui/components/tooltip"
 
 
-const geist = Geist({
-  subsets : ["latin"],
-  variable: "--font-geist",
-  display : "swap",
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-dm-sans",
+  display: "swap",
 })
 
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets : ["latin"],
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-fraunces",
+  display: "swap",
+})
+
+const ibmMono = IBM_Plex_Mono({
+  subsets: ["latin"],
   variable: "--font-ibm-mono",
-  weight  : ["400", "500"],
-  display : "swap",
-})
-
-const dmSerif = DM_Serif_Display({
-  subsets : ["latin"],
-  variable: "--font-dm-serif",
-  weight  : "400",
-  style   : ["normal", "italic"],
-  display : "swap",
+  weight: ["400", "500"],
+  display: "swap",
 })
 
 export const metadata: Metadata = {
@@ -53,12 +51,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${geist.variable} ${ibmPlexMono.variable} ${dmSerif.variable}`}
+      className={`${dmSans.variable} ${fraunces.variable} ${ibmMono.variable}`}
       suppressHydrationWarning
     >
       <body className="font-sans antialiased bg-background text-foreground min-h-screen">
         <ClerkProvider>
-          {children}
+          <TooltipProvider>
+            {children}
+          </TooltipProvider>
           <Toaster position="top-right" richColors closeButton duration={4000} />
         </ClerkProvider>
       </body>

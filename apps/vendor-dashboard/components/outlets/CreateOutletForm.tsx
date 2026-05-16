@@ -8,14 +8,29 @@ import { Input } from "@repo/ui/components/input"
 import { Label } from "@repo/ui/components/label"
 import { Textarea } from "@repo/ui/components/textarea"
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue,
 } from "@repo/ui/components/select"
 import {
-  Card, CardContent, CardHeader, CardTitle, CardDescription,
+  Card, 
+  CardContent, 
+  CardHeader, 
+  CardTitle, 
+  CardDescription,
 } from "@repo/ui/components/card"
 import {
-  Loader2, MapPin, Phone, Mail, Navigation,
-  Store, Truck, BadgeDollarSign, Map,
+  Loader2, 
+  MapPin, 
+  Phone, 
+  Mail, 
+  Navigation,
+  Store, 
+  Truck, 
+  BadgeDollarSign, 
+  Map,
 } from "lucide-react"
 import { createOutletSchema } from "@/lib/validations/create-outlet"
 import type { City } from "@/types/outlet"
