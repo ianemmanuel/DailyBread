@@ -8,10 +8,12 @@ export interface Country {
   id             : string
   name           : string
   code           : string
+  slug           : string
   currency       : string
   currencySymbol : string | null
   phoneCode      : string
   timezones      : string[]
+  cities         : City[] 
   status         : GeoStatus
   _count?        : { cities: number; vendors: number }
   createdByAdminId: string | null
@@ -24,6 +26,7 @@ export interface City {
   countryId      : string
   name           : string
   code           : string | null
+  slug           : string
   timezone       : string
   latitude       : number | null
   longitude      : number | null

@@ -196,6 +196,7 @@ model Country {
   id                 String    @id @default(uuid())
   name               String    @unique
   code               String    @unique
+  slug               String    @unique
   currency           String
   currencySymbol     String?
   phoneCode          String
@@ -213,6 +214,8 @@ model Country {
 
 
   @@index([status])
+  @@index([slug])
+
 }
 
 model City {
@@ -220,6 +223,7 @@ model City {
   countryId        String
   name             String
   code             String?
+  slug             String    @unique
   timezone         String
   latitude         Float?            // centroid — Mapbox fly-to only
   longitude        Float?            // centroid — Mapbox fly-to only
@@ -245,6 +249,7 @@ model City {
   @@unique([countryId, name])
   @@index([countryId])
   @@index([status])
+  @@index([slug])
 }
 
 
