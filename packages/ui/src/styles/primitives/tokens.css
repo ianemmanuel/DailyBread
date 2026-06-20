@@ -1,63 +1,48 @@
 /* ============================================================
-   @repo/ui — tokens.css  (PRIMITIVES ONLY)
-   Raw design values. Never carry UI meaning. Never overridden.
-   Shared by every app in the monorepo.
+   @repo/ui — tokens.css  (DESIGN PRIMITIVES ONLY)
+   Raw values. No UI meaning. No element styling. No overrides.
+   Shared across every app in the monorepo.
    ============================================================ */
 
 :root {
 
-  /* ── Neutral grey scale ──────────────────────────────────────
-     Backbone of both themes. True neutral — no warm or cool cast.
-     Light theme surfaces are white cards on a near-white grey bg.
-     Dark theme surfaces are dark grey cards on a dark grey bg.
-  */
-  --color-neutral-0:     oklch(1.000 0 0);           /* #ffffff  pure white                */
-  --color-neutral-50:    oklch(0.980 0.000 0);        /* #f9f9f9  near white                */
-  --color-neutral-100:   oklch(0.962 0.001 264);      /* #f4f4f3  light page bg             */
-  --color-neutral-150:   oklch(0.942 0.001 264);      /* #eeeded  divider / subtle           */
-  --color-neutral-200:   oklch(0.912 0.002 264);      /* #e7e6e5  border light              */
-  --color-neutral-300:   oklch(0.840 0.003 264);      /* #d3d2d0  stronger border           */
-  --color-neutral-400:   oklch(0.700 0.005 264);      /* #aaa8a5  placeholder / icon        */
-  --color-neutral-500:   oklch(0.555 0.006 264);      /* #7d7b78  muted text                */
-  --color-neutral-600:   oklch(0.430 0.006 264);      /* #5e5c59  secondary text            */
-  --color-neutral-700:   oklch(0.320 0.006 264);      /* #404040  body text                 */
-  --color-neutral-800:   oklch(0.230 0.005 264);      /* #2e2c2a  heading text              */
-  --color-neutral-900:   oklch(0.155 0.005 264);      /* #1e1c1a  deepest                   */
+  /* ── Neutral scale ──────────────────────────────────────── */
+  --color-neutral-0:     oklch(1.000 0 0);
+  --color-neutral-50:    oklch(0.980 0.000 0);
+  --color-neutral-100:   oklch(0.962 0.001 264);
+  --color-neutral-150:   oklch(0.942 0.001 264);
+  --color-neutral-200:   oklch(0.912 0.002 264);
+  --color-neutral-300:   oklch(0.840 0.003 264);
+  --color-neutral-400:   oklch(0.700 0.005 264);
+  --color-neutral-500:   oklch(0.555 0.006 264);
+  --color-neutral-600:   oklch(0.430 0.006 264);
+  --color-neutral-700:   oklch(0.320 0.006 264);
+  --color-neutral-800:   oklch(0.230 0.005 264);
+  --color-neutral-900:   oklch(0.155 0.005 264);
 
-  /* ── Dark surface scale ─────────────────────────────────────
-     Pixel-matched to the dark dashboard reference image.
-     Pure neutral grey — no warm tint, no blue tint.
-     Layered: sidebar darker → bg → card → elevated card.
-  */
-  --color-dark-sidebar:  oklch(0.130 0 0);            /* ~#1a1a1a  sidebar bg              */
-  --color-dark-bg:       oklch(0.162 0 0);            /* ~#222222  main page bg            */
-  --color-dark-card:     oklch(0.196 0 0);            /* ~#2b2b2b  card / panel            */
-  --color-dark-card-2:   oklch(0.218 0 0);            /* ~#313131  elevated / hover        */
-  --color-dark-input:    oklch(0.236 0 0);            /* ~#363636  input bg                */
-  --color-dark-border:   oklch(0.255 0 0);            /* ~#3b3b3b  subtle border           */
-  --color-dark-border-2: oklch(0.300 0 0);            /* ~#484848  stronger border         */
-  --color-dark-muted:    oklch(0.520 0 0);            /* ~#777777  muted / subtext         */
-  --color-dark-text:     oklch(0.875 0 0);            /* ~#dcdcdc  body text               */
-  --color-dark-text-2:   oklch(0.955 0 0);            /* ~#f3f3f3  heading / strong text   */
+  /* ── Dark surface scale ─────────────────────────────────── */
+  --color-dark-sidebar:  oklch(0.130 0 0);
+  --color-dark-bg:       oklch(0.162 0 0);
+  --color-dark-card:     oklch(0.196 0 0);
+  --color-dark-card-2:   oklch(0.218 0 0);
+  --color-dark-input:    oklch(0.236 0 0);
+  --color-dark-border:   oklch(0.255 0 0);
+  --color-dark-border-2: oklch(0.300 0 0);
+  --color-dark-muted:    oklch(0.520 0 0);
+  --color-dark-text:     oklch(0.875 0 0);
+  --color-dark-text-2:   oklch(0.955 0 0);
 
-  /* ── Brand — warm amber / light orange ──────────────────────
-     Used minimally across all apps.
-     On light: use brand-500 for interactive elements.
-     On dark:  use brand-500 for the same — it reads well on
-               dark-card at this lightness.
-     Think: toasted sesame, light honey, saffron milk.
-     NOT screaming orange. Chroma kept moderate.
-  */
-  --color-brand-50:   oklch(0.975 0.018 62);          /* barely-there tint              */
-  --color-brand-100:  oklch(0.950 0.040 60);          /* soft amber wash                */
-  --color-brand-200:  oklch(0.900 0.080 58);          /* light amber                    */
-  --color-brand-300:  oklch(0.830 0.115 56);          /* warm amber                     */
-  --color-brand-400:  oklch(0.755 0.148 54);          /* amber — hover / secondary use  */
-  --color-brand-500:  oklch(0.700 0.155 52);          /* PRIMARY — main interactive      */
-  --color-brand-600:  oklch(0.615 0.148 50);          /* deeper — pressed state         */
-  --color-brand-700:  oklch(0.510 0.130 48);          /* darkest amber                  */
+  /* ── Brand — warm amber ─────────────────────────────────── */
+  --color-brand-50:   oklch(0.975 0.018 62);
+  --color-brand-100:  oklch(0.950 0.040 60);
+  --color-brand-200:  oklch(0.900 0.080 58);
+  --color-brand-300:  oklch(0.830 0.115 56);
+  --color-brand-400:  oklch(0.755 0.148 54);
+  --color-brand-500:  oklch(0.700 0.155 52);
+  --color-brand-600:  oklch(0.615 0.148 50);
+  --color-brand-700:  oklch(0.510 0.130 48);
 
-  /* ── Status ─────────────────────────────────────────────────*/
+  /* ── Status ─────────────────────────────────────────────── */
   --color-success:          oklch(0.580 0.150 148);
   --color-success-bg:       oklch(0.580 0.150 148 / 11%);
   --color-warning:          oklch(0.720 0.135 72);
@@ -67,13 +52,13 @@
   --color-danger:           oklch(0.570 0.190 22);
   --color-danger-bg:        oklch(0.570 0.190 22 / 11%);
 
-  /* Order status (meal delivery domain) */
+  /* ── Order status ───────────────────────────────────────── */
   --color-status-completed: oklch(0.580 0.150 148);
   --color-status-preparing: oklch(0.720 0.135 72);
   --color-status-delivery:  oklch(0.590 0.130 240);
   --color-status-cancelled: oklch(0.555 0.006 264);
 
-  /* ── Radius ─────────────────────────────────────────────────*/
+  /* ── Radius ─────────────────────────────────────────────── */
   --radius-xs:   0.25rem;
   --radius-sm:   0.375rem;
   --radius-base: 0.75rem;
@@ -81,29 +66,11 @@
   --radius-xl:   1.25rem;
   --radius-full: 9999px;
 
-  /* ── Shadows ────────────────────────────────────────────────
-     Light: very subtle, cards use borders primarily.
-     Dark: shadows are invisible — borders do all the work.
-  */
-  --shadow-xs:  0 1px 2px oklch(0 0 0 / 4%);
-  --shadow-sm:  0 1px 3px oklch(0 0 0 / 6%), 0 1px 2px oklch(0 0 0 / 4%);
-  --shadow-md:  0 4px 12px oklch(0 0 0 / 8%), 0 2px 4px oklch(0 0 0 / 5%);
-  --shadow-lg:  0 8px 24px oklch(0 0 0 / 10%), 0 4px 8px oklch(0 0 0 / 6%);
-  --shadow-dark-dropdown: 0 4px 20px oklch(0 0 0 / 35%);
-  --shadow-dark-modal:    0 8px 40px oklch(0 0 0 / 45%);
-
-  /* ── Transitions ────────────────────────────────────────────*/
-  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-out:    cubic-bezier(0.0, 0.0, 0.2, 1);
-  --duration-fast: 120ms;
-  --duration-base: 200ms;
-  --duration-slow: 320ms;
-
-  /* ── Z-index ─────────────────────────────────────────────── */
-  --z-base:    0;
-  --z-raised:  10;
-  --z-sticky:  50;
-  --z-overlay: 100;
-  --z-modal:   200;
-  --z-toast:   300;
+  /* ── Shadows ─────────────────────────────────────────────── */
+  --shadow-xs:             0 1px 2px oklch(0 0 0 / 4%);
+  --shadow-sm:             0 1px 3px oklch(0 0 0 / 6%), 0 1px 2px oklch(0 0 0 / 4%);
+  --shadow-md:             0 4px 12px oklch(0 0 0 / 8%), 0 2px 4px oklch(0 0 0 / 5%);
+  --shadow-lg:             0 8px 24px oklch(0 0 0 / 10%), 0 4px 8px oklch(0 0 0 / 6%);
+  --shadow-dark-dropdown:  0 4px 20px oklch(0 0 0 / 35%);
+  --shadow-dark-modal:     0 8px 40px oklch(0 0 0 / 45%);
 }

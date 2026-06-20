@@ -1,8 +1,6 @@
-
 import type { Metadata } from "next"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
-import { ThemeProvider } from "@/components/shared/theme/theme-provider"
 import { AdminSessionProvider } from "@/components/dashboard/layout/AdminSessionContext"
 import { Sidebar } from "@/components/dashboard/sidebar/Sidebar"
 import { Navbar } from "@/components/dashboard/navbar/Navbar"
@@ -12,10 +10,10 @@ import { SidebarProvider } from "@/providers/sidebar-provider"
 
 export const metadata: Metadata = {
   title: {
-    template: "%s | DailyBread Admin",
-    default: "Dashboard | DailyBread Admin",
+    template: "%s | DailyBread Ops",
+    default: "Dashboard | DailyBread Ops",
   },
-  description: "DailyBread admin dashboard",
+  description: "DailyBread operations and administration dashboard",
 }
 
 export default async function DashboardLayout({
@@ -41,42 +39,27 @@ export default async function DashboardLayout({
   const { data: session }: ApiSuccess<AdminSessionData> = await sessionRes.json()
 
   return (
-    <ThemeProvider>
       <AdminSessionProvider session={session}>
         <SidebarProvider>
-          <div
-            className="relative min-h-screen"
-            style={{ backgroundColor: "var(--background)" }}
-          >
+          <div className="relative min-h-screen bg-background">
             <Sidebar session={session} />
 
             <div
-              className="flex min-h-screen flex-col"
-              style={{
-                paddingLeft: "var(--_sidebar-offset, 0px)",
-                transition: "padding-left 380ms cubic-bezier(0.4, 0, 0.2, 1)",
-              }}
+              className="flex min-h-screen flex-col transition-[padding-left] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+              style={{ paddingLeft: "var(--_sidebar-offset, 0px)" }}
             >
-              <Navbar session={session} />
+              <Navbar />
 
               <main className="flex-1 min-w-0 overflow-x-hidden">
-                <div
-                  className={[
-                    "mx-auto w-full max-w-[1600px]",
-                    "px-4 py-6",
-                    "sm:px-6 sm:py-8",
-                    "lg:px-8 lg:py-10",
-                    "xl:px-10",
-                  ].join(" ")}
-                >
+                <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10 xl:px-10">
                   {children}
                 </div>
               </main>
+
               <Footer />
             </div>
           </div>
         </SidebarProvider>
       </AdminSessionProvider>
-    </ThemeProvider>
   )
 }

@@ -102,3 +102,61 @@ export interface UpdateDeliveryZoneInput {
   boundary?      : DeliveryZoneBoundary
   maxCourierCount?: number
 }
+
+export interface PlatformKPIResult {
+  countries: {
+    total:    number
+    active:   number
+    inactive: number
+  }
+  vendors: {
+    total:  number
+    active: number
+  }
+  cities: {
+    total:  number
+    active: number
+  }
+  outlets: {
+    total:  number
+    active: number
+  }
+  customers: {
+    total:  number
+    active: number
+  }
+}
+
+export interface CountrySummaryResult {
+  id:        string
+  name:      string
+  slug:      string
+  code:      string
+  currency:  string
+  phoneCode: string
+  status:    string
+  createdAt: Date
+  _count: {
+    cities:  number
+    vendors: number
+  }
+}
+
+export interface CountryVendorSnapshot {
+  vendorAccounts: {
+    total: number
+    active: number
+    suspended: number
+    banned: number
+    averageRating: number
+  }
+
+  applications: {
+    total: number
+    draft: number
+    submitted: number
+    underReview: number
+    approved: number
+    rejected: number
+  }
+}

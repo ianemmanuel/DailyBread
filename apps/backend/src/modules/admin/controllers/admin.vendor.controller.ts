@@ -24,17 +24,17 @@ import {
   rejectDocument,
 } from "../services/admin.vendor.service"
 
-//* ─── Applications ─────────────
-
+//*Application
+ 
 export const handleListApplications: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
-    const { status, countryId, search, page, pageSize } = req.query
+    const { status, countrySlug, search, page, pageSize } = req.query
 
     const result = await listApplications(
       {
         status    : status     as VendorApplicationStatus | undefined,
-        countryId : countryId  as string | undefined,
+        countrySlug: countrySlug  as string,
         search    : search     as string | undefined,
         page      : page       ? parseInt(page     as string) : undefined,
         pageSize  : pageSize   ? parseInt(pageSize as string) : undefined,
@@ -85,7 +85,7 @@ export const handleMarkUnderReview: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err) }
 }
 
-//* ─── Vendor documents ────────────────
+//* Vendor documents
 
 export const handleApproveDocument: RequestHandler = async (req, res, next) => {
   try {
@@ -118,17 +118,17 @@ export const handleRejectDocument: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err) }
 }
 
-//* ─── Vendor accounts ────────────────
+//* Vendor accounts 
 
 export const handleListVendorAccounts: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope }  = req as unknown as AdminRequest
-    const { status, countryId, search, page, pageSize } = req.query
+    const { status, countrySlug, search, page, pageSize } = req.query
 
     const result = await listVendorAccounts(
       {
         status   : status    as VendorStatus | undefined,
-        countryId: countryId as string | undefined,
+        countrySlug: countrySlug as string,
         search   : search    as string | undefined,
         page     : page      ? parseInt(page     as string) : undefined,
         pageSize : pageSize  ? parseInt(pageSize as string) : undefined,

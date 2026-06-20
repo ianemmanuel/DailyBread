@@ -3,6 +3,7 @@ import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "./admin.audit.service"
 import type { AdminScopeContext } from "@repo/types/backend"
+import { getCountryIdFromSlug } from "../helpers/getCountryId"
 
 const serviceLog = logger.child({ module: "vendor-ops-service" })
 
@@ -29,22 +30,28 @@ const ALLOWED_SORT_COLUMNS: Record<string, string> = {
 export async function listApplications(
   filters: {
     status?   : VendorApplicationStatus | VendorApplicationStatus[]
-    countryId?: string
+    countrySlug: string
     search?   : string
     sort?     : string
     dir?      : string
     page?     : number
     pageSize? : number
   },
-  actorScope: AdminScopeContext,
+  adminScope: AdminScopeContext,
 ) {
-  const { status, countryId, search, page = 1, pageSize = 20 } = filters
+
+  const { status, countrySlug, search, page = 1, pageSize = 20 } = filters
+
+  const countryId = await getCountryIdFromSlug(
+    countrySlug,
+    adminScope,
+  )
   const sortColumn = ALLOWED_SORT_COLUMNS[filters.sort ?? ""] ?? "submittedAt"
   const sortDir    = filters.dir === "asc" ? "asc" : "desc"
   const skip       = (page - 1) * pageSize
 
   const where: any = {
-    ...buildVendorScopeFilter(actorScope, countryId),
+    ...buildVendorScopeFilter(adminScope, countryId),
     ...(status
       ? Array.isArray(status) ? { status: { in: status } } : { status }
       : {}),
@@ -420,19 +427,24 @@ export async function rejectDocument(
 export async function listVendorAccounts(
   filters: {
     status?   : VendorStatus
-    countryId?: string
+    countrySlug: string
     search?   : string
     page?     : number
     pageSize? : number
   },
-  actorScope: AdminScopeContext,
+  adminScope: AdminScopeContext,
 ) {
-  const { status, countryId, search, page = 1, pageSize = 20 } = filters
+  const { status, countrySlug, search, page = 1, pageSize = 20 } = filters
+
+  const countryId = await getCountryIdFromSlug(
+    countrySlug,
+    adminScope,
+  )
   const skip = (page - 1) * pageSize
 
   const where: any = {
     deletedAt: null,
-    ...buildVendorScopeFilter(actorScope, countryId),
+    ...buildVendorScopeFilter(adminScope, countryId),
     ...(status ? { status } : {}),
     ...(search ? {
       OR: [

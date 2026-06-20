@@ -9,14 +9,21 @@
  *   ServiceAreas — CRUD for all four modes: FULL_SERVICE | SELF_DELIVERY | WAITLIST | EXCLUDED
  *   DeliveryZones — CRUD (constrained to FULL_SERVICE areas, separate page/role)
  *
+ * Slug design:
+ *   - Country slug = ISO code lower-cased          e.g. "ke", "ae", "us"
+ *   - City slug    = slugified-name + "-" + code   e.g. "nairobi-ke", "dubai-ae"
+ *   - Slugs are globally unique (DB @unique constraint) — safe as URL identifiers.
+ *   - All read operations (getCountry, getCity, listCitiesForCountry, …) accept
+ *     EITHER a UUID or a slug via resolveCountryId() / resolveCityId().
+ *     Write operations (activate, update, boundary, …) still use IDs internally
+ *     once the slug is resolved.
+ *   - updateCity() regenerates the city slug whenever name changes.
+ *
  * Design decisions:
  *   - OSM boundary search is a preview — it NEVER writes to the DB.
- *     The admin edits the polygon on the map, then submits the final GeoJSON.
- *     saveCityBoundary() accepts whatever GeoJSON the frontend sends.
  *   - No UNZONED state. Anything inside the city boundary but outside all
  *     service area polygons is treated as WAITLIST by resolveServiceMode().
- *   - Delivery zones require at least one FULL_SERVICE service area to exist
- *     in the city before they can be created.
+ *   - Delivery zones require at least one FULL_SERVICE service area to exist.
  *   - All writes are audit-logged via auditService.log() (fire-and-forget).
  */
 
@@ -38,8 +45,20 @@ import type {
   OsmBoundaryResult,
 } from "@repo/geo/types"
 import type { AdminScopeContext }  from "@repo/types/backend"
+import { buildCountrySlug, buildCitySlug } from "@/utils/geo-slug.utils"
+import { UUID_RE } from "@/constants/system"
+import { 
+  CreateCityInput, 
+  UpdateCityInput, 
+  SaveCityBoundaryInput, 
+  CreateServiceAreaInput,
+  UpdateServiceAreaInput,
+  CreateDeliveryZoneInput,
+  UpdateDeliveryZoneInput,
+} from "@/types/admin"
 
 const serviceLog = logger.child({ module: "admin-geography-service" })
+
 
 //* Scope helpers
 
@@ -49,8 +68,37 @@ function assertCountryInScope(countryId: string, scope: AdminScopeContext): void
   }
 }
 
-async function getCityOrThrow(cityId: string) {
-  const city = await prisma.city.findUnique({ where: { id: cityId } })
+//* Slug / ID resolution helpers
+
+/**
+ * Accept either a UUID or a slug e.g ("nairobi-ke") ("ke").
+ * Returns the internal id. Throws 404 if nothing matches.
+*/
+async function resolveCountryId(idOrSlug: string): Promise<string> {
+  const isUuid = UUID_RE.test(idOrSlug)
+  const country = await prisma.country.findFirst({
+    where : isUuid ? { id: idOrSlug } : { slug: idOrSlug },
+    select: { id: true },
+  })
+  if (!country) throw new ApiError(404, "Country not found", "NOT_FOUND")
+  return country.id
+}
+
+async function resolveCityId(idOrSlug: string): Promise<string> {
+  const isUuid = UUID_RE.test(idOrSlug)
+  const city = await prisma.city.findFirst({
+    where : isUuid ? { id: idOrSlug } : { slug: idOrSlug },
+    select: { id: true },
+  })
+  if (!city) throw new ApiError(404, "City not found", "NOT_FOUND")
+  return city.id
+}
+
+async function getCityOrThrow(idOrSlug: string) {
+  const isUuid = UUID_RE.test(idOrSlug)
+  const city = await prisma.city.findFirst({
+    where: isUuid ? { id: idOrSlug } : { slug: idOrSlug },
+  })
   if (!city) throw new ApiError(404, "City not found", "NOT_FOUND")
   return city
 }
@@ -77,8 +125,6 @@ async function getDeliveryZoneOrThrow(zoneId: string) {
 
 /**
  * Validates that a value is a structurally correct GeoJSON Polygon or MultiPolygon.
- * We trust Mapbox Draw to produce geometrically valid coordinates, but we
- * verify the shape before persisting.
  */
 function validateGeoJsonBoundary(value: unknown, fieldName = "boundary"): void {
   const b = value as Record<string, unknown>
@@ -97,98 +143,45 @@ function validateGeoJsonBoundary(value: unknown, fieldName = "boundary"): void {
   }
 }
 
-//* Input types
 
-export interface CreateCityInput {
-  countryId: string
-  name     : string
-  code?    : string
-  timezone : string
-  // latitude / longitude are NOT accepted here — they are derived from the
-  // city boundary polygon in saveCityBoundary() and stored automatically.
-}
-
-export interface UpdateCityInput {
-  name?    : string
-  code?    : string
-  timezone?: string
-  // latitude / longitude are not editable directly — they come from the boundary.
-}
-
-// The boundary GeoJSON sent here is whatever the admin confirmed on the map —
-// either the original OSM polygon, an edited version, or a fully manual draw.
-export interface SaveCityBoundaryInput {
-  boundary  : CityBoundary
-  osmId?    : string    // include if this originated from an OSM search
-  source    : "OSM" | "MANUAL"
-}
-
-export interface CreateServiceAreaInput {
-  name    : string
-  mode    : ServiceAreaMode
-  boundary: ServiceAreaBoundary
-}
-
-export interface UpdateServiceAreaInput {
-  name?    : string
-  mode?    : ServiceAreaMode
-  boundary?: ServiceAreaBoundary
-}
-
-export interface CreateDeliveryZoneInput {
-  name           : string
-  boundary       : DeliveryZoneBoundary
-  maxCourierCount?: number
-}
-
-export interface UpdateDeliveryZoneInput {
-  name?          : string
-  boundary?      : DeliveryZoneBoundary
-  maxCourierCount?: number
-}
-
-//* COUNTRIES 
+//* COUNTRIES
 
 export async function listCountriesForScope(
   actorCountryIds: string[],
   isGlobal       : boolean,
 ) {
+  const select = {
+    id            : true,
+    name          : true,
+    slug          : true,
+    code          : true,
+    currency      : true,
+    currencySymbol: true,
+    phoneCode     : true,
+    timezones     : true,
+    status        : true,
+    createdAt     : true,
+  }
+
   if (isGlobal) {
     return prisma.country.findMany({
       orderBy: { name: "asc" },
-      select : {
-        id            : true,
-        name          : true,
-        code          : true,
-        currency      : true,
-        currencySymbol: true,
-        phoneCode     : true,
-        timezones     : true,
-        status        : true,
-        createdAt     : true,
-        _count        : { select: { cities: true, vendors: true } },
-      },
+      select : { ...select, _count: { select: { cities: true, vendors: true } } },
     })
   }
 
   return prisma.country.findMany({
     where  : { id: { in: actorCountryIds }, status: "ACTIVE" },
     orderBy: { name: "asc" },
-    select : {
-      id            : true,
-      name          : true,
-      code          : true,
-      currency      : true,
-      currencySymbol: true,
-      phoneCode     : true,
-      timezones     : true,
-      status        : true,
-      _count        : { select: { cities: true } },
-    },
+    select : { ...select, _count: { select: { cities: true } } },
   })
 }
 
-export async function getCountry(countryId: string, scope: AdminScopeContext) {
+/**
+ * @param idOrSlug — UUID or slug e.g. "ke"
+ */
+export async function getCountry(idOrSlug: string, scope: AdminScopeContext) {
+  const countryId = await resolveCountryId(idOrSlug)
   assertCountryInScope(countryId, scope)
 
   const country = await prisma.country.findUnique({
@@ -199,6 +192,7 @@ export async function getCountry(countryId: string, scope: AdminScopeContext) {
         select : {
           id            : true,
           name          : true,
+          slug          : true,
           code          : true,
           timezone      : true,
           status        : true,
@@ -219,14 +213,15 @@ export async function getCountry(countryId: string, scope: AdminScopeContext) {
 }
 
 export async function activateCountry(
-  countryId: string,
+  idOrSlug: string,
   actorId  : string,
   scope    : AdminScopeContext,
 ) {
   if (!scope.isGlobal) {
-    throw new ApiError(403, "Only global admins can activate countries", "SCOPE_FORBIDDEN")
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
   }
 
+  const countryId = await resolveCountryId(idOrSlug)
   const country = await prisma.country.findUnique({ where: { id: countryId } })
   if (!country) throw new ApiError(404, "Country not found", "NOT_FOUND")
   if (country.status === GeoStatus.ACTIVE) {
@@ -248,14 +243,15 @@ export async function activateCountry(
 }
 
 export async function deactivateCountry(
-  countryId: string,
+  idOrSlug: string,
   actorId  : string,
   scope    : AdminScopeContext,
 ) {
   if (!scope.isGlobal) {
-    throw new ApiError(403, "Only global admins can deactivate countries", "SCOPE_FORBIDDEN")
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
   }
 
+  const countryId = await resolveCountryId(idOrSlug)
   const country = await prisma.country.findUnique({ where: { id: countryId } })
   if (!country) throw new ApiError(404, "Country not found", "NOT_FOUND")
   if (country.status === GeoStatus.INACTIVE) {
@@ -283,7 +279,11 @@ export async function deactivateCountry(
 
 //* CITIES
 
-export async function listCitiesForCountry(countryId: string, scope: AdminScopeContext) {
+/**
+ * @param idOrSlug — UUID or slug e.g. "ke"
+ */
+export async function listCitiesForCountry(idOrSlug: string, scope: AdminScopeContext) {
+  const countryId = await resolveCountryId(idOrSlug)
   assertCountryInScope(countryId, scope)
 
   return prisma.city.findMany({
@@ -292,6 +292,7 @@ export async function listCitiesForCountry(countryId: string, scope: AdminScopeC
     select : {
       id            : true,
       name          : true,
+      slug          : true,
       code          : true,
       timezone      : true,
       countryId     : true,
@@ -301,16 +302,23 @@ export async function listCitiesForCountry(countryId: string, scope: AdminScopeC
       osmId         : true,
       boundarySource: true,
       boundarySetAt : true,
-      boundingBox   : true,   // for frontend map viewport — not the full polygon
+      boundingBox   : true,
       createdAt     : true,
       _count        : { select: { serviceAreas: true, deliveryZones: true } },
     },
   })
 }
 
-export async function getCity(cityId: string, scope: AdminScopeContext) {
-  const city = await prisma.city.findUnique({
-    where  : { id: cityId },
+/**
+ * @param idOrSlug — UUID or slug e.g. "nairobi-ke"
+ */
+export async function getCity(idOrSlug: string, scope: AdminScopeContext) {
+  const city = await getCityOrThrow(idOrSlug)
+  assertCountryInScope(city.countryId, scope)
+
+  // Re-fetch with full relations now that we have the confirmed id
+  const full = await prisma.city.findUnique({
+    where  : { id: city.id },
     include: {
       serviceAreas: {
         orderBy: [{ mode: "asc" }, { name: "asc" }],
@@ -340,9 +348,8 @@ export async function getCity(cityId: string, scope: AdminScopeContext) {
     },
   })
 
-  if (!city) throw new ApiError(404, "City not found", "NOT_FOUND")
-  assertCountryInScope(city.countryId, scope)
-  return city
+  if (!full) throw new ApiError(404, "City not found", "NOT_FOUND")
+  return full
 }
 
 export async function createCity(
@@ -354,7 +361,7 @@ export async function createCity(
 
   const country = await prisma.country.findUnique({
     where : { id: input.countryId },
-    select: { status: true },
+    select: { status: true, code: true },
   })
   if (!country) throw new ApiError(404, "Country not found", "NOT_FOUND")
   if (country.status !== GeoStatus.ACTIVE) {
@@ -371,103 +378,128 @@ export async function createCity(
     throw new ApiError(409, "A city with this name already exists in this country", "DUPLICATE_CITY")
   }
 
+  // Build slug — guaranteed unique by the [countryId, name] constraint above.
+  // In the unlikely event of a slug collision (two different cities that normalise
+  // to the same slug across countries), we append a short id fragment.
+  const baseSlug   = buildCitySlug(input.name, country.code)
+  const slugExists = await prisma.city.findUnique({ where: { slug: baseSlug }, select: { id: true } })
+  const slug       = slugExists ? `${baseSlug}-${crypto.randomUUID().slice(0, 6)}` : baseSlug
+
   const city = await prisma.city.create({
     data: {
       countryId       : input.countryId,
       name            : input.name,
+      slug,
       code            : input.code ?? null,
       timezone        : input.timezone,
-      // latitude / longitude are set later when the boundary is saved
       status          : GeoStatus.ACTIVE,
       createdByAdminId: actorId,
     },
   })
 
-  serviceLog.info({ cityId: city.id, actorId }, "City created")
+  serviceLog.info({ cityId: city.id, slug: city.slug, actorId }, "City created")
   auditService.log({
     adminUserId: actorId,
     action     : "city.created",
     entityType : "City",
     entityId   : city.id,
-    changes    : { after: { name: city.name, countryId: city.countryId } },
+    changes    : { after: { name: city.name, slug: city.slug, countryId: city.countryId } },
   })
 
   return city
 }
 
 export async function updateCity(
-  cityId : string,
-  input  : UpdateCityInput,
-  actorId: string,
-  scope  : AdminScopeContext,
+  idOrSlug: string,
+  input   : UpdateCityInput,
+  actorId : string,
+  scope   : AdminScopeContext,
 ) {
-  const city = await getCityOrThrow(cityId)
+  const city = await getCityOrThrow(idOrSlug)
   assertCountryInScope(city.countryId, scope)
 
+  // Regenerate slug if name is changing
+  let newSlug: string | undefined
+  if (input.name && input.name !== city.name) {
+    const country = await prisma.country.findUnique({
+      where : { id: city.countryId },
+      select: { code: true },
+    })
+    if (country) {
+      const base       = buildCitySlug(input.name, country.code)
+      const slugExists = await prisma.city.findFirst({
+        where: { slug: base, id: { not: city.id } },
+        select: { id: true },
+      })
+      newSlug = slugExists ? `${base}-${crypto.randomUUID().slice(0, 6)}` : base
+    }
+  }
+
   const updated = await prisma.city.update({
-    where: { id: cityId },
+    where: { id: city.id },
     data : {
       ...(input.name     != null ? { name    : input.name    } : {}),
       ...(input.code     != null ? { code    : input.code    } : {}),
       ...(input.timezone != null ? { timezone: input.timezone } : {}),
+      ...(newSlug        != null ? { slug    : newSlug       } : {}),
     },
   })
 
-  serviceLog.info({ cityId, actorId }, "City updated")
+  serviceLog.info({ cityId: city.id, actorId, slugChanged: newSlug != null }, "City updated")
   auditService.log({
     adminUserId: actorId,
     action     : "city.updated",
     entityType : "City",
-    entityId   : cityId,
+    entityId   : city.id,
     changes    : {
-      before: { name: city.name, code: city.code, timezone: city.timezone },
-      after : { name: input.name, code: input.code, timezone: input.timezone },
+      before: { name: city.name, slug: city.slug, code: city.code, timezone: city.timezone },
+      after : { name: input.name, slug: newSlug, code: input.code, timezone: input.timezone },
     },
   })
 
   return updated
 }
 
-export async function activateCity(cityId: string, actorId: string, scope: AdminScopeContext) {
-  const city = await getCityOrThrow(cityId)
+export async function activateCity(idOrSlug: string, actorId: string, scope: AdminScopeContext) {
+  const city = await getCityOrThrow(idOrSlug)
   assertCountryInScope(city.countryId, scope)
   if (city.status === GeoStatus.ACTIVE) {
     throw new ApiError(400, "City is already active", "ALREADY_ACTIVE")
   }
 
-  await prisma.city.update({ where: { id: cityId }, data: { status: GeoStatus.ACTIVE } })
+  await prisma.city.update({ where: { id: city.id }, data: { status: GeoStatus.ACTIVE } })
 
-  serviceLog.info({ cityId, actorId }, "City activated")
+  serviceLog.info({ cityId: city.id, actorId }, "City activated")
   auditService.log({
     adminUserId: actorId,
     action     : "city.activated",
     entityType : "City",
-    entityId   : cityId,
+    entityId   : city.id,
     changes    : { before: { status: "INACTIVE" }, after: { status: "ACTIVE" } },
   })
 
   return { success: true }
 }
 
-export async function deactivateCity(cityId: string, actorId: string, scope: AdminScopeContext) {
-  const city = await getCityOrThrow(cityId)
+export async function deactivateCity(idOrSlug: string, actorId: string, scope: AdminScopeContext) {
+  const city = await getCityOrThrow(idOrSlug)
   assertCountryInScope(city.countryId, scope)
   if (city.status === GeoStatus.INACTIVE) {
     throw new ApiError(400, "City is already inactive", "ALREADY_INACTIVE")
   }
 
   const activeOutletCount = await prisma.outlet.count({
-    where: { cityId, deletedAt: null, adminStatus: "ACTIVE" },
+    where: { cityId: city.id, deletedAt: null, adminStatus: "ACTIVE" },
   })
 
-  await prisma.city.update({ where: { id: cityId }, data: { status: GeoStatus.INACTIVE } })
+  await prisma.city.update({ where: { id: city.id }, data: { status: GeoStatus.INACTIVE } })
 
-  serviceLog.warn({ cityId, actorId, activeOutletCount }, "City deactivated")
+  serviceLog.warn({ cityId: city.id, actorId, activeOutletCount }, "City deactivated")
   auditService.log({
     adminUserId: actorId,
     action     : "city.deactivated",
     entityType : "City",
-    entityId   : cityId,
+    entityId   : city.id,
     changes    : { before: { status: "ACTIVE" }, after: { status: "INACTIVE" } },
     metadata   : { activeOutletCount },
   })
@@ -476,39 +508,24 @@ export async function deactivateCity(cityId: string, actorId: string, scope: Adm
 }
 
 //* CITY BOUNDARY
-//
-// Two-step flow on the admin frontend:
-//
-// Step 1 — Preview (read-only, no DB write):
-//   Admin searches by city name + country code → frontend calls
-//   GET /cities/:cityId/boundary/osm-preview?q=Dubai&countryCode=AE
-//   Backend calls searchCityBoundary() and returns OsmBoundaryResult.
-//   Frontend renders the GeoJSON on the Mapbox map. Admin can edit vertices.
-//
-// Step 2 — Save (DB write):
-//   Admin clicks "Save" → frontend sends the final (possibly edited) GeoJSON
-//   to POST /cities/:cityId/boundary
-//   Backend validates, derives bbox, persists to City record.
-//   osmId is included in the payload only when the boundary originated from OSM.
 
-/**
- * Get the stored boundary config for a city — used by the admin map page
- * to render the existing boundary on load.
- */
-export async function getCityBoundary(cityId: string, scope: AdminScopeContext) {
+export async function getCityBoundary(idOrSlug: string, scope: AdminScopeContext) {
+  const cityId = await resolveCityId(idOrSlug)
+
   const city = await prisma.city.findUnique({
     where : { id: cityId },
     select: {
-      id            : true,
-      name          : true,
-      countryId     : true,
-      latitude      : true,
-      longitude     : true,
-      boundary      : true,
-      boundingBox   : true,
-      osmId         : true,
-      boundarySource: true,
-      boundarySetAt : true,
+      id             : true,
+      name           : true,
+      slug           : true,   // ← included
+      countryId      : true,
+      latitude       : true,
+      longitude      : true,
+      boundary       : true,
+      boundingBox    : true,
+      osmId          : true,
+      boundarySource : true,
+      boundarySetAt  : true,
       boundarySetById: true,
     },
   })
@@ -517,6 +534,7 @@ export async function getCityBoundary(cityId: string, scope: AdminScopeContext) 
 
   return {
     cityId        : city.id,
+    citySlug      : city.slug,
     cityName      : city.name,
     centroid      : { latitude: city.latitude, longitude: city.longitude },
     isConfigured  : city.boundary != null,
@@ -528,11 +546,6 @@ export async function getCityBoundary(cityId: string, scope: AdminScopeContext) 
   }
 }
 
-/**
- * OSM boundary preview — search by city name + ISO country code.
- * Returns GeoJSON for the frontend to render and edit on the map.
- * Does NOT write to the DB.
- */
 export async function previewOsmBoundary(
   cityName   : string,
   countryCode: string,
@@ -540,26 +553,19 @@ export async function previewOsmBoundary(
   return searchCityBoundary(cityName, countryCode)
 }
 
-/**
- * Save the city boundary — whatever GeoJSON the admin confirmed on the map.
- * This may be the original OSM polygon, an edited version, or fully manual.
- * Derives and caches the bounding box. Updates the centroid if not set.
- */
 export async function saveCityBoundary(
-  cityId : string,
-  input  : SaveCityBoundaryInput,
-  actorId: string,
-  scope  : AdminScopeContext,
+  idOrSlug: string,
+  input   : SaveCityBoundaryInput,
+  actorId : string,
+  scope   : AdminScopeContext,
 ) {
-  const city = await getCityOrThrow(cityId)
+  const city = await getCityOrThrow(idOrSlug)
   assertCountryInScope(city.countryId, scope)
 
   validateGeoJsonBoundary(input.boundary, "boundary")
 
   const boundingBox = deriveBoundingBoxFromGeoJson(input.boundary)
 
-  // Always compute and overwrite centroid from the boundary polygon.
-  // The admin does not enter lat/lng manually — it comes from geometry only.
   const ring: [number, number][] =
     input.boundary.type === "Polygon"
       ? (input.boundary.coordinates[0] ?? [])
@@ -575,7 +581,7 @@ export async function saveCityBoundary(
   const previousBoundary = city.boundary
 
   await prisma.city.update({
-    where: { id: cityId },
+    where: { id: city.id },
     data : {
       boundary       : input.boundary as object,
       boundingBox    : boundingBox    as object,
@@ -583,28 +589,20 @@ export async function saveCityBoundary(
       boundarySource : input.source,
       boundarySetAt  : new Date(),
       boundarySetById: actorId,
-      // Always overwrite — computed from geometry, never entered manually
       latitude       : centroidLat,
       longitude      : centroidLng,
     },
   })
 
-  serviceLog.info({ cityId, actorId, source: input.source, osmId: input.osmId }, "City boundary saved")
+  serviceLog.info({ cityId: city.id, actorId, source: input.source, osmId: input.osmId }, "City boundary saved")
   auditService.log({
     adminUserId: actorId,
     action     : "city.boundary_saved",
     entityType : "City",
-    entityId   : cityId,
+    entityId   : city.id,
     changes    : {
-      before: {
-        boundarySet   : previousBoundary != null,
-        boundarySource: city.boundarySource,
-      },
-      after: {
-        boundarySet   : true,
-        boundarySource: input.source,
-        osmId         : input.osmId ?? null,
-      },
+      before: { boundarySet: previousBoundary != null, boundarySource: city.boundarySource },
+      after : { boundarySet: true, boundarySource: input.source, osmId: input.osmId ?? null },
     },
   })
 
@@ -617,20 +615,16 @@ export async function saveCityBoundary(
   }
 }
 
-/**
- * Clear the city boundary — removes the stored polygon and derived bbox.
- * All service areas must be deleted first (they depend on the boundary).
- */
 export async function clearCityBoundary(
-  cityId : string,
-  actorId: string,
-  scope  : AdminScopeContext,
+  idOrSlug: string,
+  actorId : string,
+  scope   : AdminScopeContext,
 ) {
-  const city = await getCityOrThrow(cityId)
+  const city = await getCityOrThrow(idOrSlug)
   assertCountryInScope(city.countryId, scope)
   if (!city.boundary) throw new ApiError(400, "City has no boundary to clear", "NO_BOUNDARY")
 
-  const serviceAreaCount = await prisma.serviceArea.count({ where: { cityId } })
+  const serviceAreaCount = await prisma.serviceArea.count({ where: { cityId: city.id } })
   if (serviceAreaCount > 0) {
     throw new ApiError(
       409,
@@ -640,7 +634,7 @@ export async function clearCityBoundary(
   }
 
   await prisma.city.update({
-    where: { id: cityId },
+    where: { id: city.id },
     data : {
       boundary       : {},
       boundingBox    : {},
@@ -651,12 +645,12 @@ export async function clearCityBoundary(
     },
   })
 
-  serviceLog.warn({ cityId, actorId }, "City boundary cleared")
+  serviceLog.warn({ cityId: city.id, actorId }, "City boundary cleared")
   auditService.log({
     adminUserId: actorId,
     action     : "city.boundary_cleared",
     entityType : "City",
-    entityId   : cityId,
+    entityId   : city.id,
     changes    : { before: { boundarySource: city.boundarySource }, after: { boundary: null } },
   })
 
@@ -664,19 +658,10 @@ export async function clearCityBoundary(
 }
 
 //* SERVICE AREAS
-//
-// All four modes (FULL_SERVICE, SELF_DELIVERY, WAITLIST, EXCLUDED) are managed
-// through the same CRUD endpoints. The frontend distinguishes them visually
-// by color-coding. The admin selects the mode when drawing a polygon.
-//
-// Rules:
-//   - City boundary must be set before service areas can be created.
-//   - Polygons can overlap (we don't block it — the resolver picks the
-//     most permissive non-EXCLUDED match).
-//   - Deactivating a service area does not delete it — use delete for that.
-//   - Cannot delete a service area that has linked outlet records.
 
-export async function listServiceAreas(cityId: string, scope: AdminScopeContext) {
+export async function listServiceAreas(idOrSlug: string, scope: AdminScopeContext) {
+  const cityId = await resolveCityId(idOrSlug)
+
   const city = await prisma.city.findUnique({
     where : { id: cityId },
     select: { countryId: true },
@@ -707,11 +692,13 @@ export async function getServiceArea(serviceAreaId: string, scope: AdminScopeCon
 }
 
 export async function createServiceArea(
-  cityId : string,
-  input  : CreateServiceAreaInput,
-  actorId: string,
-  scope  : AdminScopeContext,
+  idOrSlug: string,
+  input   : CreateServiceAreaInput,
+  actorId : string,
+  scope   : AdminScopeContext,
 ) {
+  const cityId = await resolveCityId(idOrSlug)
+
   const city = await prisma.city.findUnique({
     where : { id: cityId },
     select: { countryId: true, status: true, boundary: true },
@@ -723,11 +710,7 @@ export async function createServiceArea(
     throw new ApiError(400, "Cannot add service areas to an inactive city", "CITY_INACTIVE")
   }
   if (!city.boundary) {
-    throw new ApiError(
-      400,
-      "Set the city boundary before adding service areas",
-      "CITY_BOUNDARY_NOT_SET",
-    )
+    throw new ApiError(400, "Set the city boundary before adding service areas", "CITY_BOUNDARY_NOT_SET")
   }
 
   validateGeoJsonBoundary(input.boundary, "boundary")
@@ -741,11 +724,7 @@ export async function createServiceArea(
     where: { cityId, name: { equals: input.name, mode: "insensitive" } },
   })
   if (duplicate) {
-    throw new ApiError(
-      409,
-      "A service area with this name already exists in this city",
-      "DUPLICATE_SERVICE_AREA",
-    )
+    throw new ApiError(409, "A service area with this name already exists in this city", "DUPLICATE_SERVICE_AREA")
   }
 
   const area = await prisma.serviceArea.create({
@@ -805,7 +784,7 @@ export async function updateServiceArea(
     entityType : "ServiceArea",
     entityId   : serviceAreaId,
     changes    : {
-      before: { name: area.name, mode: area.mode, boundaryChanged: input.boundary != null },
+      before: { name: area.name, mode: area.mode },
       after : { name: input.name, mode: input.mode, boundaryChanged: input.boundary != null },
     },
   })
@@ -824,10 +803,7 @@ export async function activateServiceArea(
     throw new ApiError(400, "Service area is already active", "ALREADY_ACTIVE")
   }
 
-  await prisma.serviceArea.update({
-    where: { id: serviceAreaId },
-    data : { status: GeoStatus.ACTIVE },
-  })
+  await prisma.serviceArea.update({ where: { id: serviceAreaId }, data: { status: GeoStatus.ACTIVE } })
 
   serviceLog.info({ serviceAreaId, actorId }, "Service area activated")
   auditService.log({
@@ -859,10 +835,7 @@ export async function deactivateServiceArea(
     throw new ApiError(400, "Service area is already inactive", "ALREADY_INACTIVE")
   }
 
-  await prisma.serviceArea.update({
-    where: { id: serviceAreaId },
-    data : { status: GeoStatus.INACTIVE },
-  })
+  await prisma.serviceArea.update({ where: { id: serviceAreaId }, data: { status: GeoStatus.INACTIVE } })
 
   serviceLog.warn({ serviceAreaId, actorId, linkedOutlets: area._count.outlets }, "Service area deactivated")
   auditService.log({
@@ -915,12 +888,10 @@ export async function deleteServiceArea(
 }
 
 //* DELIVERY ZONES
-//
-// Separate from service areas — managed on a different admin page by courier_ops.
-// Constrained to FULL_SERVICE areas only.
-// No overlaps enforced — backend warns, does not block.
 
-export async function listDeliveryZones(cityId: string, scope: AdminScopeContext) {
+export async function listDeliveryZones(idOrSlug: string, scope: AdminScopeContext) {
+  const cityId = await resolveCityId(idOrSlug)
+
   const city = await prisma.city.findUnique({
     where : { id: cityId },
     select: { countryId: true },
@@ -944,11 +915,13 @@ export async function listDeliveryZones(cityId: string, scope: AdminScopeContext
 }
 
 export async function createDeliveryZone(
-  cityId : string,
-  input  : CreateDeliveryZoneInput,
-  actorId: string,
-  scope  : AdminScopeContext,
+  idOrSlug: string,
+  input   : CreateDeliveryZoneInput,
+  actorId : string,
+  scope   : AdminScopeContext,
 ) {
+  const cityId = await resolveCityId(idOrSlug)
+
   const city = await prisma.city.findUnique({
     where : { id: cityId },
     select: { countryId: true, status: true, boundary: true },
@@ -965,10 +938,6 @@ export async function createDeliveryZone(
 
   validateGeoJsonBoundary(input.boundary, "boundary")
 
-  // ── Hard constraint: the delivery zone must be fully inside a FULL_SERVICE area ──
-  // We sample all vertex points of the incoming zone polygon and require that
-  // every vertex falls inside at least one active FULL_SERVICE service area.
-  // This prevents zones from straddling WAITLIST, SELF_DELIVERY, or EXCLUDED areas.
   const fullServiceAreas = await prisma.serviceArea.findMany({
     where : { cityId, mode: "FULL_SERVICE", status: "ACTIVE" },
     select: { id: true, name: true, boundaries: true },
@@ -991,14 +960,9 @@ export async function createDeliveryZone(
     where: { cityId, name: { equals: input.name, mode: "insensitive" } },
   })
   if (duplicate) {
-    throw new ApiError(
-      409,
-      "A delivery zone with this name already exists in this city",
-      "DUPLICATE_DELIVERY_ZONE",
-    )
+    throw new ApiError(409, "A delivery zone with this name already exists in this city", "DUPLICATE_DELIVERY_ZONE")
   }
 
-  // Soft overlap detection — warn but don't block
   const overlapWarning = await detectDeliveryZoneOverlap(cityId, input.boundary)
 
   const zone = await prisma.deliveryZone.create({
@@ -1037,7 +1001,6 @@ export async function updateDeliveryZone(
   if (input.boundary) {
     validateGeoJsonBoundary(input.boundary, "boundary")
 
-    // Re-validate containment if boundary is changing
     const fullServiceAreas = await prisma.serviceArea.findMany({
       where : { cityId: zone.cityId, mode: "FULL_SERVICE", status: "ACTIVE" },
       select: { id: true, name: true, boundaries: true },
@@ -1165,14 +1128,8 @@ export async function deleteDeliveryZone(
 }
 
 
-
 //* Internal helpers
 
-/**
- * Soft overlap detection for delivery zones.
- * Checks whether the centroid of the incoming zone falls inside any existing
- * active zone in the same city. Warns but does not block — the admin decides.
- */
 async function detectDeliveryZoneOverlap(
   cityId        : string,
   boundary      : DeliveryZoneBoundary,
@@ -1208,29 +1165,14 @@ async function detectDeliveryZoneOverlap(
   return undefined
 }
 
-/**
- * Hard containment check for delivery zones.
- *
- * Samples every vertex of the incoming delivery zone polygon and verifies
- * that each one falls inside at least one active FULL_SERVICE service area.
- *
- * Why vertices rather than just the centroid: a centroid-only check would
- * pass for a large zone that spans a FULL_SERVICE area and a WAITLIST area.
- * Checking all vertices is still O(n*m) where n = zone vertices, m = service
- * areas — completely tractable for hand-drawn admin polygons.
- *
- * Returns an error message string if any vertex is outside all FULL_SERVICE
- * areas, undefined if the zone is fully contained.
- */
 function validateZoneInsideFullService(
-  boundary    : DeliveryZoneBoundary,
+  boundary        : DeliveryZoneBoundary,
   fullServiceAreas: Array<{ id: string; name: string; boundaries: unknown }>,
 ): string | undefined {
   if (fullServiceAreas.length === 0) {
     return "No active FULL_SERVICE service areas exist in this city."
   }
 
-  // Collect all vertex points from the zone polygon
   const vertices: [number, number][] =
     boundary.type === "Polygon"
       ? (boundary.coordinates[0] ?? [])

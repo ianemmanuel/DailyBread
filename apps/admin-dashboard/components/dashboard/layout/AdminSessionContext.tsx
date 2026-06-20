@@ -1,8 +1,8 @@
 "use client"
 
-import { createContext, useContext }        from "react"
-import type { AdminSessionData }            from "@repo/types/admin-app"
-import type { AdminPermissionKey }          from "@repo/types/admin-app"
+import { createContext, useContext } from "react"
+import type { AdminSessionData } from "@repo/types/admin-app"
+import type { AdminPermissionKey } from "@repo/types/admin-app"
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 //

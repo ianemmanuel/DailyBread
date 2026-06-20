@@ -1,56 +1,23 @@
-import { ReactNode } from "react"
+import { type ReactNode } from "react"
 import { cn } from "@repo/ui/lib/utils"
 
 interface PageHeaderProps {
-  title: string
-  
+  title:        string
   description?: string
-  
-  /**
-   * Optional action buttons or elements aligned to the right
-   */
-  actions?: ReactNode
-  
-  /**
-   * Optional breadcrumb component
-   */
-  breadcrumb?: ReactNode
-  
-  /**
-   * Optional icon to display before the title
-   */
-  icon?: React.ElementType
-  
-  /**
-   * Additional className for the header container
-   */
-  className?: string
-  
-  /**
-   * Whether to show a divider line below the header
-   * @default false
-   */
-  divider?: boolean
+  actions?:     ReactNode
+  breadcrumb?:  ReactNode
+  icon?:        React.ElementType
+  className?:   string
+  divider?:     boolean
 }
 
 /**
- * PageHeader — Minimalist, clean header for dashboard pages.
- * 
- * Features:
- * - Responsive: stacks on mobile, row on desktop
- * - Consistent spacing that aligns with dashboard grid
- * - Optional description text with subtle styling
- * - Optional actions area (buttons, filters, etc.)
- * - Optional breadcrumb navigation
- * 
- * Usage:
- * ```tsx
- * <PageHeader 
- *   title="Cities"
- *   description="Manage delivery zones and city configurations"
- *   actions={<Button>Add City</Button>}
- * />
- * ```
+ * PageHeader — shared across all dashboard pages.
+ *
+ * Left: optional icon pill + h1 title + description.
+ * Right: optional actions slot (buttons, dropdowns, etc.)
+ * Optional breadcrumb row above.
+ * Optional divider below.
  */
 export function PageHeader({
   title,
@@ -62,48 +29,46 @@ export function PageHeader({
   divider = false,
 }: PageHeaderProps) {
   return (
-    <div className={cn("space-y-4", className)}>
-      {/* Breadcrumb (if provided) */}
+    <div className={cn("space-y-3 pb-2", className)}>
       {breadcrumb && (
-        <div className="text-sm">
+        <div className="text-sm" style={{ color: "var(--muted-foreground)" }}>
           {breadcrumb}
         </div>
       )}
 
-      {/* Main header row */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        {/* Left side: Icon + Title + Description */}
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex items-center gap-3">
-            {Icon && (
-              <div
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                style={{
-                  backgroundColor: "color-mix(in oklch, var(--primary) 10%, transparent)",
-                }}
-              >
-                <Icon className="h-4 w-4" style={{ color: "var(--primary)" }} />
-              </div>
-            )}
+        {/* Left: icon + title + description */}
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          {Icon && (
+            <div
+              className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+              style={{
+                backgroundColor: "color-mix(in oklch, var(--primary) 12%, transparent)",
+                border: "1px solid color-mix(in oklch, var(--primary) 25%, transparent)",
+              }}
+            >
+              <Icon className="h-5 w-5" style={{ color: "var(--primary)" }} />
+            </div>
+          )}
+          <div className="min-w-0">
             <h1
               className="font-display text-2xl font-semibold tracking-tight sm:text-3xl"
               style={{ color: "var(--foreground)" }}
             >
               {title}
             </h1>
+            {description && (
+              <p
+                className="mt-1 text-sm leading-relaxed"
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                {description}
+              </p>
+            )}
           </div>
-          
-          {description && (
-            <p
-              className="text-sm leading-relaxed sm:text-base"
-              style={{ color: "var(--muted-foreground)" }}
-            >
-              {description}
-            </p>
-          )}
         </div>
 
-        {/* Right side: Actions */}
+        {/* Right: actions */}
         {actions && (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {actions}
@@ -111,10 +76,9 @@ export function PageHeader({
         )}
       </div>
 
-      {/* Divider */}
       {divider && (
         <div
-          className="h-px w-full pt-4"
+          className="mt-2 h-px w-full"
           style={{ backgroundColor: "var(--border)" }}
         />
       )}

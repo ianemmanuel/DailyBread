@@ -23,7 +23,6 @@ export async function POST(
     if (!allowedActions.includes(action)) {
       return NextResponse.json({ message: "Invalid action" }, { status: 400 })
     }
-    console.log("request passed allowedActions check")
     let body: object | undefined
     try { body = await req.json() } catch { body = undefined }
 

@@ -1,4 +1,4 @@
-// ─── API response envelope ────────────────────────────────────────────────────
+//* API response envelope
 // Every API response follows one of these three shapes.
 // The backend constructs them via sendSuccess/sendError.
 // The frontend destructures them in fetch wrappers.
@@ -17,8 +17,7 @@ export interface ApiErrorResponse {
 
 export type ApiResponse<T> = ApiSuccess<T> | ApiErrorResponse
 
-// ─── Pagination ───────────────────────────────────────────────────────────────
-
+//*Pagination
 export interface PaginationMeta {
   page       : number
   pageSize   : number
@@ -33,7 +32,7 @@ export interface PaginatedData<T> {
 
 export type PaginatedResponse<T> = ApiSuccess<PaginatedData<T>>
 
-// ─── Common query params ──────────────────────────────────────────────────────
+//*Common query params
 
 export interface PaginationParams {
   page?     : number   // default 1
@@ -45,7 +44,7 @@ export interface DateRangeParams {
   to?   : string  // ISO date string
 }
 
-// ─── Type guard ───────────────────────────────────────────────────────────────
+//*Type guard
 
 export function isApiError(response: ApiResponse<unknown>): response is ApiErrorResponse {
   return response.status === "error"
