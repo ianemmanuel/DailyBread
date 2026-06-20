@@ -4,14 +4,12 @@ import Link from "next/link"
 import {
   CheckCircle2,
   XCircle,
-  ExternalLink,
   BarChart2,
   ShieldCheck,
   MapPin,
   Store,
   FileText,
 } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
 import { Button } from "@repo/ui/components/button"
 import type { Country } from "@repo/types/admin-app"
 
@@ -19,11 +17,11 @@ interface CountryHeroProps {
   country: Country
 }
 
-export function CountryHero({ country }: CountryHeroProps) {
+export default function Hero({ country }: CountryHeroProps) {
   const isActive = country.status === "ACTIVE"
 
   const quickActions = [
-    { label: "Analytics",  icon: BarChart2,   href: `/countries/${country.slug}/stats`      },
+    { label: "Analytics",  icon: BarChart2,   href: `/countries/${country.slug}/analytics`      },
     { label: "Vendors",    icon: Store,       href: `/countries/${country.slug}/vendors`     },
     { label: "Cities",     icon: MapPin,      href: `/countries/${country.slug}/cities`      },
     { label: "Compliance", icon: ShieldCheck, href: `/countries/${country.slug}/compliance`  },
@@ -32,13 +30,11 @@ export function CountryHero({ country }: CountryHeroProps) {
 
   return (
     <div
-      className="rounded-xl border p-5 sm:p-6"
+      className="rounded-xl border p-5 sm:p-6 pb-6"
       style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
     >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        {/* Left — country identity */}
         <div className="flex items-start gap-4">
-          {/* Code badge */}
           <div
             className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-lg font-bold font-display tracking-wide"
             style={{
@@ -98,7 +94,6 @@ export function CountryHero({ country }: CountryHeroProps) {
         </div>
       </div>
 
-      {/* Quick actions */}
       <div
         className="mt-5 flex flex-wrap items-center gap-2 border-t pt-4"
         style={{ borderColor: "var(--border)" }}
@@ -111,7 +106,7 @@ export function CountryHero({ country }: CountryHeroProps) {
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1.5 rounded-lg px-3 text-xs font-medium"
+              className="h-7 gap-1.5 rounded-lg px-3 text-xs font-medium cursor-pointer"
             >
               <Icon className="h-3 w-3" />
               {label}

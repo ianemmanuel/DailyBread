@@ -4,6 +4,7 @@ import { requirePermission } from "@/modules/admin/middleware"
 import {
   handleGetPlatformKPIs,
   handleGetCountriesByStatus,
+  handleGetCountryVendorSnapshot,
 } from "../../controllers/admin.platform.controller"
 
 const platformRouter: Router = Router()
@@ -19,12 +20,9 @@ platformRouter.get("/kpis", READ, handleGetPlatformKPIs)
 /**
  * GET /admin/v1/platform/countries
  * GET /admin/v1/platform/countries?status=ACTIVE
- * GET /admin/v1/platform/countries?status=INACTIVE
- *
- * Single endpoint, status-filtered. Cleaner than three separate routes.
- * Geography routes (/geography/countries) remain for geography-specific operations
- * (city CRUD, boundaries, service areas). This route is for UI-layer listing and KPIs.
+ * GET /admin/v1/platform/countries?status=INACTIVE.
  */
 platformRouter.get("/countries", READ, handleGetCountriesByStatus)
+platformRouter.get("/countries/:countrySlug/vendors", READ, handleGetCountryVendorSnapshot)
 
 export default platformRouter

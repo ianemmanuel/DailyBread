@@ -1,4 +1,11 @@
-import { Store, MapPin, ShoppingBag, Users, TrendingUp, Clock } from "lucide-react"
+import { 
+  Store, 
+  MapPin, 
+  ShoppingBag, 
+  Users, 
+  TrendingUp, 
+  Clock 
+} from "lucide-react"
 import type { CountryDetailMetrics as CountryMetricsType } from "@/types/geography.types"
 
 interface CountryMetricsProps {
@@ -13,7 +20,7 @@ interface MetricCard {
   accent?:   boolean
 }
 
-export function CountryMetrics({ metrics }: CountryMetricsProps) {
+export default function Metrics({ metrics }: CountryMetricsProps) {
   const cards: MetricCard[] = [
     {
       label:  "Total Vendors",
@@ -51,7 +58,7 @@ export function CountryMetrics({ metrics }: CountryMetricsProps) {
   ]
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 pt-6">
       {cards.map(({ label, value, sub, icon: Icon, accent }) => (
         <div
           key={label}
@@ -61,18 +68,17 @@ export function CountryMetrics({ metrics }: CountryMetricsProps) {
             borderColor: "var(--border)",
           }}
         >
-          {/* Icon */}
           <div
             className="flex h-8 w-8 items-center justify-center rounded-lg"
             style={{
               backgroundColor: accent
-                ? "color-mix(in oklch, var(--primary) 10%, transparent)"
+                ? "color-mix(in oklch, var(--success) 10%, transparent)"
                 : "var(--icon-bg)",
             }}
           >
             <Icon
               className="h-4 w-4"
-              style={{ color: accent ? "var(--primary)" : "var(--icon-fg)" }}
+              style={{ color: accent ? "var(--success)" : "var(--icon-fg)" }}
             />
           </div>
 
@@ -81,7 +87,7 @@ export function CountryMetrics({ metrics }: CountryMetricsProps) {
             <p
               className="font-display text-xl font-semibold tabular-nums leading-none tracking-tight"
               style={{
-                color: accent ? "var(--primary)" : "var(--foreground)",
+                color: accent ? "var(--success)" : "var(--foreground)",
               }}
             >
               {value}
@@ -93,7 +99,6 @@ export function CountryMetrics({ metrics }: CountryMetricsProps) {
             )}
           </div>
 
-          {/* Label */}
           <p
             className="text-xs font-medium"
             style={{ color: "var(--muted-foreground)" }}

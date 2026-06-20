@@ -1,7 +1,7 @@
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react"
 import type { ComplianceItem } from "@/types/geography.types"
 
-interface CountryCompliancePanelProps {
+interface CompliancePanelProps {
   items: ComplianceItem[]
 }
 
@@ -11,7 +11,7 @@ const statusConfig = {
   EXPIRED: { icon: XCircle,      color: "var(--destructive)", bg: "var(--destructive-bg)" },
 }
 
-export function CountryCompliancePanel({ items }: CountryCompliancePanelProps) {
+export default function CompliancePanel({ items }: CompliancePanelProps) {
   const expiredCount = items.filter((i) => i.status === "EXPIRED").length
   const warningCount = items.filter((i) => i.status === "WARNING").length
 

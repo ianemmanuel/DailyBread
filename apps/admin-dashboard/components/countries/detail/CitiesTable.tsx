@@ -3,12 +3,12 @@ import { ArrowRight } from "lucide-react"
 import { GeoStatusBadge } from "@/components/geography/shared/GeoStatusBadge"
 import type { CityRow } from "@/types/geography.types"
 
-interface CountryCitiesTableProps {
-  cities:      CityRow[]
+interface CitiesTableProps {
+  cities: CityRow[]
   countrySlug: string
 }
 
-export function CountryCitiesTable({ cities, countrySlug }: CountryCitiesTableProps) {
+export default function CitiesTable({ cities, countrySlug }: CitiesTableProps) {
   return (
     <div
       className="overflow-hidden rounded-xl border"
@@ -139,7 +139,7 @@ export function CountryCitiesTable({ cities, countrySlug }: CountryCitiesTablePr
           className="text-xs font-medium transition-colors duration-150"
           style={{ color: "var(--primary)" }}
         >
-          Manage cities →
+          View More →
         </Link>
       </div>
     </div>

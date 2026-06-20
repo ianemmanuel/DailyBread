@@ -9,12 +9,12 @@ import type {
 } from "@/types/geography.types"
 
 
-export function buildMockDetail(country: Country): CountryDetailData {
+export function buildCountryDetail(country: Country): CountryDetailData {
   const metrics: CountryDetailMetrics = {
-    totalVendors: country._count?.vendors ?? 532,
-    activeVendors: Math.floor((country._count?.vendors ?? 532) * 0.87),
-    totalCities: country._count?.cities ?? 14,
-    activeCities: Math.floor((country._count?.cities ?? 14) * 0.79),
+    totalVendors: country._count?.vendors ?? 0,
+    activeVendors: Math.floor((country._count?.vendors ?? 0) * 0.87),
+    totalCities: country._count?.cities ?? 0,
+    activeCities: Math.floor((country._count?.cities ?? 0) * 0.79),
     totalOutlets: 1840,
     totalCustomers: 48200,
     fulfillmentRate: 94.2,

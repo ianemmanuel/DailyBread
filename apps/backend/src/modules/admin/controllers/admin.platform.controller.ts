@@ -7,6 +7,7 @@ import { ApiError } from "@/middleware/error"
 import {
   getPlatformKPIs,
   getCountriesByStatus,
+  getCountryVendorSnapshot,
 } from "../services/admin.platform.service"
 
 /**
@@ -45,4 +46,18 @@ export const handleGetCountriesByStatus: RequestHandler = async (req, res, next)
     )
     return sendSuccess(res, data, "Countries fetched")
   } catch (err) { next(err) }
+}
+
+export const handleGetCountryVendorSnapshot: RequestHandler = async ( req, res, next ) => {
+  try {
+    const { adminScope } = req as unknown as AdminRequest
+
+    const { countrySlug } =req.params as { countrySlug: string }
+
+    const snapshot = await getCountryVendorSnapshot( countrySlug, adminScope )
+    console.log("Snapshot in controller:", snapshot)
+    return sendSuccess( res, snapshot, "Vendor snapshot fetched")
+  } catch (err) {
+    next(err)
+  }
 }

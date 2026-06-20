@@ -3,10 +3,10 @@ import type {
     CountrySummaryResult,
     CountryDetailData,
 } from "@/types/geography.types"
-import { buildMockDetail } from "@/utils/helpers/countries";
+import { buildCountryDetail } from "@/utils/helpers/countries"
 
 
-type FetchResult<T> =
+type FetchResult<T> = 
   | { ok: true;  data: T }
   | { ok: false; error: string }
 
@@ -58,8 +58,9 @@ export async function fetchCountryDetail(token: string, slug: string): Promise<C
     if (res.status === 404) return null
     if (!res.ok) return null
     const { data }: ApiSuccess<Country> = await res.json()
-    return buildMockDetail(data)
+    return buildCountryDetail(data)
   } catch {
     return null
   }
 }
+

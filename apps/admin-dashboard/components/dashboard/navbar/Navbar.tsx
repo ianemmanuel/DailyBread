@@ -2,36 +2,12 @@ import { Bell } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { ThemeToggle } from "@/components/shared/theme/theme-toggle"
 import { AdminProfileButton } from "./AdminProfileButton"
-import { MobileSidebar } from "@/components/dashboard/sidebar/MobileSidebar"
 
-interface NavbarProps {
-  session: any
-}
-
-/**
- * Navbar — sticky top bar.
- *
- * MobileSidebar renders its own SheetTrigger (burger) + SheetContent.
- * They MUST live in the same component so Radix Sheet context is intact.
- * The trigger is lg:hidden so it only appears on mobile.
- */
-export function Navbar({ session }: NavbarProps) {
+export function Navbar() {
   return (
-    <header
-      className="sticky top-0 z-30 flex h-16 items-center border-b border-topbar-border px-4 sm:px-6 lg:px-8"
-      style={{
-        backgroundColor: "color-mix(in oklch, var(--topbar) 92%, transparent)",
-        backdropFilter: "blur(10px) saturate(1.4)",
-        WebkitBackdropFilter: "blur(10px) saturate(1.4)",
-        boxShadow: "0 1px 0 0 var(--border), 0 2px 8px -2px oklch(0 0 0 / 4%)",
-      }}
-    >
-      {/* Mobile burger + Sheet — self-contained, lg:hidden trigger inside */}
-      <MobileSidebar session={session} />
-
+    <header className="sticky top-0 z-30 flex h-16 items-center border-b border-[transparent] bg-[var(--topbar)] px-4 shadow-[0_1px_0_0_var(--topbar-border)] backdrop-blur-xl backdrop-saturate-150 sm:px-6 lg:px-8">
       <div className="flex-1" />
 
-      {/* Right actions */}
       <div className="flex items-center gap-1">
         <ThemeToggle />
 

@@ -1,4 +1,5 @@
 import { SidebarDesktop } from "./SidebarDesktop"
+import { MobileSidebar } from "./MobileSidebar"
 import type { AdminSessionData } from "@repo/types/admin-app"
 
 interface SidebarProps {
@@ -6,12 +7,16 @@ interface SidebarProps {
 }
 
 /**
- * Sidebar — desktop only.
- *
- * MobileSidebar (Sheet + trigger) is rendered inside Navbar so the
- * SheetTrigger and SheetContent share the same Radix Sheet context.
- * Splitting them across the component tree breaks the trigger entirely.
+ * Sidebar — renders the desktop sidebar + the mobile Sheet trigger.
+ * Both live here so the burger button is logically part of navigation,
+ * not the topbar. The Sheet is uncontrolled (no useState) — Radix
+ * manages open/close state internally via its context.
  */
 export function Sidebar({ session }: SidebarProps) {
-  return <SidebarDesktop session={session} />
+  return (
+    <>
+      <SidebarDesktop session={session} />
+      <MobileSidebar session={session} />
+    </>
+  )
 }

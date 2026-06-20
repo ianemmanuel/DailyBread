@@ -40,7 +40,7 @@ export default function SectionTitle({
           className="text-xs font-medium transition-colors duration-150"
           style={{ color: "var(--primary)" }}
         >
-          View all →
+          Manage →
         </Link>
       )}
     </div>

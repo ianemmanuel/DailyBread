@@ -1,45 +1,137 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 @import "@repo/ui/styles/tokens.css";
 @import "@repo/ui/styles/base.css";
 
+@custom-variant dark (&:is(.dark *));
+
 /* ============================================================
-   ADMIN DASHBOARD — globals.css  (APP PERSONALITY)
-   Character: data-dense, professional, clean.
-   Overrides what differs from the base system defaults.
-   Does NOT redefine primitives. Does NOT break token naming.
+   ADMIN DASHBOARD — globals.css
+   Purpose: (1) admin navy theme token overrides, (2) Tailwind
+   @theme bridge, (3) things that can't be done in inline
+   Tailwind (Recharts SVG, scrollbar, skeleton).
+   All component styling lives in inline Tailwind.
    ============================================================ */
 
 
-/* ── APP-LEVEL TOKEN OVERRIDES ───────────────────────────────── */
+/* ── ADMIN DARK SURFACE PRIMITIVES ──────────────────────────
+   Navy-tinted raw values. Admin-specific — not in tokens.css.
+   Referenced only by the .dark block below.
+*/
 :root {
-  /* Slightly tighter radius for a more structured data-dashboard
-     feel vs customer app (which can keep the default 0.75rem) */
-  --radius:                 0.625rem;
+  --admin-dark-sidebar:      oklch(0.118 0.018 258);
+  --admin-dark-bg:           oklch(0.148 0.020 258);
+  --admin-dark-card:         oklch(0.178 0.020 258);
+  --admin-dark-card-2:       oklch(0.200 0.020 258);
+  --admin-dark-input:        oklch(0.218 0.018 258);
+  --admin-dark-border:       oklch(0.240 0.018 258);
+  --admin-dark-border-2:     oklch(0.280 0.018 258);
+  --admin-dark-muted:        oklch(0.520 0.012 258);
+  --admin-dark-text:         oklch(0.875 0.006 258);
+  --admin-dark-text-2:       oklch(0.955 0.004 258);
 
-  /* Layout dimensions — consumed by layout components */
-  --sidebar-width:          240px;
+  /* Layout dimensions */
+  --radius:                  0.625rem;
+  --sidebar-width:           240px;
   --sidebar-width-collapsed: 68px;
-  --topbar-height:          60px;
+  --topbar-height:           60px;
 }
 
-/* Dark mode layout overrides (radius stays the same) */
+
+/* ── ADMIN DARK MODE TOKEN OVERRIDES ─────────────────────────
+   Replaces base.css neutral dark tokens with admin navy values.
+   Light mode inherits base.css tokens unchanged.
+   Order matters: this runs after base.css so it wins cleanly.
+*/
 .dark {
-  /* No colour overrides needed — base.css dark handles everything.
-     Only add here if the admin dashboard dark deviates from base. */
+  --background:             var(--admin-dark-bg);
+  --foreground:             var(--admin-dark-text);
+
+  --card:                   var(--admin-dark-card);
+  --card-foreground:        var(--admin-dark-text);
+
+  --popover:                var(--admin-dark-card-2);
+  --popover-foreground:     var(--admin-dark-text);
+
+  --sidebar:                var(--admin-dark-sidebar);
+  --sidebar-foreground:     var(--admin-dark-muted);
+  --sidebar-border:         var(--admin-dark-border);
+  --sidebar-icon:           var(--admin-dark-muted);
+  --sidebar-active-bg:      color-mix(in oklch, var(--color-brand-500) 16%, var(--admin-dark-card));
+  --sidebar-active-fg:      var(--admin-dark-text-2);
+  --sidebar-active-icon:    var(--color-brand-500);
+  --sidebar-hover-bg:       var(--admin-dark-card);
+
+  --primary:                var(--color-brand-500);
+  --primary-foreground:     var(--color-neutral-900);
+  --primary-hover:          var(--color-brand-400);
+  --primary-subtle:         oklch(0.700 0.155 52 / 14%);
+  --primary-subtle-fg:      var(--color-brand-400);
+
+  --secondary:              var(--admin-dark-card-2);
+  --secondary-foreground:   var(--admin-dark-text);
+
+  --muted:                  var(--admin-dark-card);
+  --muted-foreground:       var(--admin-dark-muted);
+
+  --accent:                 var(--admin-dark-card-2);
+  --accent-foreground:      var(--admin-dark-text);
+
+  --border:                 var(--admin-dark-border);
+  --border-strong:          var(--admin-dark-border-2);
+
+  --input:                  var(--admin-dark-input);
+  --input-border:           var(--admin-dark-border);
+  --input-placeholder:      var(--admin-dark-muted);
+
+  --ring:                   var(--color-brand-500);
+
+  --topbar:                 var(--admin-dark-card);
+  --topbar-border:          var(--admin-dark-border);
+
+  --icon-bg:                var(--admin-dark-card-2);
+  --icon-fg:                var(--admin-dark-muted);
+
+  --success:                oklch(0.640 0.150 148);
+  --success-foreground:     var(--admin-dark-bg);
+  --success-bg:             oklch(0.640 0.150 148 / 14%);
+  --warning:                oklch(0.750 0.135 72);
+  --warning-foreground:     var(--admin-dark-bg);
+  --warning-bg:             oklch(0.750 0.135 72 / 14%);
+  --info:                   oklch(0.640 0.130 240);
+  --info-foreground:        var(--admin-dark-bg);
+  --info-bg:                oklch(0.640 0.130 240 / 14%);
+  --destructive:            oklch(0.630 0.190 22);
+  --destructive-foreground: var(--admin-dark-bg);
+  --destructive-bg:         oklch(0.630 0.190 22 / 14%);
+
+  --shadow-card:            none;
+  --shadow-dropdown:        var(--shadow-dark-dropdown);
+  --shadow-modal:           var(--shadow-dark-modal);
+
+  --chart-1:                var(--color-brand-500);
+  --chart-2:                oklch(0.640 0.130 240);
+  --chart-3:                oklch(0.580 0.150 148);
+  --chart-4:                oklch(0.750 0.135 72);
+  --chart-5:                oklch(0.630 0.190 22);
+  --chart-grid:             var(--admin-dark-border);
+  --chart-label:            var(--admin-dark-muted);
+  --chart-tooltip-bg:       var(--admin-dark-card-2);
+  --chart-tooltip-border:   var(--admin-dark-border-2);
 }
 
 
-/* ── TAILWIND THEME BRIDGE ───────────────────────────────────── */
-@theme {
-  /* Fonts
-     DM Sans: geometric, clean, excellent at 13–14px data density.
-     Fraunces: has warmth and personality for h1/h2 without being
-               editorial — good food-product character in headings. */
-  --font-sans:    var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
-  --font-display: var(--font-fraunces), "Fraunces", Georgia, serif;
+/* ── TAILWIND THEME BRIDGE ───────────────────────────────────
+   Exposes all CSS vars as Tailwind utility tokens.
+   bg-sidebar, text-primary, border-border, etc.
+   @theme inline: vars resolve at use-time (respects .dark).
+*/
+@theme inline {
+  --font-sans:    var(--font-dm-sans),  "DM Sans",       system-ui, sans-serif;
+  --font-display: var(--font-fraunces), "Fraunces",      Georgia,   serif;
   --font-mono:    var(--font-ibm-mono), "IBM Plex Mono", monospace;
 
-  /* Core surfaces */
   --color-background:           var(--background);
   --color-foreground:           var(--foreground);
   --color-card:                 var(--card);
@@ -47,13 +139,11 @@
   --color-popover:              var(--popover);
   --color-popover-foreground:   var(--popover-foreground);
 
-  /* Brand */
   --color-primary:              var(--primary);
   --color-primary-foreground:   var(--primary-foreground);
   --color-primary-subtle:       var(--primary-subtle);
   --color-primary-subtle-fg:    var(--primary-subtle-fg);
 
-  /* Neutral actions */
   --color-secondary:            var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted:                var(--muted);
@@ -61,13 +151,11 @@
   --color-accent:               var(--accent);
   --color-accent-foreground:    var(--accent-foreground);
 
-  /* Structural */
   --color-border:               var(--border);
   --color-border-strong:        var(--border-strong);
   --color-input:                var(--input);
   --color-ring:                 var(--ring);
 
-  /* Navigation */
   --color-sidebar:              var(--sidebar);
   --color-sidebar-foreground:   var(--sidebar-foreground);
   --color-sidebar-border:       var(--sidebar-border);
@@ -76,11 +164,9 @@
   --color-topbar:               var(--topbar);
   --color-topbar-border:        var(--topbar-border);
 
-  /* Icon containers */
   --color-icon-bg:              var(--icon-bg);
   --color-icon-fg:              var(--icon-fg);
 
-  /* Status */
   --color-success:              var(--success);
   --color-success-bg:           var(--success-bg);
   --color-warning:              var(--warning);
@@ -90,164 +176,62 @@
   --color-destructive:          var(--destructive);
   --color-destructive-bg:       var(--destructive-bg);
 
-  /* Order status */
   --color-status-completed:     var(--status-completed);
   --color-status-preparing:     var(--status-preparing);
   --color-status-delivery:      var(--status-delivery);
   --color-status-cancelled:     var(--status-cancelled);
 
-  /* Charts */
   --color-chart-1:              var(--chart-1);
   --color-chart-2:              var(--chart-2);
+  --color-chart-3:              var(--chart-3);
+  --color-chart-4:              var(--chart-4);
+  --color-chart-5:              var(--chart-5);
   --color-chart-grid:           var(--chart-grid);
   --color-chart-label:          var(--chart-label);
   --color-chart-tooltip-bg:     var(--chart-tooltip-bg);
 
-  /* Layout sizing as Tailwind values */
   --width-sidebar:              var(--sidebar-width);
   --width-sidebar-collapsed:    var(--sidebar-width-collapsed);
   --height-topbar:              var(--topbar-height);
 
-  /* Radius */
-  --radius-xs:   var(--radius-xs);
-  --radius-sm:   var(--radius-sm);
-  --radius-md:   var(--radius);
-  --radius-lg:   var(--radius-lg);
-  --radius-full: var(--radius-full);
+  --radius-xs:                  var(--radius-xs);
+  --radius-sm:                  var(--radius-sm);
+  --radius-md:                  var(--radius);
+  --radius-lg:                  var(--radius-lg);
+  --radius-xl:                  var(--radius-xl);
+  --radius-full:                var(--radius-full);
 }
 
 
-/* ── BASE LAYER ──────────────────────────────────────────────── */
-@layer base {
-  body {
-    font-family: var(--font-sans);
-    font-size: 0.875rem;       /* 14px default — data dashboards run dense */
-    line-height: 1.5;
-  }
-
-  /* Page-level headings get the display font for warmth */
-  h1 {
-    font-family: var(--font-display);
-    font-size: 1.5rem;
-    font-weight: 600;
-    line-height: 1.2;
-    letter-spacing: -0.015em;
-    color: var(--foreground);
-  }
-
-  h2 {
-    font-family: var(--font-display);
-    font-size: 1.25rem;
-    font-weight: 500;
-    line-height: 1.3;
-    letter-spacing: -0.01em;
-  }
-
-  /* Section titles, card headers — stay sans for density */
-  h3, h4, h5, h6 {
-    font-family: var(--font-sans);
-    font-weight: 500;
-    line-height: 1.4;
-  }
-
-  /* Ensure numbers align in tables and stat cards */
-  [data-tabular], .tabular-nums {
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum";
-  }
+/* ── RECHARTS ────────────────────────────────────────────────
+   SVG fill/stroke can't be set in inline Tailwind.
+*/
+.recharts-wrapper,
+.recharts-surface {
+  overflow: visible !important;
 }
 
-
-/* ── ANIMATIONS ──────────────────────────────────────────────── */
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0);   }
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-@keyframes shimmer {
-  0%   { background-position: -200% 0; }
-  100% { background-position:  200% 0; }
-}
-
-/* Dropdown / popover entrance — subtle upward drift + fade.
-   Referenced by name in ThemeToggle and any other dropdown. */
-@keyframes dropdownEnter {
-  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0)    scale(1);    }
-}
-
-@keyframes dropdownExit {
-  from { opacity: 1; transform: translateY(0)    scale(1);    }
-  to   { opacity: 0; transform: translateY(-4px) scale(0.97); }
-}
-
-/*
- * Radix data-[state] hooks — apply animation to the actual visible surface
- * (not the portal wrapper). Works for DropdownMenuContent, TooltipContent,
- * PopoverContent — anything Radix renders with data-state="open/closed".
- *
- * We do NOT need !important here because these are data-attribute selectors
- * which have higher specificity than shadcn's base classes.
- */
-[data-radix-popper-content-wrapper] [data-state="open"] {
-  animation: dropdownEnter 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-[data-radix-popper-content-wrapper] [data-state="closed"] {
-  animation: dropdownExit 140ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-/*
- * Solid background fix for ALL Radix popper surfaces.
- * Targets the rendered content element directly — not the portal wrapper.
- * Covers: DropdownMenu, Tooltip, Popover, Select, ContextMenu.
- */
-[data-radix-popper-content-wrapper] > * {
-  background-color: var(--popover) !important;
-  color: var(--popover-foreground) !important;
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: var(--chart-tooltip-bg) !important;
   border-color: var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--foreground) !important;
 }
 
-/* ── UTILITY CLASSES ─────────────────────────────────────────── */
-
-.animate-slide-up {
-  animation: slideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+.recharts-cartesian-axis-tick-value,
+.recharts-legend-item-text {
+  fill: var(--chart-label) !important;
+  font-size: 11px;
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.25s ease both;
+.recharts-cartesian-grid line {
+  stroke: var(--chart-grid) !important;
 }
 
-/* Stagger entrance for sibling cards/rows */
-.animate-stagger > * { animation: slideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-stagger > *:nth-child(1) { animation-delay:   0ms; }
-.animate-stagger > *:nth-child(2) { animation-delay:  55ms; }
-.animate-stagger > *:nth-child(3) { animation-delay: 110ms; }
-.animate-stagger > *:nth-child(4) { animation-delay: 165ms; }
-.animate-stagger > *:nth-child(5) { animation-delay: 220ms; }
-.animate-stagger > *:nth-child(6) { animation-delay: 275ms; }
 
-/* Loading skeleton — wire to --muted and --border */
-.skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--muted) 25%,
-    var(--border) 50%,
-    var(--muted) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.6s ease infinite;
-  border-radius: var(--radius-sm);
-  color: transparent;
-}
-
-/* ── SCROLLBAR ───────────────────────────────────────────────── */
+/* ── SCROLLBAR ───────────────────────────────────────────────
+   Webkit pseudo-elements — not expressible in Tailwind.
+*/
 ::-webkit-scrollbar        { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track  { background: transparent; }
 ::-webkit-scrollbar-thumb  {

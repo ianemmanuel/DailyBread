@@ -1,14 +1,7 @@
 "use client"
+
 import Link from "next/link"
-import {
-  Globe,
-  CheckCircle2,
-  XCircle,
-  Store,
-  MapPin,
-  ShoppingBag,
-  Users,
-} from "lucide-react"
+import { Globe, CheckCircle2, XCircle, Store, MapPin, ShoppingBag, Users, TrendingUp } from "lucide-react"
 import type { PlatformKPIResult } from "@/types/geography.types"
 
 interface CountryKPIStripProps {
@@ -19,6 +12,7 @@ interface KPICard {
   label:    string
   value:    string | number
   sub?:     string
+  trend?:   { value: string; positive: boolean }
   icon:     React.ElementType
   variant:  "default" | "active" | "inactive" | "danger"
   href:     string
@@ -27,49 +21,37 @@ interface KPICard {
 export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
   const cards: KPICard[] = [
     {
-      label:   "Total Countries",
-      value:   kpis.countries.total,
-      sub:     "all markets",
-      icon:    Globe,
-      variant: "default",
-      href:    "/countries/all",
-    },
-    {
-      label:   "Active",
+      label:   "Active Countries",
       value:   kpis.countries.active,
-      sub:     "operational",
-      icon:    CheckCircle2,
+      sub:     `of ${kpis.countries.total} total`,
+      trend:   { value: "+2 vs last month", positive: true },
+      icon:    Globe,
       variant: "active",
       href:    "/countries",
     },
     {
-      label:   "Inactive",
-      value:   kpis.countries.inactive,
-      sub:     "deactivated",
-      icon:    XCircle,
-      variant: kpis.countries.inactive > 0 ? "inactive" : "default",
-      href:    "/countries/inactive",
-    },
-    {
-      label:   "Vendors",
-      value:   kpis.vendors.total.toLocaleString(),
-      sub:     `${kpis.vendors.active.toLocaleString()} active`,
-      icon:    Store,
-      variant: "default",
-      href:    "/vendors",
-    },
-    {
-      label:   "Cities",
+      label:   "Total Cities",
       value:   kpis.cities.total.toLocaleString(),
-      sub:     `${kpis.cities.active.toLocaleString()} active`,
+      sub:     "across all countries",
+      trend:   { value: "+8 vs last month", positive: true },
       icon:    MapPin,
       variant: "default",
       href:    "/cities",
     },
     {
-      label:   "Outlets",
+      label:   "Total Vendors",
+      value:   kpis.vendors.total.toLocaleString(),
+      sub:     "across all countries",
+      trend:   { value: "+12.4% vs last month", positive: true },
+      icon:    Store,
+      variant: "default",
+      href:    "/vendors",
+    },
+    {
+      label:   "Total Outlets",
       value:   kpis.outlets.total.toLocaleString(),
       sub:     `${kpis.outlets.active.toLocaleString()} active`,
+      trend:   { value: "+15.7% vs last month", positive: true },
       icon:    ShoppingBag,
       variant: "default",
       href:    "/outlets",
@@ -78,6 +60,7 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
       label:   "Customers",
       value:   kpis.customers.total.toLocaleString(),
       sub:     `${kpis.customers.active.toLocaleString()} active`,
+      trend:   { value: "+18.3% vs last month", positive: true },
       icon:    Users,
       variant: "default",
       href:    "/customers",
@@ -85,8 +68,8 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
   ]
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-      {cards.map(({ label, value, sub, icon: Icon, variant, href }) => {
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 mb-6">
+      {cards.map(({ label, value, sub, trend, icon: Icon, variant, href }) => {
         const s = VARIANT_STYLES[variant]
 
         return (
@@ -94,10 +77,10 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
             key={label}
             href={href}
             className={[
-              "group flex flex-col justify-between gap-4 rounded-xl border px-4 py-4",
+              "group flex flex-col gap-3 rounded-xl border px-4 py-4",
               "cursor-pointer outline-none",
               "transition-all duration-200",
-              "hover:-translate-y-0.5 hover:shadow-md",
+              "hover:-translate-y-0.5",
               "focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-1",
             ].join(" ")}
             style={{
@@ -115,37 +98,55 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
               el.style.boxShadow   = ""
             }}
           >
-            {/* Icon */}
-            <div
-              className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200"
-              style={{ backgroundColor: s.iconBg }}
-            >
-              <Icon className="h-3.5 w-3.5" style={{ color: s.iconColor }} />
+            {/* Icon row */}
+            <div className="flex items-start justify-between">
+              <div
+                className="flex h-9 w-9 items-center justify-center rounded-lg"
+                style={{ backgroundColor: s.iconBg }}
+              >
+                <Icon className="h-4 w-4" style={{ color: s.iconColor }} />
+              </div>
             </div>
 
             {/* Value + label */}
             <div>
               <p
-                className="font-display text-2xl font-semibold tabular-nums leading-none tracking-tight transition-colors duration-200"
+                className="font-display text-2xl font-semibold tabular-nums leading-none tracking-tight"
                 style={{ color: s.valueColor }}
               >
                 {value}
               </p>
               <p
-                className="mt-1 text-[11px] font-medium leading-tight"
+                className="mt-1 text-xs font-medium leading-tight"
                 style={{ color: s.labelColor }}
               >
                 {label}
               </p>
               {sub && (
                 <p
-                  className="mt-0.5 text-[10px] leading-tight tabular-nums"
+                  className="mt-0.5 text-[11px] leading-tight tabular-nums"
                   style={{ color: s.subColor }}
                 >
                   {sub}
                 </p>
               )}
             </div>
+
+            {/* Trend */}
+            {trend && (
+              <div className="flex items-center gap-1">
+                <TrendingUp
+                  className="h-3 w-3 shrink-0"
+                  style={{ color: trend.positive ? "var(--success)" : "var(--destructive)" }}
+                />
+                <span
+                  className="text-[11px] font-medium"
+                  style={{ color: trend.positive ? "var(--success)" : "var(--destructive)" }}
+                >
+                  {trend.value}
+                </span>
+              </div>
+            )}
           </Link>
         )
       })}
@@ -153,7 +154,6 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
   )
 }
 
-//* Variant styles
 
 const VARIANT_STYLES = {
   default: {
@@ -167,10 +167,10 @@ const VARIANT_STYLES = {
     subColor:         "var(--muted-foreground)",
   },
   active: {
-    cardBg:           "color-mix(in oklch, var(--primary) 6%, var(--card))",
-    borderColor:      "color-mix(in oklch, var(--primary) 22%, var(--border))",
-    hoverBorderColor: "color-mix(in oklch, var(--primary) 50%, var(--border))",
-    iconBg:           "color-mix(in oklch, var(--primary) 12%, transparent)",
+    cardBg:           "color-mix(in oklch, var(--primary) 8%, var(--card))",
+    borderColor:      "color-mix(in oklch, var(--primary) 25%, var(--border))",
+    hoverBorderColor: "color-mix(in oklch, var(--primary) 55%, var(--border))",
+    iconBg:           "color-mix(in oklch, var(--primary) 15%, transparent)",
     iconColor:        "var(--primary)",
     valueColor:       "var(--primary)",
     labelColor:       "var(--primary)",

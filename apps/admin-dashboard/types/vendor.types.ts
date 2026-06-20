@@ -62,3 +62,35 @@ export interface VendorListResult {
   pageSize   : number
   totalPages : number
 }
+
+
+export interface VendorMetrics {
+  totalVendors: number
+  activeVendors: number
+  suspendedVendors: number
+  bannedVendors: number
+
+  draftApplications: number
+  submittedApplications: number
+  underReviewApplications: number
+  approvedApplications: number
+  rejectedApplications: number
+
+  vendorsByType: {
+    type: string
+    count: number
+  }[]
+}
+
+export interface LatestVendorApplication {
+  id: string
+  legalBusinessName: string
+  vendorType: { id: string; name: string }
+  status:
+    | "DRAFT"
+    | "SUBMITTED"
+    | "UNDER_REVIEW"
+    | "APPROVED"
+    | "REJECTED"
+  submittedAt: string | null
+}

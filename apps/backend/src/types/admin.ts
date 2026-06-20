@@ -141,3 +141,22 @@ export interface CountrySummaryResult {
     vendors: number
   }
 }
+
+export interface CountryVendorSnapshot {
+  vendorAccounts: {
+    total: number
+    active: number
+    suspended: number
+    banned: number
+    averageRating: number
+  }
+
+  applications: {
+    total: number
+    draft: number
+    submitted: number
+    underReview: number
+    approved: number
+    rejected: number
+  }
+}

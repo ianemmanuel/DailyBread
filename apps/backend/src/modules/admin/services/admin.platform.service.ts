@@ -1,23 +1,17 @@
 /**
- * admin.platform.service.ts
- *
- * Cross-domain KPI aggregation service.
- *
- * Responsibility: compute platform-wide and country-scoped summary metrics
- * that require data from multiple domains (geography, vendors, outlets,
- * customers). No single domain service owns this — it lives here.
- *
  * This service ONLY reads. It never writes. All reads use select-minimal
  * queries and run in a single prisma.$transaction for consistency.
- *
- * Used by:
- *   - /admin/v1/platform/kpis              → global dashboard KPIs
- *   - /admin/v1/platform/countries/summary  → per-status country aggregates
+
  */
 
-import { prisma } from "@repo/db"
+import { 
+  prisma,
+  VendorStatus,
+  VendorApplicationStatus
+} from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
-import { PlatformKPIResult, CountrySummaryResult } from "@/types/admin"
+import { PlatformKPIResult, CountrySummaryResult, CountryVendorSnapshot } from "@/types/admin"
+import { getCountryIdFromSlug } from "../helpers/getCountryId"
 
 
 /**
@@ -83,7 +77,7 @@ export async function getPlatformKPIs(scope: AdminScopeContext): Promise<Platfor
   }
 }
 
-/**
+/** 
  * Fetch countries list filtered by status.
  * status = "ACTIVE" | "INACTIVE" | undefined (all)
  *
@@ -120,4 +114,120 @@ export async function getCountriesByStatus(
       },
     },
   })
+}
+
+export async function getCountryVendorSnapshot(
+  countrySlug: string,
+  adminScope: AdminScopeContext,
+) {
+  const countryId = await getCountryIdFromSlug(
+    countrySlug,
+    adminScope,
+  )
+
+  const [
+    applications,
+    accounts,
+    vendorTypes,
+  ] = await Promise.all([
+    prisma.vendorApplication.groupBy({
+      by: ["status"],
+      where: {
+        countryId,
+      },
+      _count: true,
+    }),
+
+    prisma.vendorAccount.groupBy({
+      by: ["status"],
+      where: {
+        countryId,
+        deletedAt: null,
+      },
+      _count: true,
+    }),
+
+    prisma.vendorAccount.groupBy({
+      by: ["vendorTypeId"],
+      where: {
+        countryId,
+        deletedAt: null,
+      },
+      _count: true,
+    }),
+  ])
+
+  const vendorTypeIds = vendorTypes.map(
+    (v) => v.vendorTypeId,
+  )
+
+  const types = await prisma.vendorType.findMany({
+    where: {
+      id: {
+        in: vendorTypeIds,
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  })
+
+  const typeMap = new Map(
+    types.map((t) => [t.id, t.name]),
+  )
+
+  return {
+    applications: {
+      draft:
+        applications.find(
+          (s) => s.status === "DRAFT",
+        )?._count ?? 0,
+
+      submitted:
+        applications.find(
+          (s) => s.status === "SUBMITTED",
+        )?._count ?? 0,
+
+      underReview:
+        applications.find(
+          (s) => s.status === "UNDER_REVIEW",
+        )?._count ?? 0,
+
+      approved:
+        applications.find(
+          (s) => s.status === "APPROVED",
+        )?._count ?? 0,
+
+      rejected:
+        applications.find(
+          (s) => s.status === "REJECTED",
+        )?._count ?? 0,
+    },
+
+    accounts: {
+      active:
+        accounts.find(
+          (s) => s.status === "ACTIVE",
+        )?._count ?? 0,
+
+      suspended:
+        accounts.find(
+          (s) => s.status === "SUSPENDED",
+        )?._count ?? 0,
+
+      banned:
+        accounts.find(
+          (s) => s.status === "BANNED",
+        )?._count ?? 0,
+    },
+
+    vendorTypes: vendorTypes.map((v) => ({
+      name:
+        typeMap.get(v.vendorTypeId) ??
+        "Unknown",
+
+      count: v._count,
+    })),
+  }
 }

@@ -5,7 +5,7 @@ interface CountryVendorSnapshotProps {
   stats: VendorStats
 }
 
-export function CountryVendorSnapshot({ stats }: CountryVendorSnapshotProps) {
+export default function VendorSnapshot({ stats }: CountryVendorSnapshotProps) {
   const maxCount = Math.max(...stats.byType.map((t) => t.count))
 
   return (

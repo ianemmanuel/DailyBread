@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/shared/EmptyState"
 import { FetchError } from "@/components/shared/FetchError"
 import { fetchActiveCountries } from "@/lib/api/server/countries"
 import { fetchPlatformKPIs } from "@/lib/api/server/platform"
+import { CountryInsightsPanel } from "@/components/countries/CountryInsights"
 
 export const metadata: Metadata = { title: "Countries" }
 
@@ -30,7 +31,7 @@ export default async function CountriesPage() {
     <>
       <PageHeader
         title="Countries"
-        description="Platform expansion overview, operational footprint, and country health."
+        description="Platform expansion overview, operational footprint and country health."
         icon={Globe}
       />
 
@@ -58,6 +59,9 @@ export default async function CountriesPage() {
         ) : (
           <CountryGrid countries={countriesResult.data} pageSize={9} />
         )}
+      </section>
+      <section className="space-y-4">
+        <CountryInsightsPanel/>
       </section>
     </>
   )
