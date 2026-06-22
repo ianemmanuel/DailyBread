@@ -12,14 +12,11 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { SidebarNav } from "./SidebarNav"
-import type { AdminSessionData } from "@repo/types/admin-app"
+import { useAdminSession } from "@/providers/admin-session-provider"
 
-interface Props {
-  session: AdminSessionData
-}
-
-export function MobileSidebar({ session }: Props) {
+export function MobileSidebar() {
   const { signOut } = useClerk()
+  const session     = useAdminSession()
 
   const first       = session.firstName?.trim() ?? ""
   const last        = session.lastName?.trim()  ?? ""
@@ -39,9 +36,10 @@ export function MobileSidebar({ session }: Props) {
         </Button>
       </SheetTrigger>
 
+      {/* side="right" — slides in from the right */}
       <SheetContent
-        side="left"
-        className="flex w-[280px] flex-col gap-0 border-r border-sidebar-border bg-sidebar p-0 sm:w-[300px]"
+        side="right"
+        className="flex w-[280px] flex-col gap-0 border-l border-sidebar-border bg-sidebar p-0 sm:w-[300px]"
       >
         <SheetTitle className="sr-only">Navigation menu</SheetTitle>
         <SheetDescription className="sr-only">
@@ -56,17 +54,12 @@ export function MobileSidebar({ session }: Props) {
               <path d="M7 15h6v1.5a1 1 0 01-1 1H8a1 1 0 01-1-1V15z" fill="white" fillOpacity="0.7" />
             </svg>
           </div>
-
           <Link
             href="/overview"
             className="font-display text-[15px] font-semibold tracking-tight text-foreground"
           >
             Daily<span className="text-primary">Bread</span>
           </Link>
-
-          <span className="ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-primary/10 text-primary">
-            Admin
-          </span>
         </div>
 
         {/* ── Nav — scrollable ─────────────────────────────── */}
@@ -75,9 +68,11 @@ export function MobileSidebar({ session }: Props) {
         </div>
 
         {/* ── Footer ──────────────────────────────────────── */}
-        <div className="shrink-0 space-y-1 border-t border-sidebar-border p-3">
-          <div className="flex items-center gap-3 rounded-lg bg-sidebar-active-bg px-3 py-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+        <div className="shrink-0 border-t border-sidebar-border p-3 space-y-1">
+
+          {/* User card */}
+          <div className="flex items-center gap-3 rounded-lg bg-sidebar-hover-bg px-3 py-2.5 pb-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[12px] font-bold text-primary ring-2 ring-primary/20">
               {initials}
             </div>
             <div className="min-w-0 flex-1">
@@ -90,13 +85,16 @@ export function MobileSidebar({ session }: Props) {
             </div>
           </div>
 
-          <button
+          {/* Sign out */}
+          <Button
+            variant="ghost"
             onClick={() => signOut({ redirectUrl: "/sign-in" })}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors duration-150 hover:bg-sidebar-hover-bg hover:text-destructive"
+            className="w-full justify-start gap-3 px-3 text-muted-foreground hover:bg-sidebar-hover-bg hover:text-destructive bg-primary text-white rounded-lg"
           >
             <LogOut className="h-4 w-4 shrink-0" />
             Sign out
-          </button>
+          </Button>
+
         </div>
       </SheetContent>
     </Sheet>

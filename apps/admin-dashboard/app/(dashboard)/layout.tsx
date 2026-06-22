@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
-import { AdminSessionProvider } from "@/components/dashboard/layout/AdminSessionContext"
+import { AdminSessionProvider } from "@/providers/admin-session-provider"
 import { Sidebar } from "@/components/dashboard/sidebar/Sidebar"
 import { Navbar } from "@/components/dashboard/navbar/Navbar"
 import { Footer } from "@/components/dashboard/layout/Footer"
@@ -42,7 +42,7 @@ export default async function DashboardLayout({
       <AdminSessionProvider session={session}>
         <SidebarProvider>
           <div className="relative min-h-screen bg-background">
-            <Sidebar session={session} />
+            <Sidebar/>
 
             <div
               className="flex min-h-screen flex-col transition-[padding-left] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
