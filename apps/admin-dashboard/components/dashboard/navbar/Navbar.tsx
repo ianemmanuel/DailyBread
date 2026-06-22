@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { Bell } from "lucide-react"
 import { Button } from "@repo/ui/components/button"
 import { ThemeToggle } from "@/components/shared/theme/theme-toggle"
@@ -12,16 +13,18 @@ export function Navbar() {
         <ThemeToggle />
 
         <Button
+          asChild
           variant="ghost"
           size="icon"
           className="relative h-9 w-9 rounded-lg"
-          aria-label="Notifications"
         >
-          <Bell className="h-4 w-4" />
-          <span
-            className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-primary"
-            aria-hidden="true"
-          />
+          <Link href="/notifications" aria-label="Notifications">
+            <Bell className="h-4 w-4" />
+            <span
+              className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-primary"
+              aria-hidden="true"
+            />
+          </Link>
         </Button>
 
         <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />

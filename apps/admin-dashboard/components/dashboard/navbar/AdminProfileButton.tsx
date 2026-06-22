@@ -1,7 +1,7 @@
 "use client"
 
 import { UserButton }      from "@clerk/nextjs"
-import { useAdminSession } from "../layout/AdminSessionContext"
+import { useAdminSession } from "../../../providers/admin-session-provider"
 
 /**
  * AdminProfileButton — Clerk UserButton with role/scope context pill.
