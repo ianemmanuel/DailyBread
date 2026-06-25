@@ -1,7 +1,5 @@
 import type { ApiSuccess } from "@repo/types/admin-app"
-import type {
-  PlatformKPIResult,
-} from "@/types/geography.types"
+import type { PlatformKPIResult } from "@/types/country.types"
 
 
 type FetchResult<T> =

@@ -1,4 +1,20 @@
-//** Thin controller for cross-domain platform KPI endpoints.
+/**
+ * admin.platform.controller.ts
+ *
+ * Thin controller — no business logic, no queries.
+ * All work is delegated to the service layer.
+ *
+ * Endpoints
+ * ──────────
+ * GET /admin/v1/platform/kpis                          → full platform snapshot
+ * GET /admin/v1/platform/kpis/countries                → country KPIs only
+ * GET /admin/v1/platform/kpis/cities                   → city KPIs only
+ * GET /admin/v1/platform/kpis/vendors                  → vendor KPIs only
+ * GET /admin/v1/platform/kpis/outlets                  → outlet KPIs only
+ * GET /admin/v1/platform/kpis/customers                → customer KPIs only
+ * GET /admin/v1/platform/countries                     → country list (optional ?status=)
+ * GET /admin/v1/platform/countries/:countrySlug/vendors → vendor snapshot for a country
+ */
 
 import { RequestHandler } from "express"
 import type { AdminRequest } from "@repo/types/backend"
@@ -6,14 +22,16 @@ import { sendSuccess } from "@/helpers/api-response/response"
 import { ApiError } from "@/middleware/error"
 import {
   getPlatformKPIs,
+  getCountryKPIs,
+  getCityKPIs,
+  getVendorKPIs,
+  getOutletKPIs,
+  getCustomerKPIs,
   getCountriesByStatus,
   getCountryVendorSnapshot,
 } from "../services/admin.platform.service"
 
-/**
- * GET /admin/v1/platform/kpis
- * Returns platform-wide counts for the dashboard KPI strip.
- */
+
 export const handleGetPlatformKPIs: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
@@ -22,42 +40,47 @@ export const handleGetPlatformKPIs: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err) }
 }
 
-/**
- * GET /admin/v1/platform/countries?status=ACTIVE|INACTIVE
- * Returns countries filtered by optional status query param.
- * Omitting ?status returns all countries visible to the caller's scope.
- */
-export const handleGetCountriesByStatus: RequestHandler = async (req, res, next) => {
+/* ── Domain-specific KPI endpoints ──────────────────────────
+   Useful when a page only needs one domain's metrics,
+   avoiding the overhead of fetching all five simultaneously.
+*/
+
+export const handleGetCountryKPIs: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
-    const { status }     = req.query as { status?: string }
-
-    if (status && status !== "ACTIVE" && status !== "INACTIVE") {
-      throw new ApiError(
-        400,
-        "status must be 'ACTIVE' or 'INACTIVE'",
-        "INVALID_STATUS",
-      )
-    }
-
-    const data = await getCountriesByStatus(
-      adminScope,
-      status as "ACTIVE" | "INACTIVE" | undefined,
-    )
-    return sendSuccess(res, data, "Countries fetched")
+    const data = await getCountryKPIs(adminScope)
+    return sendSuccess(res, data, "Country KPIs fetched")
   } catch (err) { next(err) }
 }
 
-export const handleGetCountryVendorSnapshot: RequestHandler = async ( req, res, next ) => {
+export const handleGetCityKPIs: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
+    const data = await getCityKPIs(adminScope)
+    return sendSuccess(res, data, "City KPIs fetched")
+  } catch (err) { next(err) }
+}
 
-    const { countrySlug } =req.params as { countrySlug: string }
+export const handleGetVendorKPIs: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminScope } = req as unknown as AdminRequest
+    const data = await getVendorKPIs(adminScope)
+    return sendSuccess(res, data, "Vendor KPIs fetched")
+  } catch (err) { next(err) }
+}
 
-    const snapshot = await getCountryVendorSnapshot( countrySlug, adminScope )
-    console.log("Snapshot in controller:", snapshot)
-    return sendSuccess( res, snapshot, "Vendor snapshot fetched")
-  } catch (err) {
-    next(err)
-  }
+export const handleGetOutletKPIs: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminScope } = req as unknown as AdminRequest
+    const data = await getOutletKPIs(adminScope)
+    return sendSuccess(res, data, "Outlet KPIs fetched")
+  } catch (err) { next(err) }
+}
+
+export const handleGetCustomerKPIs: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminScope } = req as unknown as AdminRequest
+    const data = await getCustomerKPIs(adminScope)
+    return sendSuccess(res, data, "Customer KPIs fetched")
+  } catch (err) { next(err) }
 }

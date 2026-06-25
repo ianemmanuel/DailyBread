@@ -1,8 +1,6 @@
 import type { ApiSuccess, Country } from "@repo/types/admin-app"
-import type {
-    CountrySummaryResult,
-    CountryDetailData,
-} from "@/types/geography.types"
+import type { CountryDetailData } from "@/types/geography.types"
+import { CountrySummaryResult } from "@/types/country.types"
 import { buildCountryDetail } from "@/utils/helpers/countries"
 
 
