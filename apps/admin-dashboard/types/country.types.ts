@@ -23,7 +23,7 @@ export interface CountryDetailMetrics {
 }
 
 
-export interface PlatformKPIResult {
+export interface GlobalKPIResult {
   countries: {
     total:    number
     active:   number
@@ -61,4 +61,72 @@ export interface CountrySummaryResult {
     cities:  number
     vendors: number
   }
+}
+
+
+/**
+ * Frontend mirror of the backend PlatformKPIResult.
+ * Keep in sync with packages/types or backend types/platform-kpi.types.ts.
+ */
+
+export interface KPITrend {
+  delta:        number
+  deltaPercent: number
+  direction:    "up" | "down" | "flat"
+}
+
+export interface CountryKPIs {
+  total:    number
+  active:   number
+  inactive: number
+  trend: {
+    active: KPITrend
+    total:  KPITrend
+  }
+}
+
+export interface CityKPIs {
+  total:  number
+  active: number
+  trend: { total: KPITrend }
+}
+
+export interface VendorKPIs {
+  total:               number
+  active:              number
+  suspended:           number
+  pendingApplications: number
+  trend: { total: KPITrend }
+}
+
+export interface OutletKPIs {
+  total:  number
+  active: number
+  trend: { total: KPITrend }
+}
+
+export interface CustomerKPIs {
+  total:  number
+  active: number
+  trend: { total: KPITrend }
+}
+
+export interface PlatformKPIResult {
+  countries:  CountryKPIs
+  cities:     CityKPIs
+  vendors:    VendorKPIs
+  outlets:    OutletKPIs
+  customers:  CustomerKPIs
+  computedAt: string
+}
+
+/* ── KPICard used by CountryKPIStrip ─────────────────────── */
+export interface KPICard {
+  label:   string
+  value:   string | number
+  sub?:    string
+  trend?:  KPITrend
+  icon:    React.ElementType
+  variant: "brand" | "default"
+  href:    string
 }

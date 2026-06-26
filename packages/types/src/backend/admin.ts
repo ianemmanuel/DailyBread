@@ -4,6 +4,15 @@ import type { Request } from "express"
 import type { AdminUserWithRole, AdminScopeContext } from "../domain/admin"
 import type { AdminPermissionKey } from "../enums/admin"
 export type { AdminScopeContext } from "../domain/admin"
+export type { 
+    CountryKPIs, 
+    KPITrend, 
+    CityKPIs, 
+    OutletKPIs, 
+    VendorKPIs, 
+    KPIResult,
+    CustomerKPIs
+} from "../domain/kpi"
 
 //* ─── Admin request interfaces ─────────────────────────────────────────────────
 // Import in middleware and controllers:

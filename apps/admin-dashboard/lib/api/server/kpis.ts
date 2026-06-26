@@ -7,10 +7,10 @@ type FetchResult<T> =
   | { ok: false; error: string }
 
 
-export async function fetchPlatformKPIs(token: string): Promise<FetchResult<PlatformKPIResult>> {
+export async function fetchKPIs(token: string): Promise<FetchResult<PlatformKPIResult>> {
   try {
     const res = await fetch(
-      `${process.env.BACKEND_API_URL}/admin/v1/platform/kpis`,
+      `${process.env.BACKEND_API_URL}/admin/v1/kpis`,
       {
         headers: { Authorization: `Bearer ${token}` },
         next:    { revalidate: 60 },

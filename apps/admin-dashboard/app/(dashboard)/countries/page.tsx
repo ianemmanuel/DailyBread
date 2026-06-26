@@ -11,7 +11,7 @@ import { CountryActivityFeed } from "@/components/countries/feed/CountryActivity
 import { FetchError } from "@/components/shared/FetchError"
 import { EmptyState } from "@/components/shared/EmptyState"
 import { fetchActiveCountries } from "@/lib/api/server/countries"
-import { fetchPlatformKPIs } from "@/lib/api/server/platform"
+import { fetchKPIs } from "@/lib/api/server/kpis"
 import Link from "next/link"
 
 export const metadata: Metadata = { title: "Countries" }
@@ -23,7 +23,7 @@ export default async function CountriesPage() {
   const token = await getToken()
 
   const [kpisResult, countriesResult] = await Promise.all([
-    fetchPlatformKPIs(token!),
+    fetchKPIs(token!),
     fetchActiveCountries(token!),
   ])
 

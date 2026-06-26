@@ -7,10 +7,18 @@
 //! Never import from @repo/types/backend — that file depends on Express.
 
 //* API
-export type { AdminSessionData } from "../api/admin/auth"
-export type { SessionRole } from "../api/admin/auth"
-export type { SessionScope } from "../api/admin/auth"
-export type { SessionScopeContext } from "../api/admin/auth"
+export type { AdminSessionData } from "../shared/admin/auth"
+export type { SessionRole } from "../shared/admin/auth"
+export type { SessionScope } from "../shared/admin/auth"
+export type { SessionScopeContext } from "../shared/admin/auth"
+export type { 
+    CountryKPIs, 
+    KPITrend, 
+    CityKPIs, 
+    OutletKPIs, 
+    VendorKPIs, 
+    KPIResult
+} from "../domain/kpi"
 
 //* ENUMS
 export type { AdminPermissionKey } from "../enums/admin"
@@ -41,4 +49,4 @@ export type { DeliveryZoneBoundary } from "../domain/geography"
 export type { BoundingBox } from "../domain/geography"
 export type { GeoPoint } from "../domain/geography"
 
-export type { ApiSuccess, ApiErrorResponse } from "../api/common"
+export type { ApiSuccess, ApiErrorResponse } from "../shared/common"

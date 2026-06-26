@@ -6,17 +6,63 @@ import {
   Store,
   MapPin,
   ShoppingBag,
-  DollarSign,
+  Users,
   TrendingUp,
   TrendingDown,
+  Minus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { PlatformKPIResult, KPICard } from "@/types/country.types"
+import { KPIResult, KPITrend } from "@repo/types/admin-app"
+
 
 interface CountryKPIStripProps {
-  kpis: PlatformKPIResult
+  kpis: KPIResult
 }
 
+
+export interface KPICard {
+  label:   string
+  value:   string | number
+  sub?:    string
+  trend?:  KPITrend
+  icon:    React.ElementType
+  variant: "brand" | "default"
+  href:    string
+}
+/**
+ * Renders a live trend pill.
+ *
+ * direction = "up"   → green TrendingUp   + "+N (X%)"
+ * direction = "down" → red TrendingDown   + "−N (X%)"
+ * direction = "flat" → muted Minus        + "No change this month"
+ */
+function TrendPill({ trend }: { trend: KPITrend }) {
+  if (trend.direction === "flat") {
+    return (
+      <div className="flex items-center gap-1">
+        <Minus className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="text-[11px] font-medium text-muted-foreground">
+          No change this month
+        </span>
+      </div>
+    )
+  }
+
+  const isUp     = trend.direction === "up"
+  const Icon     = isUp ? TrendingUp : TrendingDown
+  const colorCls = isUp ? "text-success" : "text-destructive"
+  const sign     = isUp ? "+" : ""
+  const pctSign  = trend.deltaPercent >= 0 ? "+" : ""
+
+  return (
+    <div className="flex items-center gap-1">
+      <Icon className={cn("h-3 w-3 shrink-0", colorCls)} />
+      <span className={cn("text-[11px] font-medium", colorCls)}>
+        {sign}{trend.delta} ({pctSign}{trend.deltaPercent}%) this month
+      </span>
+    </div>
+  )
+}
 
 export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
   const cards: KPICard[] = [
@@ -24,7 +70,7 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
       label:   "Active Countries",
       value:   kpis.countries.active,
       sub:     `of ${kpis.countries.total} total`,
-      trend:   { value: "+2 vs last month", positive: true },
+      trend:   kpis.countries.trend.active,
       icon:    Globe,
       variant: "brand",
       href:    "/countries",
@@ -32,8 +78,8 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
     {
       label:   "Total Cities",
       value:   kpis.cities.total.toLocaleString(),
-      sub:     "across all countries",
-      trend:   { value: "+8 vs last month", positive: true },
+      sub:     `${kpis.cities.active.toLocaleString()} active`,
+      trend:   kpis.cities.trend.total,
       icon:    MapPin,
       variant: "default",
       href:    "/cities",
@@ -41,29 +87,29 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
     {
       label:   "Total Vendors",
       value:   kpis.vendors.total.toLocaleString(),
-      sub:     "across all countries",
-      trend:   { value: "+12.4% vs last month", positive: true },
+      sub:     `${kpis.vendors.pendingApplications} pending review`,
+      trend:   kpis.vendors.trend.totalVendors,
       icon:    Store,
       variant: "default",
       href:    "/vendors",
     },
     {
-      label:   "Total Orders (30d)",
-      value:   kpis.outlets?.total.toLocaleString() ?? "1.24M",
-      sub:     "across all countries",
-      trend:   { value: "+15.7% vs last month", positive: true },
+      label:   "Total Outlets",
+      value:   kpis.outlets.total.toLocaleString(),
+      sub:     `${kpis.outlets.active.toLocaleString()} active`,
+      trend:   kpis.outlets.trend.total,
       icon:    ShoppingBag,
       variant: "default",
-      href:    "/orders",
+      href:    "/outlets",
     },
     {
-      label:   "GMV (30d)",
-      value:   kpis.customers?.total.toLocaleString() ?? "KES 128.6M",
-      sub:     "across all countries",
-      trend:   { value: "+18.3% vs last month", positive: true },
-      icon:    DollarSign,
+      label:   "Customers",
+      value:   kpis.customers.total.toLocaleString(),
+      sub:     `${kpis.customers.active.toLocaleString()} active`,
+      trend:   kpis.customers.trend.total,
+      icon:    Users,
       variant: "default",
-      href:    "/reports",
+      href:    "/customers",
     },
   ]
 
@@ -131,24 +177,8 @@ export function CountryKPIStrip({ kpis }: CountryKPIStripProps) {
               )}
             </div>
 
-            {/* Trend */}
-            {trend && (
-              <div className="flex items-center gap-1">
-                {trend.positive ? (
-                  <TrendingUp className="h-3 w-3 shrink-0 text-success" />
-                ) : (
-                  <TrendingDown className="h-3 w-3 shrink-0 text-destructive" />
-                )}
-                <span
-                  className={cn(
-                    "text-[11px] font-medium",
-                    trend.positive ? "text-success" : "text-destructive",
-                  )}
-                >
-                  {trend.value}
-                </span>
-              </div>
-            )}
+            {/* Live trend */}
+            {trend && <TrendPill trend={trend} />}
           </Link>
         )
       })}

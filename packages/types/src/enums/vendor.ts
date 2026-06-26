@@ -1,4 +1,3 @@
-// ─── Vendor enums ────────────────────────────────────────────────────────────
 
 export enum VendorStatus {
   ACTIVE    = "ACTIVE",

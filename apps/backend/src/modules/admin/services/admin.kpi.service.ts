@@ -29,18 +29,18 @@
 import { prisma } from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
 import type {
-  PlatformKPIResult,
+  KPIResult,
   CountryKPIs,
   CityKPIs,
   VendorKPIs,
   OutletKPIs,
   CustomerKPIs,
-} from "@/types/platform-kpi.types"
+} from "@repo/types/backend"
 import {
   buildTrend,
   currentMonthStart,
   previousMonthStart,
-} from "../helpers/platform-kpi.helper"
+} from "../helpers/kpi.helper"
 import { getCountriesByStatus, getCountryVendorSnapshot } from "./admin.country.service"
 
 // Re-export the geography helpers so existing callers don't break
@@ -106,20 +106,15 @@ export async function getCountryKPIs( scope: AdminScopeContext ): Promise<Countr
   }
 }
  
-export async function getCityKPIs( scope: AdminScopeContext ): Promise<CityKPIs> {
-  const where     = cityWhere(scope)
+export async function getCityKPIs(scope: AdminScopeContext): Promise<CityKPIs> {
+  const where = cityWhere(scope)
   const thisMonth = currentMonthStart()
 
-  const [
-    total,
-    active, 
-    totalLastMonth, 
-    activeLastMonth
-  ] = await prisma.$transaction([
+  const [total, active, totalLastMonth, activeLastMonth] = await prisma.$transaction([
     prisma.city.count({ where }),
     prisma.city.count({ where: { ...where, status: "ACTIVE" } }),
     prisma.city.count({ where: { ...where, createdAt: { lt: thisMonth } } }),
-    prisma.country.count({ where: { ...where, status: "ACTIVE", createdAt: { lt: thisMonth } } }),
+    prisma.city.count({ where: { ...where, status: "ACTIVE", createdAt: { lt: thisMonth } } }), // ← was prisma.country
   ])
 
   return {
@@ -131,7 +126,7 @@ export async function getCityKPIs( scope: AdminScopeContext ): Promise<CityKPIs>
       active: buildTrend(active, activeLastMonth),
     },
   }
-}
+} 
 
 /**
  * Vendor KPIs
@@ -182,10 +177,10 @@ export async function getVendorKPIs( scope: AdminScopeContext ): Promise<VendorK
       where: {...where, status: { in: ["REJECTED"] }},
     }),
     prisma.vendorApplication.count({ 
-      where: {...where, deletedAt: null, createdAt: { lt: thisMonth }}
+      where: {...where, createdAt: { lt: thisMonth }}
     }),
     prisma.vendorApplication.count({ 
-      where: {...where, deletedAt: null,}
+      where: {...where}
     }),
     prisma.vendorAccount.count({
       where: { ...where, deletedAt: null, createdAt: { lt: thisMonth } },
@@ -233,15 +228,9 @@ export async function getOutletKPIs( scope: AdminScopeContext ): Promise<OutletK
   }
 }
 
-/**
- * Customer KPIs
- * Customers have no countryId on ConsumerAccount, so scope filtering
- * is not yet possible here — global view only for now.
- * When the schema gains countryId on ConsumerAccount, add the scope filter.
- */
-export async function getCustomerKPIs(
-  _scope: AdminScopeContext,
-): Promise<CustomerKPIs> {
+//**Customer KPIs
+
+export async function getCustomerKPIs( _scope: AdminScopeContext ): Promise<CustomerKPIs> {
   const thisMonth = currentMonthStart()
 
   const [total, active, totalLastMonth] = await prisma.$transaction([
@@ -272,7 +261,7 @@ export async function getCustomerKPIs(
  */
 export async function getPlatformKPIs(
   scope: AdminScopeContext,
-): Promise<PlatformKPIResult> {
+): Promise<KPIResult> {
   const [countries, cities, vendors, outlets, customers] = await Promise.all([
     getCountryKPIs(scope),
     getCityKPIs(scope),

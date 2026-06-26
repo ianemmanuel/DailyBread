@@ -103,30 +103,6 @@ export interface UpdateDeliveryZoneInput {
   maxCourierCount?: number
 }
 
-export interface PlatformKPIResult {
-  countries: {
-    total:    number
-    active:   number
-    inactive: number
-  }
-  vendors: {
-    total:  number
-    active: number
-  }
-  cities: {
-    total:  number
-    active: number
-  }
-  outlets: {
-    total:  number
-    active: number
-  }
-  customers: {
-    total:  number
-    active: number
-  }
-}
-
 export interface CountrySummaryResult {
   id:        string
   name:      string

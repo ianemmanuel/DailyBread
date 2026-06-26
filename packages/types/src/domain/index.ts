@@ -1,3 +1,6 @@
 export * from "./admin"
 export * from "./geography"
 export * from "./vendor"
+export * from "./city"
+export * from "./country"
+export * from "./region"

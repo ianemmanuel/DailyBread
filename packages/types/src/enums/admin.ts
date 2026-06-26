@@ -1,5 +1,4 @@
 // packages/types/src/enums/admin.ts
-// REPLACE the AdminPermissions const with this.
 // All permission keys now follow: module:submodule:action
 // This makes every key self-describing without needing context.
 

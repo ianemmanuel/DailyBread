@@ -1,7 +1,3 @@
-/**
- * Handles country list queries and country-level vendor snapshots.
- * Imported by admin.platform.service and re-exported for backward compat.
- */
 
 import type { AdminScopeContext } from "@repo/types/backend"
 import type { CountrySummaryResult, CountryVendorSnapshot } from "@/types/admin"

@@ -192,6 +192,24 @@ model DashboardStat {
 
 //* =========GEOGRAPHY & CONFIGURATION=============
 
+
+model Region {
+  id          String        @id  @default(uuid())
+  name        String        @unique   // "East Africa", "West Africa"
+  slug        String        @unique   // "east-africa", "west-africa"
+  code        String        @unique   // "EAF", "WAF", "SAF" — short display code
+  description String?
+  status      GeoStatus     @default(ACTIVE)
+  createdByAdminId String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  countries   Country[]
+
+  @@index([status])
+  @@index([slug])
+}
+
 model Country {
   id                 String    @id @default(uuid())
   name               String    @unique
@@ -201,6 +219,8 @@ model Country {
   currencySymbol     String?
   phoneCode          String
   timezones          String[]
+  regionId           String?
+  region             Region?   @relation(fields: [regionId], references: [id])
   status             GeoStatus @default(ACTIVE)
   createdByAdminId   String?
   createdAt          DateTime  @default(now())
@@ -215,7 +235,7 @@ model Country {
 
   @@index([status])
   @@index([slug])
-
+  @@index([regionId])   
 }
 
 model City {

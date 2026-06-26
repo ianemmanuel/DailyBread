@@ -29,12 +29,13 @@ import {
   getCustomerKPIs,
   getCountriesByStatus,
   getCountryVendorSnapshot,
-} from "../services/admin.platform.service"
+} from "../services/admin.kpi.service"
 
 
-export const handleGetPlatformKPIs: RequestHandler = async (req, res, next) => {
+export const handleGetKPIs: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
+    console.log('here we are')
     const data = await getPlatformKPIs(adminScope)
     return sendSuccess(res, data, "Platform KPIs fetched")
   } catch (err) { next(err) }

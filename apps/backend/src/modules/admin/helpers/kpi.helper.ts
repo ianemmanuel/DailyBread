@@ -1,4 +1,4 @@
-import type { KPITrend } from "@/types/platform-kpi.types"
+import type { KPITrend } from "@/types/kpi.types"
 
 /**
  * Returns the start of the current calendar month (UTC midnight).

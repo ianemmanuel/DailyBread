@@ -9,16 +9,13 @@
  */
 
 export interface KPITrend {
-  delta:        number
+  delta: number
   deltaPercent: number
-  direction:    "up" | "down" | "flat"
+  direction: "up" | "down" | "flat"
 }
 
-/* ── Domain KPI blocks ───────────────────────────────────────
-   Each domain owns its own KPI shape.
-   The orchestrator assembles them into PlatformKPIResult.
-*/
-
+//* Domain KPI blocks
+ 
 export interface CountryKPIs {
   total:    number
   active:   number
@@ -45,7 +42,6 @@ export interface VendorKPIs {
   suspended: number
   banned: number
   inactive: number
-  /** Pending applications waiting for review */
   pendingApplications: number
   trend: {
     totalVendors: KPITrend
@@ -72,11 +68,9 @@ export interface CustomerKPIs {
   }
 }
 
-/**
- * Full platform KPI result — returned by GET /admin/v1/platform/kpis.
- * Assembles all domain KPIs into one response.
- */
-export interface PlatformKPIResult {
+//** Full platform KPI result - Assembles all domain KPIs into one response
+
+export interface KPIResult {
   countries: CountryKPIs
   cities:    CityKPIs
   vendors:   VendorKPIs
