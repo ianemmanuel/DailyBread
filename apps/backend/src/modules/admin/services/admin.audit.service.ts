@@ -16,7 +16,7 @@ export interface AuditLogInput {
   metadata?   : Record<string, unknown>
 }
 
-// ─── Queue ────────────────────────────────────────────────────────────────────
+//* ─── Queue ───────────────────────────────
 
 const pendingWrites: Promise<unknown>[] = []
 

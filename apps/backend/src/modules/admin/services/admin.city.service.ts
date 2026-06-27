@@ -4,7 +4,7 @@ import { prisma, GeoStatus } from "@repo/db"
 import type { AdminScopeContext }  from "@repo/types/backend"
 import { UUID_RE } from "@/constants/system"
 import { ApiError } from "@/middleware/error"
-import { SaveCityBoundaryInput } from "@/types/admin"
+import { SaveCityBoundaryRequest } from "@repo/types/backend"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "./admin.audit.service"
 import {
@@ -321,7 +321,7 @@ export async function previewOsmBoundary(
 
 export async function saveCityBoundary(
     idOrSlug: string,
-    input   : SaveCityBoundaryInput,
+    input   : SaveCityBoundaryRequest,
     actorId : string,
     scope   : AdminScopeContext,
 ) {
