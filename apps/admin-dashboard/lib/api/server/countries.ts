@@ -1,8 +1,6 @@
 import type { ApiSuccess, Country } from "@repo/types/admin-app"
-import type {
-    CountrySummaryResult,
-    CountryDetailData,
-} from "@/types/geography.types"
+import type { CountryDetailData } from "@/types/geography.types"
+import { CountrySummaryResult } from "@/types/country.types"
 import { buildCountryDetail } from "@/utils/helpers/countries"
 
 
@@ -14,7 +12,7 @@ type FetchResult<T> =
 export async function fetchActiveCountries(token: string): Promise<FetchResult<CountrySummaryResult[]>> {
   try {
     const res = await fetch(
-      `${process.env.BACKEND_API_URL}/admin/v1/platform/countries?status=ACTIVE`,
+      `${process.env.BACKEND_API_URL}/admin/v1/countries?status=ACTIVE`,
       {
         headers: { Authorization: `Bearer ${token}` },
         next:    { revalidate: 60 },
@@ -32,7 +30,7 @@ export async function fetchActiveCountries(token: string): Promise<FetchResult<C
 export async function fetchAllCountries(token: string): Promise<FetchResult<CountrySummaryResult[]>> {
   try {
     const res = await fetch(
-      `${process.env.BACKEND_API_URL}/admin/v1/platform/countries`,
+      `${process.env.BACKEND_API_URL}/admin/v1/countries`,
       {
         headers: { Authorization: `Bearer ${token}` },
         next:    { revalidate: 60 },
@@ -49,7 +47,7 @@ export async function fetchAllCountries(token: string): Promise<FetchResult<Coun
 export async function fetchCountryDetail(token: string, slug: string): Promise<CountryDetailData | null> {
   try {
     const res = await fetch(
-      `${process.env.BACKEND_API_URL}/admin/v1/geography/countries/${slug}`,
+      `${process.env.BACKEND_API_URL}/admin/v1/countries/${slug}`,
       {
         headers: { Authorization: `Bearer ${token}` },
         next:    { revalidate: 60 },

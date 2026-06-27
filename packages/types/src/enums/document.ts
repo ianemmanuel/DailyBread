@@ -1,4 +1,3 @@
-// ─── Document enums ───────────────────────────────────────────────────────────
 
 export enum DocumentStatus {
   PENDING    = "PENDING",

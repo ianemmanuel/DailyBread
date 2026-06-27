@@ -1,5 +1,6 @@
 
 import { ServiceAreaMode, Country } from "@repo/types/admin-app"
+import { CountryDetailMetrics } from "./country.types"
 
 //* Service area mode UI config
 
@@ -43,17 +44,6 @@ export interface CountryDetailData {
   vendorStats:  VendorStats
   compliance:   ComplianceItem[]
   admins:       AdminRow[]
-}
-
-export interface CountryDetailMetrics {
-  totalVendors:    number
-  activeVendors:   number
-  totalCities:     number
-  activeCities:    number
-  totalOutlets:    number
-  totalCustomers:  number
-  fulfillmentRate: number
-  avgDeliveryMins: number
 }
 
 export interface CityRow {
@@ -122,45 +112,10 @@ export interface InsightItem {
  * from backend data on the page layer, not fetched as a dedicated endpoint).
  */
 
-export interface PlatformKPIResult {
-  countries: {
-    total:    number
-    active:   number
-    inactive: number
-  }
-  vendors: {
-    total:  number
-    active: number
-  }
-  cities: {
-    total:  number
-    active: number
-  }
-  outlets: {
-    total:  number
-    active: number
-  }
-  customers: {
-    total:  number
-    active: number
-  }
-}
 
 
-export interface CountrySummaryResult {
-  id:        string
-  name:      string
-  slug:      string
-  code:      string
-  currency:  string
-  phoneCode: string
-  status:    string
-  createdAt: string   // ISO string after JSON serialisation
-  _count: {
-    cities:  number
-    vendors: number
-  }
-}
+
+
 
 export interface InsightItem {
   id:      string
