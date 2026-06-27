@@ -75,8 +75,16 @@ export interface CreateCityRequest {
 }
 
 export interface UpdateCityRequest {
-    status? : GeoStatus
-    timezone? : string
-    latitude? : number
-    longitude?: number
+  name?: string
+  status?: GeoStatus
+  timezone?: string
+  latitude?: number
+  longitude?: number
+}
+
+
+export interface SaveCityBoundaryRequest {
+  boundary  : CityBoundary
+  osmId?    : string    // include if this originated from an OSM search
+  source    : "OSM" | "MANUAL"
 }

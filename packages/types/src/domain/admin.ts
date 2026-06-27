@@ -110,13 +110,11 @@ export interface AuditLogWithAdmin extends AuditLog {
   adminUser: Pick<AdminUser, "id" | "firstName" | "lastName" | "email">
 }
 
-
 export interface ListAdminUsersParams extends PaginationParams {
   status? : AdminUserStatus   // replaces isActive — use status for precise filtering
   role? : AdminRoleName
   search? : string            // searches email and fullName
 }
-
 
 export interface CreateAdminUserRequest {
   email : string
@@ -124,33 +122,40 @@ export interface CreateAdminUserRequest {
   middleName? : string
   lastName : string
   roleId : string
-  permissionKeys?: string[]   // must all be within the role's pool
+  employeeId? : string
+  permissionKeys?: string[]  
+  scopes? : ScopeEntry[] // must all be within the role's pool
 }
 
 export interface UpdateAdminUserPermissionsRequest {
-  permissionKeys: string[]   // replaces all existing grants; empty array = revoke all
+  adminUserId : string
+  permissionKeys : string[]   // replaces all existing grants; empty array = revoke all
 }
 
 export interface SuspendAdminUserRequest {
+  adminUserId : string
   reason: string
 }
 
 export interface DeactivateAdminUserRequest {
+  adminUserId : string
   reason: string
 }
 
 export interface UpdateAdminUserRoleRequest {
+  adminUserId : string
   roleId: string
 }
 
-export interface InviteScopeEntry {
+export interface ScopeEntry {
   scopeType : "COUNTRY" | "CITY"
   countryId : string
   cityId?   : string
 }
 
 export interface UpdateAdminUserScopesRequest {
-  scopes: InviteScopeEntry[]
+  adminUserId : string
+  scopes: ScopeEntry[]
 }
 
 export type AdminUserListItem = Pick<
@@ -202,7 +207,6 @@ export interface AdminSessionData {
 }
 
 //* VENDOR MANAGEMENT
-
 
 export interface ListApplicationsParams extends PaginationParams, DateRangeParams {
   status? : VendorApplicationStatus | VendorApplicationStatus[]

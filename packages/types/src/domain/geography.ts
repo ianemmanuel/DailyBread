@@ -19,6 +19,7 @@ export interface BoundingBox {
   west : number
 }
 
+
 export interface GeoPoint {
   latitude : number
   longitude: number
@@ -50,6 +51,19 @@ export interface ListServiceAreasParams {
 export type ServiceAreaListItem = ServiceArea
 
 
+export interface CreateServiceAreaRequest {
+  name    : string
+  mode    : ServiceAreaMode
+  boundary: ServiceAreaBoundary
+}
+
+export interface UpdateServiceAreaRequest {
+  name?    : string
+  mode?    : ServiceAreaMode
+  boundary?: ServiceAreaBoundary
+}
+
+
 //* Delivery zone
 export interface DeliveryZone {
   id : string
@@ -63,5 +77,17 @@ export interface DeliveryZone {
 }
 
 export type DeliveryZoneBoundary = GeoJsonPolygon | GeoJsonMultiPolygon
+
+export interface CreateDeliveryZoneRequest {
+  name           : string
+  boundary       : DeliveryZoneBoundary
+  maxCourierCount?: number
+}
+
+export interface UpdateDeliveryZoneRequest {
+  name?          : string
+  boundary?      : DeliveryZoneBoundary
+  maxCourierCount?: number
+}
 
 

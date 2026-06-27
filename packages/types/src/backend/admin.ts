@@ -1,25 +1,107 @@
 //* src/backend/admin.ts
+//! NEVER import this file in frontend apps — it depends on Express types.
 
 import type { Request } from "express"
 import type { AdminUserWithRole, AdminScopeContext } from "../domain/admin"
 import type { AdminPermissionKey } from "../enums/admin"
-export type { AdminScopeContext } from "../domain/admin"
+
+export type {
+  AdminPermission,
+  AdminRole,
+  AdminRoleWithPermissions,
+  AdminUserScope,
+  AdminUser,
+  AdminUserPermissionGrant,
+  AdminUserWithRole,
+  AdminUserProfile,
+  AdminScopeContext,
+  AuditLog,
+  AuditLogWithAdmin,
+  ListAdminUsersParams,
+  CreateAdminUserRequest,
+  UpdateAdminUserPermissionsRequest,
+  SuspendAdminUserRequest,
+  DeactivateAdminUserRequest,
+  UpdateAdminUserRoleRequest,
+  ScopeEntry,
+  UpdateAdminUserScopesRequest,
+  AdminUserListItem,
+  AdminUserDetail,
+  SessionRole,
+  SessionScope,
+  SessionScopeContext,
+  AdminSessionData,
+  ListApplicationsParams,
+  ApplicationQueueItem,
+  ApplicationDetail,
+  ApproveApplicationResponse,
+  RejectApplicationRequest,
+  ListVendorAccountsParams,
+  VendorAccountListItem,
+  VendorAccountDetail,
+  SuspendVendorRequest,
+} from "../domain/admin";
+
+
 export type { 
-    CountryKPIs, 
-    KPITrend, 
-    CityKPIs, 
-    OutletKPIs, 
-    VendorKPIs, 
-    KPIResult,
-    CustomerKPIs
+  CountryKPIs, 
+  KPITrend, 
+  CityKPIs, 
+  OutletKPIs, 
+  VendorKPIs, 
+  KPIResult,
+  CustomerKPIs
 } from "../domain/kpi"
 
-//* ─── Admin request interfaces ─────────────────────────────────────────────────
-// Import in middleware and controllers:
-//   import type { AdminRequest } from "@repo/types/backend"
-//! NEVER import this file in frontend apps — it depends on Express types.
+export type { 
+  CityBoundary, 
+  CreateCityRequest, 
+  UpdateCityRequest,
+  City,
+  CityBoundaryData,
+  CityDetail,
+  OsmPreviewResult,
+  CityWithCountry,
+  SaveCityBoundaryRequest,
+  ListCitiesParams
+} from "../domain/city"
 
-// After verifyAdminToken runs
+export type { 
+  ServiceAreaBoundary, 
+  DeliveryZoneBoundary, 
+  BoundingBox,
+  GeoJsonPolygon,
+  GeoJsonMultiPolygon,
+  GeoPoint,
+  ServiceArea,
+  ListServiceAreasParams,
+  ServiceAreaListItem,
+  CreateServiceAreaRequest,
+  UpdateServiceAreaRequest,
+  UpdateDeliveryZoneRequest,
+  DeliveryZone,
+  CreateDeliveryZoneRequest,
+} from "../domain/geography"
+
+export type {
+  Country,
+  UpdateCountryRequest,
+  CountrySummaryResult,
+  CreateCountryRequest,
+  CountryWithCities,
+  CountryVendorSnapshot,
+} from "../domain/country"
+
+export type {
+  RegionBreakdown,
+  RegionBreakdownItem,
+  RegionSummaryResult,
+  RegionWithCountries,
+} from "../domain/region"
+
+export type { ServiceAreaMode } from "../enums/geography"
+
+
 export interface AuthenticatedAdminRequest extends Request {
   adminClerkUserId: string
 }
@@ -31,8 +113,6 @@ export interface AdminRequest extends AuthenticatedAdminRequest {
   adminScope       : AdminScopeContext
 }
 
-// ─── Discriminated union helpers ──────────────────────────────────────────────
-// Pattern used in vendorAuth.ts and equivalent admin helpers
 
 export type AuthOk<T extends object>  = { ok: true } & T
 export type AuthFail = { ok: false; status: number; message: string }

@@ -4,11 +4,7 @@ import { prisma, GeoStatus } from "@repo/db"
 import type { AdminScopeContext }  from "@repo/types/backend"
 import { UUID_RE } from "@/constants/system"
 import { ApiError } from "@/middleware/error"
-import { 
-  CreateCityInput, 
-  UpdateCityInput, 
-  SaveCityBoundaryInput, 
-} from "@/types/admin"
+import { SaveCityBoundaryInput } from "@/types/admin"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "./admin.audit.service"
 import {
@@ -16,10 +12,15 @@ import {
   searchCityBoundary,
 } from "@repo/geo"
 import type {
-  CityBoundary,
+
   BoundingBox,
   OsmBoundaryResult,
 } from "@repo/geo/types"
+import type {
+  CityBoundary,
+  CreateCityRequest,
+  UpdateCityRequest 
+} from "@repo/types/backend"
 
 
 const serviceLog = logger.child({ module: "admin-city-service" })
@@ -108,7 +109,7 @@ export async function getCity(idOrSlug: string, scope: AdminScopeContext) {
 }
 
 export async function createCity(
-    input  : CreateCityInput,
+    input  :  CreateCityRequest,
     actorId: string,
     scope  : AdminScopeContext,
 ){
@@ -165,7 +166,7 @@ export async function createCity(
 
 export async function updateCity(
     idOrSlug: string,
-    input   : UpdateCityInput,
+    input   : UpdateCityRequest ,
     actorId : string,
     scope   : AdminScopeContext,
 ) {
@@ -191,11 +192,13 @@ export async function updateCity(
 
     const updated = await prisma.city.update({
         where: { id: city.id },
-        data : {
-            ...(input.name != null ? { name : input.name } : {}),
-            ...(input.code != null ? { code : input.code } : {}),
-            ...(input.timezone != null ? { timezone: input.timezone } : {}),
-            ...(newSlug != null ? { slug : newSlug } : {}),
+        data: {
+        ...(input.name != null ? { name: input.name } : {}),
+        ...(input.latitude != null ? { latitude: input.latitude } : {}),
+        ...(input.longitude != null ? { longitude: input.longitude } : {}),
+        ...(input.timezone != null ? { timezone: input.timezone } : {}),
+        ...(input.status != null ? { status: input.status } : {}),
+        ...(newSlug != null ? { slug: newSlug } : {}),
         },
     })
 
@@ -206,8 +209,8 @@ export async function updateCity(
         entityType : "City",
         entityId   : city.id,
         changes    : {
-            before: { name: city.name, slug: city.slug, code: city.code, timezone: city.timezone },
-            after : { name: input.name, slug: newSlug, code: input.code, timezone: input.timezone },
+            before: { name: city.name, slug: city.slug, latitude: city.latitude, longitude: city.longitude, timezone: city.timezone },
+            after : { name: input.name, slug: newSlug, latitude: input.latitude, longitude:input.longitude, timezone: input.timezone },
         },
     })
 

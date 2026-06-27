@@ -60,6 +60,26 @@ export interface CountryWithCities extends Country {
   cities: City[]
 }
 
+export interface CountrySummaryResult {
+  id:        string
+  name:      string
+  slug:      string
+  code:      string
+  currency:  string
+  phoneCode: string
+  status:    string
+  createdAt: Date
+  region?: {
+    id:   string
+    name: string
+    code: string
+  } | null
+  _count: {
+    cities:  number
+    vendors: number
+  }
+}
+
 export interface CountryVendorSnapshot {
   applications: {
     total:       number

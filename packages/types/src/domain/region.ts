@@ -1,6 +1,6 @@
 
-import { Country } from "./country"
 
+import { GeoStatus } from "../enums/geography"
 
 export interface RegionSummaryResult {
   id:          string
@@ -15,15 +15,23 @@ export interface RegionSummaryResult {
   }
 }
 
+export interface RegionCountrySummary {
+  id: string
+  name: string
+  slug: string
+  code: string
+  status: GeoStatus
+}
+
 export interface RegionWithCountries {
-  id:          string
-  name:        string
-  slug:        string
-  code:        string
+  id: string
+  name: string
+  slug: string
+  code: string
   description: string | null
-  status:      string
-  createdAt:   Date
-  countries: Country[]
+  status: GeoStatus
+  createdAt: Date
+  countries: RegionCountrySummary[]
 }
 
 /* ── RegionBreakdownItem ─────────────────────────────────────

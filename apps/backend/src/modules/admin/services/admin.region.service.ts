@@ -20,13 +20,13 @@
 import { prisma } from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
 import type {
-    RegionSummaryResult,
-    RegionWithCountries,
-    RegionBreakdown,
-    RegionBreakdownItem,
-} from "@/types/admin"
+  RegionSummaryResult,
+  RegionWithCountries,
+  RegionBreakdown,
+  RegionBreakdownItem,
+} from "@repo/types/backend"
 
-/* ── helpers ──────────────────────────────────────────────── */
+//* helpers
 
 function slugify(name: string): string {
   return name
@@ -36,15 +36,7 @@ function slugify(name: string): string {
     .replace(/^-|-$/g, "")
 }
 
-/* ══════════════════════════════════════════════════════════════
-   READ OPERATIONS
-   ══════════════════════════════════════════════════════════════ */
 
-/**
- * List all regions with country counts.
- * Scoped admins see the same region list as global admins — regions are
- * global groupings. The country counts are unfiltered (platform-wide).
- */
 export async function getRegions(): Promise<RegionSummaryResult[]> {
   return prisma.region.findMany({
     orderBy: { name: "asc" },
@@ -63,10 +55,7 @@ export async function getRegions(): Promise<RegionSummaryResult[]> {
   })
 }
 
-/**
- * Get a single region with its full country list.
- * Used on the Region detail page.
- */
+
 export async function getRegionBySlug(slug: string): Promise<RegionWithCountries | null> {
   return prisma.region.findUnique({
     where : { slug },

@@ -79,3 +79,4 @@ export interface KPIResult {
   /** ISO string of when this snapshot was computed */
   computedAt: string
 }
+
