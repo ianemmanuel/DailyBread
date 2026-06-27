@@ -7,6 +7,7 @@ import serviceAreaRouter from "./admin.servicearea.routes"
 import citiesRouter from "./admin.city.routes"
 import countriesRouter from "./admin.country.routes"
 import kpiRouter from "./admin.kpi.routes"
+import regionsRouter from "./admin.region.routes"
 
 const v1Router: Router = Router()
 
@@ -17,6 +18,7 @@ v1Router.use("/delivery-zones", deliveryzoneRouter)
 v1Router.use("/service-areas", serviceAreaRouter)
 v1Router.use("/cities", citiesRouter)
 v1Router.use("/countries", countriesRouter)
+v1Router.use("/regions", regionsRouter)
 v1Router.use("/kpis", kpiRouter)
 
 export default v1Router

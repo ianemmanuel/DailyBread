@@ -97,6 +97,8 @@ export type {
   RegionBreakdownItem,
   RegionSummaryResult,
   RegionWithCountries,
+  CreateRegionRequest,
+ UpdateRegionRequest,
 } from "../domain/region"
 
 export type { ServiceAreaMode } from "../enums/geography"

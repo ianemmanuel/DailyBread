@@ -4,7 +4,7 @@ import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/modules/admin/services/admin.audit.service"
 import { validateScopeForRole, getDefaultScopeType } from "@/lib/scope/scope-rules"
-import type { AdminScopeContext }  from "@repo/types/backend"
+import type { AdminScopeContext, CreateAdminUserRequest }  from "@repo/types/backend"
 
 const serviceLog = logger.child({ module: "admin-user-service" })
 
@@ -16,16 +16,16 @@ export interface ScopeEntry {
   cityId?   : string
 }
 
-interface CreateAdminUserInput {
-  firstName      : string
-  middleName?    : string
-  lastName       : string
-  email          : string
-  employeeId?    : string
-  roleId         : string
-  permissionKeys : string[]
-  scopes?        : ScopeEntry[]
-}
+// interface CreateAdminUserInput {
+//   firstName      : string
+//   middleName?    : string
+//   lastName       : string
+//   email          : string
+//   employeeId?    : string
+//   roleId         : string
+//   permissionKeys : string[]
+//   scopes?        : ScopeEntry[]
+// }
 
 interface UpdateAdminUserPermissionsInput {
   adminUserId    : string
@@ -61,31 +61,72 @@ function getAdminClerkClient() {
 //* ─── Create ─────────────────
 
 export async function createAdminUser(
-  input     : CreateAdminUserInput,
-  actorId   : string,
+  input: CreateAdminUserRequest,
+  actorId: string,
   actorScope: AdminScopeContext,
 ) {
-  const { firstName, middleName, lastName, email, employeeId, roleId, permissionKeys, scopes } = input
+  const {
+    firstName,
+    middleName,
+    lastName,
+    email,
+    employeeId,
+    roleId,
+    permissionKeys: rawPermissionKeys,
+    scopes,
+  } = input
+
+  const permissionKeys = rawPermissionKeys ?? []
   const normalizedEmail = email.toLowerCase().trim()
 
-  const existing = await prisma.adminUser.findUnique({ where: { email: normalizedEmail } })
-  if (existing) throw new ApiError(409, "An admin user with this email already exists", "DUPLICATE_EMAIL")
-
-  if (employeeId) {
-    const existingEmployee = await prisma.adminUser.findFirst({ where: { employeeId } })
-    if (existingEmployee) throw new ApiError(409, "An admin user with this employee ID already exists", "DUPLICATE_EMPLOYEE_ID")
+  const existing = await prisma.adminUser.findUnique({
+    where: { email: normalizedEmail },
+  })
+  if (existing) {
+    throw new ApiError(
+      409,
+      "An admin user with this email already exists",
+      "DUPLICATE_EMAIL",
+    )
   }
 
-  const role = await prisma.adminRole.findUnique({ where: { id: roleId } })
-  if (!role) throw new ApiError(404, "Role not found", "ROLE_NOT_FOUND")
-  if (role.name === "system") throw new ApiError(400, "Cannot assign the system role", "INVALID_ROLE")
+  if (employeeId) {
+    const existingEmployee = await prisma.adminUser.findFirst({
+      where: { employeeId },
+    })
 
-  if (permissionKeys.length > 0) await validatePermissionsInRolePool(roleId, permissionKeys)
+    if (existingEmployee) {
+      throw new ApiError(
+        409,
+        "An admin user with this employee ID already exists",
+        "DUPLICATE_EMPLOYEE_ID",
+      )
+    }
+  }
+
+  const role = await prisma.adminRole.findUnique({
+    where: { id: roleId },
+  })
+
+  if (!role) {
+    throw new ApiError(404, "Role not found", "ROLE_NOT_FOUND")
+  }
+
+  if (role.name === "system") {
+    throw new ApiError(400, "Cannot assign the system role", "INVALID_ROLE")
+  }
+
+  if (permissionKeys.length > 0) {
+    await validatePermissionsInRolePool(roleId, permissionKeys)
+  }
 
   const resolvedScopes = resolveScopes(scopes, actorScope, role.name)
 
   // Validate scope-role compatibility
-  validateScopeForRole(role.name, resolvedScopes.map((s) => s.scopeType))
+  validateScopeForRole(
+    role.name,
+    resolvedScopes.map((s) => s.scopeType),
+  )
 
   // Scope guard: actor can only create users within their own scope
   assertScopeCanManage(actorScope, resolvedScopes)
@@ -94,26 +135,30 @@ export async function createAdminUser(
     const created = await tx.adminUser.create({
       data: {
         firstName,
-        middleName : middleName ?? null,
+        middleName: middleName ?? null,
         lastName,
-        email      : normalizedEmail,
-        employeeId : employeeId ?? null,
+        email: normalizedEmail,
+        employeeId: employeeId ?? null,
         roleId,
-        status     : AdminUserStatus.pending,
-        isActive   : false,
+        status: AdminUserStatus.pending,
+        isActive: false,
         invitedById: actorId,
       },
     })
 
     if (permissionKeys.length > 0) {
       const permissions = await tx.adminPermission.findMany({
-        where: { key: { in: permissionKeys }, isActive: true },
+        where: {
+          key: { in: permissionKeys },
+          isActive: true,
+        },
       })
+
       await tx.adminUserPermission.createMany({
         data: permissions.map((p) => ({
-          adminUserId : created.id,
+          adminUserId: created.id,
           permissionId: p.id,
-          grantedById : actorId,
+          grantedById: actorId,
         })),
       })
     }
@@ -121,32 +166,45 @@ export async function createAdminUser(
     await tx.adminUserScope.createMany({
       data: resolvedScopes.map((s) => ({
         adminUserId: created.id,
-        scopeType  : s.scopeType,
-        countryId  : s.countryId ?? null,
-        cityId     : s.cityId    ?? null,
+        scopeType: s.scopeType,
+        countryId: s.countryId ?? null,
+        cityId: s.cityId ?? null,
       })),
     })
 
     return created
   })
 
-  serviceLog.info({ adminUserId: user.id, email: normalizedEmail, actorId }, "Admin user created")
+  serviceLog.info(
+    {
+      adminUserId: user.id,
+      email: normalizedEmail,
+      actorId,
+    },
+    "Admin user created",
+  )
 
   auditService.log({
     adminUserId: actorId,
-    action     : "admin_user.created",
-    entityType : "AdminUser",
-    entityId   : user.id,
-    changes    : {
+    action: "admin_user.created",
+    entityType: "AdminUser",
+    entityId: user.id,
+    changes: {
       after: {
-        email      : normalizedEmail,
-        displayName: formatDisplayName({ firstName, middleName, lastName }),
+        email: normalizedEmail,
+        displayName: formatDisplayName({
+          firstName,
+          middleName,
+          lastName,
+        }),
         roleId,
-        status     : "pending",
-        scopes     : resolvedScopes,
+        status: "pending",
+        scopes: resolvedScopes,
       },
     },
-    metadata: { permissionCount: permissionKeys.length },
+    metadata: {
+      permissionCount: permissionKeys.length,
+    },
   })
 
   return user

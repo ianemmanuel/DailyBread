@@ -123,9 +123,10 @@ export interface CreateAdminUserRequest {
   lastName : string
   roleId : string
   employeeId? : string
-  permissionKeys?: string[]  
+  permissionKeys? : string[]  
   scopes? : ScopeEntry[] // must all be within the role's pool
 }
+
 
 export interface UpdateAdminUserPermissionsRequest {
   adminUserId : string

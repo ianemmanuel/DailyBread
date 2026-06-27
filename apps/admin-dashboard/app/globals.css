@@ -36,6 +36,19 @@
   --sidebar-width:           240px;
   --sidebar-width-collapsed: 68px;
   --topbar-height:           60px;
+
+  --chart-1: oklch(0.700 0.155 52);    
+  --chart-2: oklch(0.530 0.130 240);   
+  --chart-3: oklch(0.500 0.150 148);   
+  --chart-4: oklch(0.620 0.135 72);    
+  --chart-5: oklch(0.560 0.190 22);    
+  --chart-6: oklch(0.530 0.150 300);   
+  --chart-7: oklch(0.540 0.120 195);   
+  --chart-8: oklch(0.450 0.080 258); 
+ 
+  --chart-grid:       oklch(0.900 0.000 0);
+  --chart-label:      oklch(0.500 0.010 258);
+  --chart-tooltip-bg: oklch(1.000 0.000 0);
 }
 
 
@@ -119,6 +132,9 @@
   --chart-label:            var(--admin-dark-muted);
   --chart-tooltip-bg:       var(--admin-dark-card-2);
   --chart-tooltip-border:   var(--admin-dark-border-2);
+  --chart-6: oklch(0.620 0.150 300);
+  --chart-7: oklch(0.650 0.120 195);   
+  --chart-8: oklch(0.550 0.080 258);   
 }
 
 

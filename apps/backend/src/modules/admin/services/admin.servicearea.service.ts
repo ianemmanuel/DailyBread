@@ -5,7 +5,7 @@ import { logger } from "@/lib/pino/logger"
 import { auditService } from "./admin.audit.service"
 import type { ServiceAreaMode } from "@repo/geo/types"
 import type { AdminScopeContext }  from "@repo/types/backend"
-import { CreateServiceAreaInput, UpdateServiceAreaInput } from "@/types/admin"
+import { CreateServiceAreaRequest, UpdateServiceAreaRequest } from "@repo/types/backend"
 import { UUID_RE } from "@/constants/system"
 
 const serviceLog = logger.child({ module: "admin-geography-service" })
@@ -96,7 +96,7 @@ export async function getServiceArea(
 
 export async function createServiceArea(
     idOrSlug: string,
-    input   : CreateServiceAreaInput,
+    input   : CreateServiceAreaRequest,
     actorId : string,
     scope   : AdminScopeContext,
 ) {
@@ -155,7 +155,7 @@ export async function createServiceArea(
 
 export async function updateServiceArea(
     serviceAreaId: string,
-    input : UpdateServiceAreaInput,
+    input : UpdateServiceAreaRequest,
     actorId : string,
     scope : AdminScopeContext,
 ){

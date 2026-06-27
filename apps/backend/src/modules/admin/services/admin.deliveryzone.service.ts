@@ -7,7 +7,7 @@ import { isPointInServiceArea } from "@repo/geo"
 import type { ServiceAreaBoundary, DeliveryZoneBoundary }from "@repo/geo/types"
 import type { AdminScopeContext }  from "@repo/types/backend"
 import { UUID_RE } from "@/constants/system"
-import {  CreateDeliveryZoneInput, UpdateDeliveryZoneInput } from "@/types/admin"
+import {  CreateDeliveryZoneRequest, UpdateDeliveryZoneRequest } from "@repo/types/backend"
 
 const serviceLog = logger.child({ module: "admin-geography-service" })
 
@@ -154,7 +154,7 @@ export async function listDeliveryZones(
 
 export async function createDeliveryZone(
   idOrSlug: string,
-  input   : CreateDeliveryZoneInput,
+  input   : CreateDeliveryZoneRequest,
   actorId : string,
   scope   : AdminScopeContext,
 ) {
@@ -229,7 +229,7 @@ export async function createDeliveryZone(
 
 export async function updateDeliveryZone(
   zoneId : string,
-  input  : UpdateDeliveryZoneInput,
+  input  : UpdateDeliveryZoneRequest,
   actorId: string,
   scope  : AdminScopeContext,
 ) {

@@ -1,25 +1,7 @@
-/**
- * admin.platform.controller.ts
- *
- * Thin controller — no business logic, no queries.
- * All work is delegated to the service layer.
- *
- * Endpoints
- * ──────────
- * GET /admin/v1/platform/kpis                          → full platform snapshot
- * GET /admin/v1/platform/kpis/countries                → country KPIs only
- * GET /admin/v1/platform/kpis/cities                   → city KPIs only
- * GET /admin/v1/platform/kpis/vendors                  → vendor KPIs only
- * GET /admin/v1/platform/kpis/outlets                  → outlet KPIs only
- * GET /admin/v1/platform/kpis/customers                → customer KPIs only
- * GET /admin/v1/platform/countries                     → country list (optional ?status=)
- * GET /admin/v1/platform/countries/:countrySlug/vendors → vendor snapshot for a country
- */
 
-import { RequestHandler } from "express"
+import type { RequestHandler } from "express"
 import type { AdminRequest } from "@repo/types/backend"
 import { sendSuccess } from "@/helpers/api-response/response"
-import { ApiError } from "@/middleware/error"
 import {
   getPlatformKPIs,
   getCountryKPIs,
@@ -27,24 +9,20 @@ import {
   getVendorKPIs,
   getOutletKPIs,
   getCustomerKPIs,
-  getCountriesByStatus,
-  getCountryVendorSnapshot,
 } from "../services/admin.kpi.service"
 
+
+//*Full platform snapshot-Fetches all five domain KPI blocks in parallel.
 
 export const handleGetKPIs: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
-    console.log('here we are')
     const data = await getPlatformKPIs(adminScope)
     return sendSuccess(res, data, "Platform KPIs fetched")
   } catch (err) { next(err) }
 }
 
-/* ── Domain-specific KPI endpoints ──────────────────────────
-   Useful when a page only needs one domain's metrics,
-   avoiding the overhead of fetching all five simultaneously.
-*/
+//*Domain-specific endpoints -Call individually when a page only needs one domain's metrics.
 
 export const handleGetCountryKPIs: RequestHandler = async (req, res, next) => {
   try {

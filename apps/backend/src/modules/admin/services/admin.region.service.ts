@@ -1,30 +1,18 @@
-/**
- * admin.region.service.ts
- *
- * READ-WRITE service for the Region domain.
- * Reads: list, detail, breakdown for the donut chart.
- * Writes: create, assign country, remove country, update, soft-deactivate.
- *
- * Why we include write operations now even though no UI exists yet:
- * The Region model is live in the DB from the migration, so seed scripts
- * and future pages need these functions. Keeping them here avoids a second
- * service file later.
- *
- * Scope notes:
- * - Regions are a global concept — there is no per-country scope on them.
- * - Scoped admins can READ region breakdown (filtered to their countries).
- * - Only global admins should CREATE / UPDATE / DELETE regions (enforced
- *   at the controller level via requirePermission).
- */
 
-import { prisma } from "@repo/db"
-import type { AdminScopeContext } from "@repo/types/backend"
+import { logger } from "@/lib/pino/logger"
+import { GeoStatus, prisma } from "@repo/db"
+import type { AdminScopeContext, CreateRegionRequest, UpdateRegionRequest } from "@repo/types/backend"
 import type {
   RegionSummaryResult,
   RegionWithCountries,
   RegionBreakdown,
   RegionBreakdownItem,
 } from "@repo/types/backend"
+import { auditService } from "./admin.audit.service"
+import { ApiError } from "@/middleware/error"
+import { UUID_RE } from "@/constants/system"
+
+const serviceLog = logger.child({ module: "admin-region-controller" })
 
 //* helpers
 
@@ -36,8 +24,21 @@ function slugify(name: string): string {
     .replace(/^-|-$/g, "")
 }
 
+async function resolveRegionId(idOrSlug: string): Promise<string> {
+  const isUuid = UUID_RE.test(idOrSlug)
+  const region = await prisma.region.findFirst({
+    where : isUuid ? { id: idOrSlug } : { slug: idOrSlug },
+    select: { id: true },
+  })
+  if (!region) throw new ApiError(404, "Region not found", "NOT_FOUND")
+  return region.id
+}
 
-export async function getRegions(): Promise<RegionSummaryResult[]> {
+
+export async function getRegions(scope : AdminScopeContext): Promise<RegionSummaryResult[]> {
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
   return prisma.region.findMany({
     orderBy: { name: "asc" },
     select: {
@@ -55,10 +56,19 @@ export async function getRegions(): Promise<RegionSummaryResult[]> {
   })
 }
 
+export async function getRegionById( 
+  idOrSlug: string, 
+  scope: AdminScopeContext
+): Promise<RegionWithCountries | null> {
 
-export async function getRegionBySlug(slug: string): Promise<RegionWithCountries | null> {
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
+
+  const id = await resolveRegionId(idOrSlug)
+
   return prisma.region.findUnique({
-    where : { slug },
+    where : { id },
     select: {
       id:          true,
       name:        true,
@@ -81,28 +91,14 @@ export async function getRegionBySlug(slug: string): Promise<RegionWithCountries
   })
 }
 
-/**
- * getRegionBreakdown
- *
- * Returns the data needed for the "Countries by Region" donut chart.
- * Scoped admins get counts filtered to their allowed country IDs,
- * so a country-scoped admin only sees regions their countries belong to.
- *
- * Algorithm:
- *   1. Fetch all active countries (within scope) with their region.
- *   2. Group by region, count per region.
- *   3. Count countries where regionId IS NULL → "Ungrouped".
- *   4. Compute percent share for each region.
- */
-export async function getRegionBreakdown(
-  scope: AdminScopeContext,
-): Promise<RegionBreakdown> {
-  // Pull only the fields we need — no over-fetching
+export async function getRegionBreakdown( scope: AdminScopeContext ): Promise<RegionBreakdown> {
+
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
+  //* Pull only the fields we need — no over-fetching
   const countries = await prisma.country.findMany({
-    where: {
-      status: "ACTIVE",
-      ...(scope.isGlobal ? {} : { id: { in: scope.countryIds } }),
-    },
+    where: { status: "ACTIVE"},
     select: {
       regionId: true,
       region: {
@@ -175,34 +171,23 @@ export async function getRegionBreakdown(
   return { regions, ungroupedCountries: ungrouped, totalActive }
 }
 
-/* ══════════════════════════════════════════════════════════════
-   WRITE OPERATIONS
-   ══════════════════════════════════════════════════════════════ */
-
-export interface CreateRegionInput {
-  name:        string
-  code:        string   // e.g. "EAF" — must be unique, stored uppercase
-  description?: string
-}
-
-/**
- * Create a new region.
- * Slug is auto-derived from name. Code is uppercased and trimmed.
- * Throws if name or code already exists (Prisma unique constraint).
- */
-export async function createRegion(
-  input:       CreateRegionInput,
+export async function createRegion( 
+  input: CreateRegionRequest, 
   adminUserId: string,
+  scope: AdminScopeContext
 ): Promise<RegionSummaryResult> {
+
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
   const slug = slugify(input.name)
   const code = input.code.trim().toUpperCase()
-
   const region = await prisma.region.create({
     data: {
-      name:            input.name.trim(),
+      name: input.name.trim(),
       slug,
       code,
-      description:     input.description?.trim() ?? null,
+      description: input.description?.trim() ?? null,
       createdByAdminId: adminUserId,
     },
     select: {
@@ -216,25 +201,31 @@ export async function createRegion(
       _count: { select: { countries: true } },
     },
   })
+  serviceLog.info({ regionId: region.id, actorId: adminUserId }, "Region created")
+  auditService.log({
+    adminUserId: adminUserId,
+    action     : "region.created",
+    entityType : "Region",
+    entityId   : region.id,
+    changes    : { after: { name: region.name, code: region.code, slug: region.slug } },
+  })
 
   return region
 }
 
-export interface UpdateRegionInput {
-  name?:        string
-  code?:        string
-  description?: string | null
-}
-
-/**
- * Update a region's metadata.
- * Slug is re-derived if name changes.
- * Partial update — only provided fields are written.
- */
 export async function updateRegion(
-  regionId: string,
-  input:    UpdateRegionInput,
+  idOrSlug : string,
+  adminId  : string, 
+  scope    : AdminScopeContext,
+  input    : UpdateRegionRequest,
 ): Promise<RegionSummaryResult> {
+
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
+
+  const id = await resolveRegionId(idOrSlug)
+  
   const data: Record<string, unknown> = {}
 
   if (input.name !== undefined) {
@@ -248,8 +239,8 @@ export async function updateRegion(
     data.description = input.description?.trim() ?? null
   }
 
-  return prisma.region.update({
-    where : { id: regionId },
+  const region = await prisma.region.update({
+    where : { id },
     data,
     select: {
       id:          true,
@@ -262,53 +253,75 @@ export async function updateRegion(
       _count: { select: { countries: true } },
     },
   })
+
+  serviceLog.info({ regionId: region.id, adminId }, "Region updated")
+  auditService.log({
+    adminUserId: adminId,
+    action     : "region.updated",
+    entityType : "Region",
+    entityId   : region.id,
+    changes    : { after: { ...region } },
+  })
+  return region
 }
 
-/**
- * Assign a country to a region.
- * Replaces any existing region assignment on that country.
- * Idempotent — safe to call if country is already in this region.
- */
-export async function assignCountryToRegion(
-  countryId: string,
-  regionId:  string,
-): Promise<void> {
-  await prisma.country.update({
-    where: { id: countryId },
-    data:  { regionId },
+export async function deactivateRegion(
+  idOrSlug : string,
+  adminId  : string, 
+  scope    : AdminScopeContext,
+){
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
+
+  const id = await resolveRegionId(idOrSlug)
+
+  const activeCountryCount = await prisma.country.count({
+    where: { regionId: id, status: GeoStatus.ACTIVE, deletedAt: null },
   })
+
+  const region = await prisma.region.update({
+    where: { id },
+    data:  { status: GeoStatus.INACTIVE },
+  })
+
+  serviceLog.info({ regionId: region.id, adminId }, "Region deactivated")
+  auditService.log({
+    adminUserId: adminId,
+    action     : "region.deactivated",
+    entityType : "Region",
+    entityId   : region.id,
+    changes    : { before: { status: GeoStatus.ACTIVE }, after: { status: GeoStatus.INACTIVE } },
+    metadata   : { activeCountryCount },
+  })
+
+  return { success: true, activeCountryCount }
 }
 
-/**
- * Remove a country from its region (sets regionId = null).
- */
-export async function removeCountryFromRegion(
-  countryId: string,
-): Promise<void> {
-  await prisma.country.update({
-    where: { id: countryId },
-    data:  { regionId: null },
-  })
-}
+export async function activateRegion(
+  idOrSlug : string, 
+  adminId  : string, 
+  scope    : AdminScopeContext
+){
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
 
-/**
- * Set region status to INACTIVE.
- * Does NOT unassign its countries — they remain grouped.
- * The UI can warn before deactivating if the region has countries.
- */
-export async function deactivateRegion(regionId: string): Promise<void> {
-  await prisma.region.update({
-    where: { id: regionId },
-    data:  { status: "INACTIVE" },
-  })
-}
+  const id = await resolveRegionId(idOrSlug)
 
-/**
- * Reactivate a previously deactivated region.
- */
-export async function activateRegion(regionId: string): Promise<void> {
-  await prisma.region.update({
-    where: { id: regionId },
-    data:  { status: "ACTIVE" },
+  const region = await prisma.region.update({
+    where: { id },
+    data:  { status: GeoStatus.ACTIVE },
   })
+
+  serviceLog.info({ regionId: region.id, adminId }, "Region activated")
+  auditService.log({
+    adminUserId: adminId,
+    action     : "region.activated",
+    entityType : "Region",
+    entityId   : region.id,
+    changes    : { before: { status: GeoStatus.INACTIVE }, after: { status: GeoStatus.ACTIVE }},
+  })
+
+  return { success: true }
 }

@@ -8,7 +8,9 @@ import {
     handleGetCountry, 
     handleListCities,
     handleGetCountriesByStatus,
-    handleGetCountryVendorSnapshot
+    handleGetCountryVendorSnapshot,
+    handleAssignCountryToRegion,
+    handleRemoveCountryFromRegion,
 } from "../../controllers/admin.country.controller"
 import { handleCreateCity } from "../../controllers/admin.city.controller"
 
@@ -27,5 +29,7 @@ countryRouter.patch("/:countryRef/deactivate", GLOBAL, handleDeactivateCountry)
 countryRouter.get ("/:countryRef/cities", READ, handleListCities)
 countryRouter.post ("/:countryRef/cities", WRITE, handleCreateCity)
 countryRouter.get("/:countryRef/vendors", READ, handleGetCountryVendorSnapshot)
+countryRouter.patch("/:countryRef/region",  WRITE, handleAssignCountryToRegion)
+countryRouter.patch("/:countryRef/region", WRITE, handleRemoveCountryFromRegion)
 
 export default countryRouter

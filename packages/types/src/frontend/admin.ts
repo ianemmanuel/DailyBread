@@ -7,10 +7,14 @@
 //! Never import from @repo/types/backend — that file depends on Express.
 
 //* API
-export type { AdminSessionData } from "../shared/admin/auth"
-export type { SessionRole } from "../shared/admin/auth"
-export type { SessionScope } from "../shared/admin/auth"
-export type { SessionScopeContext } from "../shared/admin/auth"
+
+export type { 
+    SessionRole, 
+    AdminSessionData, 
+    SessionScope, 
+    SessionScopeContext 
+} from "../domain/admin"
+
 export type { 
     CountryKPIs, 
     KPITrend, 
@@ -20,6 +24,7 @@ export type {
     KPIResult
 } from "../domain/kpi"
 
+export type { RegionBreakdown, RegionSummaryResult } from "../domain/region"
 //* ENUMS
 export type { AdminPermissionKey } from "../enums/admin"
 export { AdminPermissions } from "../enums/admin"
@@ -36,14 +41,18 @@ export type { BoundarySource } from "../enums/geography"
 //* DOMAIN TYPES
 
 //* Geography
-export type { Country } from "../domain/geography"
-export type { City } from "../domain/geography"
-export type { CityDetail } from "../domain/geography"
-export type { OsmPreviewResult } from "../domain/geography"
-export type { CityBoundaryData } from "../domain/geography"
+export type { Country } from "../domain/country"
+export type { 
+    City, 
+    CityDetail, 
+    CityBoundaryData, 
+    CityBoundary, 
+    OsmPreviewResult   
+} from "../domain/city"
+
 export type { ServiceArea } from "../domain/geography"
 export type { DeliveryZone } from "../domain/geography"
-export type { CityBoundary } from "../domain/geography"
+
 export type { ServiceAreaBoundary } from "../domain/geography"
 export type { DeliveryZoneBoundary } from "../domain/geography" 
 export type { BoundingBox } from "../domain/geography"

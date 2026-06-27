@@ -1,6 +1,6 @@
 
 import type { AdminScopeContext } from "@repo/types/backend"
-import type { CountrySummaryResult, CountryVendorSnapshot } from "@/types/admin"
+import type { CountrySummaryResult, CountryVendorSnapshot } from "@repo/types/backend"
 import { getCountryIdFromSlug } from "../helpers/get-country-id.helper"
 import { prisma, GeoStatus } from "@repo/db"
 import { ApiError } from "@/middleware/error"
@@ -29,34 +29,34 @@ function assertCountryInScope(countryId: string, scope: AdminScopeContext): void
 }
 
 export async function getCountriesByStatus(
-    scope: AdminScopeContext, 
-    status?: "ACTIVE" | "INACTIVE"
+  scope:   AdminScopeContext,
+  status?: "ACTIVE" | "INACTIVE",
 ): Promise<CountrySummaryResult[]> {
-    const statusFilter = status ? { status } : {}
-    const scopeFilter  = scope.isGlobal
-        ? statusFilter
-        : { ...statusFilter, id: { in: scope.countryIds } }
+  const statusFilter = status ? { status } : {}
+  const scopeFilter  = scope.isGlobal
+    ? statusFilter
+    : { ...statusFilter, id: { in: scope.countryIds } }
 
-    return prisma.country.findMany({
-        where  : scopeFilter,
-        orderBy: { name: "asc" },
-        select : {
-            id       : true,
-            name     : true,
-            slug     : true,
-            code     : true,
-            currency : true,
-            phoneCode: true,
-            status   : true,
-            createdAt: true,
-            _count   : {
-                select: {
-                    cities : true,
-                    vendors: true,
-                },
-            },
-        },
-    })
+  return prisma.country.findMany({
+    where  : scopeFilter,
+    orderBy: { name: "asc" },
+    select : {
+      id       : true,
+      name     : true,
+      slug     : true,
+      code     : true,
+      currency : true,
+      phoneCode: true,
+      status   : true,
+      createdAt: true,
+      region: {
+        select: { id: true, name: true, code: true },
+      },
+      _count: {
+        select: { cities: true, vendors: true },
+      },
+    },
+  })
 }
 
 export async function getCountry(
@@ -118,7 +118,7 @@ export async function activateCountry(
         action     : "country.activated",
         entityType : "Country",
         entityId   : countryId,
-        changes    : { before: { status: "INACTIVE" }, after: { status: "ACTIVE" } },
+        changes    : { before: { status: GeoStatus.INACTIVE }, after: { status: GeoStatus.ACTIVE } },
     })
 
     return { success: true }
@@ -137,27 +137,88 @@ export async function deactivateCountry(
     const country = await prisma.country.findUnique({ where: { id: countryId } })
     if (!country) throw new ApiError(404, "Country not found", "NOT_FOUND")
     if (country.status === GeoStatus.INACTIVE) {
-        throw new ApiError(400, "Country is already inactive", "ALREADY_INACTIVE")
+      throw new ApiError(400, "Country is already inactive", "ALREADY_INACTIVE")
     }
 
     const activeVendorCount = await prisma.vendorAccount.count({
-        where: { countryId, status: "ACTIVE", deletedAt: null },
+      where: { countryId, status: "ACTIVE", deletedAt: null },
     })
 
     await prisma.country.update({ where: { id: countryId }, data: { status: GeoStatus.INACTIVE } })
 
     serviceLog.warn({ countryId, actorId, activeVendorCount }, "Country deactivated")
     auditService.log({
-        adminUserId: actorId,
-        action     : "country.deactivated",
-        entityType : "Country",
-        entityId   : countryId,
-        changes    : { before: { status: "ACTIVE" }, after: { status: "INACTIVE" } },
-        metadata   : { activeVendorCount },
+      adminUserId: actorId,
+      action     : "country.deactivated",
+      entityType : "Country",
+      entityId   : countryId,
+      changes    : { before: { status: GeoStatus.ACTIVE }, after: { status: GeoStatus.INACTIVE } },
+      metadata   : { activeVendorCount },
     })
 
     return { success: true, activeVendorCount }
 }
+
+//*REGIONS
+export async function assignCountryToRegion( 
+  idOrSlug  : string, 
+  regionId  : string, 
+  adminId   : string, 
+  scope     : AdminScopeContext,
+) {
+
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
+
+  const countryId = await resolveCountryId(idOrSlug)
+
+  await prisma.country.update({
+    where: { id: countryId },
+    data:  { regionId },
+  })
+
+  serviceLog.info({ countryId: countryId, adminId }, "Country updated")
+  auditService.log({
+    adminUserId: adminId,
+    action     : "country.updated",
+    entityType : "Country",
+    entityId   :  countryId,
+    changes    : { after: { regionId } },
+  })
+
+  return { success: true }
+}
+
+export async function removeCountryFromRegion( 
+  idOrSlug  : string,  
+  adminId   : string, 
+  scope     : AdminScopeContext,
+) {
+
+  if (!scope.isGlobal) {
+    throw new ApiError(403, "Operation beyond your current scope", "SCOPE_FORBIDDEN")
+  }
+
+  const countryId = await resolveCountryId(idOrSlug)
+
+  await prisma.country.update({
+    where: { id: countryId },
+    data:  { regionId: null },
+  })
+
+  serviceLog.info({ countryId: countryId, adminId }, "Country updated")
+  auditService.log({
+    adminUserId: adminId,
+    action     : "country.updated",
+    entityType : "Country",
+    entityId   :  countryId,
+    changes    : { after: { regionId: null } },
+  })
+
+  return { success: true }
+}
+
 
 export async function listCountriesForScope(
     actorCountryIds: string[],
@@ -220,64 +281,68 @@ export async function listCitiesForCountry(
   })
 }
 
-/**
- * Per-country vendor snapshot — used on the country detail page.
- * Groups application and account statuses + vendor type breakdown.
- */
 export async function getCountryVendorSnapshot(
   countrySlug: string,
   adminScope:  AdminScopeContext,
 ): Promise<CountryVendorSnapshot> {
   const countryId = await getCountryIdFromSlug(countrySlug, adminScope)
 
-  const [applications, accounts, vendorTypes] = await Promise.all([
+  const [applicationGroups, accountGroups, vendorTypeGroups] = await Promise.all([
     prisma.vendorApplication.groupBy({
-      by   : ["status"],
-      where: { countryId },
+      by    : ["status"],
+      where : { countryId },
       _count: true,
     }),
     prisma.vendorAccount.groupBy({
-      by   : ["status"],
-      where: { countryId, deletedAt: null },
+      by    : ["status"],
+      where : { countryId, deletedAt: null },
       _count: true,
     }),
     prisma.vendorAccount.groupBy({
-      by   : ["vendorTypeId"],
-      where: { countryId, deletedAt: null },
+      by    : ["vendorTypeId"],
+      where : { countryId, deletedAt: null },
       _count: true,
     }),
   ])
 
+  // Resolve vendor type names in a single query
   const typeMap = new Map(
     (
       await prisma.vendorType.findMany({
-        where : { id: { in: vendorTypes.map((v) => v.vendorTypeId) } },
+        where : { id: { in: vendorTypeGroups.map((v) => v.vendorTypeId) } },
         select: { id: true, name: true },
       })
     ).map((t) => [t.id, t.name]),
   )
 
-  const find = <T extends { status: string; _count: number }>(
-    arr: T[],
-    s: string,
-  ) => arr.find((r) => r.status === s)?._count ?? 0
+  // Helper: find count for a given status string in a groupBy result
+  const findCount = <T extends { status: string; _count: number }>(
+    rows: T[],
+    status: string,
+  ): number => rows.find((r) => r.status === status)?._count ?? 0
+
+  const appTotal = applicationGroups.reduce((s, r) => s + r._count, 0)
+  const accTotal = accountGroups.reduce((s, r) => s + r._count, 0)
 
   return {
     applications: {
-      draft:       find(applications, "DRAFT"),
-      submitted:   find(applications, "SUBMITTED"),
-      underReview: find(applications, "UNDER_REVIEW"),
-      approved:    find(applications, "APPROVED"),
-      rejected:    find(applications, "REJECTED"),
+      total:       appTotal,
+      draft:       findCount(applicationGroups, "DRAFT"),
+      submitted:   findCount(applicationGroups, "SUBMITTED"),
+      underReview: findCount(applicationGroups, "UNDER_REVIEW"),
+      approved:    findCount(applicationGroups, "APPROVED"),
+      rejected:    findCount(applicationGroups, "REJECTED"),
     },
     accounts: {
-      active:    find(accounts, "ACTIVE"),
-      suspended: find(accounts, "SUSPENDED"),
-      banned:    find(accounts, "BANNED"),
+      total:     accTotal,
+      active:    findCount(accountGroups, "ACTIVE"),
+      suspended: findCount(accountGroups, "SUSPENDED"),
+      banned:    findCount(accountGroups, "BANNED"),
     },
-    vendorTypes: vendorTypes.map((v) => ({
+    vendorTypes: vendorTypeGroups.map((v) => ({
       name : typeMap.get(v.vendorTypeId) ?? "Unknown",
       count: v._count,
     })),
   }
 }
+

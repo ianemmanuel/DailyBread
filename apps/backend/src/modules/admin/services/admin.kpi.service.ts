@@ -1,22 +1,4 @@
 /**
- * admin.platform.service.ts
- *
- * READ-ONLY service — never writes, never mutates.
- *
- * Architecture
- * ─────────────
- * Four domain sub-functions handle their own DB queries:
- *   getCountryKPIs   → Country model
- *   getCityKPIs      → City model
- *   getVendorKPIs    → VendorAccount + VendorApplication models
- *   getOutletKPIs    → Outlet model
- *   getCustomerKPIs  → ConsumerAccount model
- *
- * getPlatformKPIs (the orchestrator) calls all five in parallel and
- * assembles the final PlatformKPIResult. The controller stays thin.
- *
- * Each domain function can be called independently by other controllers
- * (e.g. VendorsDashboard only needs getVendorKPIs).
  *
  * Trend computation
  * ──────────────────
@@ -69,11 +51,6 @@ function outletWhere(scope: AdminScopeContext) {
 }
 
 
-/* ══════════════════════════════════════════════════════════════
-   DOMAIN SUB-SERVICES
-   Each function runs its own $transaction for consistency.
-   All are exported so other controllers can call them directly.
-   ══════════════════════════════════════════════════════════════ */
 
 //** Country & City KPI services - Tracks: total, active, inactive + trend on active count.
  

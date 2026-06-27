@@ -1,18 +1,20 @@
-import type { Metadata } from "next"
-import { auth } from "@clerk/nextjs/server"
-import { redirect } from "next/navigation"
-import { Globe, Plus } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { PageHeader } from "@/components/dashboard/layout/PageHeader"
-import { CountryKPIStrip } from "@/components/countries/sections/CountryKPIStrip"
-import { CountriesTable } from "@/components/countries/tables/CountriesTable"
-import { CountryInsights } from "@/components/countries/insights/CountryInsigits"
-import { CountryActivityFeed } from "@/components/countries/feed/CountryActivityFeed"
-import { FetchError } from "@/components/shared/FetchError"
-import { EmptyState } from "@/components/shared/EmptyState"
+import type { Metadata }  from "next"
+import { auth }           from "@clerk/nextjs/server"
+import { redirect }       from "next/navigation"
+import { Globe, Plus }    from "lucide-react"
+import Link               from "next/link"
+import { Button }         from "@/components/ui/button"
+import { PageHeader }         from "@/components/dashboard/layout/PageHeader"
+import { CountryKPIStrip }    from "@/components/countries/sections/CountryKPIStrip"
+import { RegionDonutCard }    from "@/components/charts/RegionDonutChart"
+import { CountriesTable }     from "@/components/countries/tables/CountriesTable"
+import { CountryInsights }    from "@/components/countries/insights/CountryInsigits"
+import { CountryActivityFeed }from "@/components/countries/feed/CountryActivityFeed"
+import { FetchError }         from "@/components/shared/FetchError"
+import { EmptyState }         from "@/components/shared/EmptyState"
 import { fetchActiveCountries } from "@/lib/api/server/countries"
-import { fetchKPIs } from "@/lib/api/server/kpis"
-import Link from "next/link"
+import { fetchKPIs }            from "@/lib/api/server/kpis"
+import { fetchRegionBreakdown } from "@/lib/api/server/regions"
 
 export const metadata: Metadata = { title: "Countries" }
 
@@ -22,13 +24,19 @@ export default async function CountriesPage() {
 
   const token = await getToken()
 
-  const [kpisResult, countriesResult] = await Promise.all([
+  const [kpisResult, countriesResult, regionBreakdownResult] = await Promise.all([
     fetchKPIs(token!),
     fetchActiveCountries(token!),
+    fetchRegionBreakdown(token!),
   ])
+
+  const regionBreakdown = regionBreakdownResult.ok
+    ? regionBreakdownResult.data
+    : { regions: [], ungroupedCountries: 0, totalActive: 0 }
 
   return (
     <>
+      {/* Page header */}
       <PageHeader
         title="Countries"
         description="Platform expansion overview, operational footprint and country health."
@@ -40,27 +48,27 @@ export default async function CountriesPage() {
             className="gap-1.5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0"
           >
             <Link href="/countries/add-country">
-              <Plus className="h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
+              <Plus className="h-4 w-4" />
               Add Country
             </Link>
           </Button>
         }
       />
 
+      {/* KPI strip */}
       {kpisResult.ok ? (
         <CountryKPIStrip kpis={kpisResult.data} />
       ) : (
         <FetchError message={kpisResult.error} context="platform metrics" className="mb-6" />
       )}
 
-      {/* Two-column body
-          Left col: table + activity feed (both grow with the content area)
-          Right col: insights sidebar (fixed width on lg+, full width on mobile)
-          The layout.tsx wrapper's max-w-[1600px] + paddingLeft CSS var handle
-          the sidebar expand/collapse — nothing extra needed here.
-      */}
+      {/* Region donut — full width, between KPI strip and table */}
+      <RegionDonutCard regionBreakdown={regionBreakdown} />
+
+      {/* Two-column body */}
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
-        {/* Left — table then activity feed */}
+
+        {/* Left — countries table + activity feed */}
         <div className="min-w-0 flex-1 space-y-5">
           {!countriesResult.ok ? (
             <FetchError message={countriesResult.error} context="countries" />
@@ -75,14 +83,14 @@ export default async function CountriesPage() {
           ) : (
             <CountriesTable countries={countriesResult.data} pageSize={8} />
           )}
-
           <CountryActivityFeed />
         </div>
 
-        {/* Right — region chart, health, GMV ranking */}
+        {/* Right — health summary + GMV ranking */}
         <aside className="w-full shrink-0 lg:w-[320px] xl:w-[340px]">
           <CountryInsights />
         </aside>
+
       </div>
     </>
   )

@@ -4,12 +4,14 @@ import type { AdminRequest } from "@repo/types/backend"
 import { sendSuccess } from "@/helpers/api-response/response"
 import { 
     activateCountry,
+    assignCountryToRegion,
     deactivateCountry, 
     getCountriesByStatus,
     getCountry, 
     getCountryVendorSnapshot, 
-    listCitiesForCountry, 
-    listCountriesForScope 
+    listCitiesForCountry,  
+    listCountriesForScope, 
+    removeCountryFromRegion
 } from "../services/admin.country.service"
 import { ApiError } from "@/middleware/error"
 
@@ -64,6 +66,30 @@ export const handleGetCountriesByStatus: RequestHandler = async (req, res, next)
     return sendSuccess(res, data, "Countries fetched")
   } catch (err) { next(err) }
 }
+
+export const handleAssignCountryToRegion: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser, adminScope } = req as unknown as AdminRequest
+    const { regionId, countryId } = req.params as { regionId: string; countryId: string }
+
+    await assignCountryToRegion(countryId, regionId, adminUser.id, adminScope )
+
+    return sendSuccess(res, null, "Country assigned to region")
+  } catch (err) { next(err) }
+}
+
+export const handleRemoveCountryFromRegion: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser, adminScope }  = req as unknown as AdminRequest
+    const { countryId } = req.params as { regionId: string; countryId: string }
+
+    await removeCountryFromRegion(countryId, adminUser.id, adminScope)
+
+    return sendSuccess(res, null, "Country removed from region")
+  } catch (err) { next(err) }
+}
+
+
 
 export const handleListCities: RequestHandler = async (req, res, next) => {
     try {

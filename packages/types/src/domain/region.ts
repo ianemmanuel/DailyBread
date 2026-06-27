@@ -56,3 +56,15 @@ export interface RegionBreakdown {
   ungroupedCountries: number   // active countries with regionId = null
   totalActive:        number   // sum of all active countries
 }
+
+export interface CreateRegionRequest {
+  name: string
+  code: string   // e.g. "EAF" — must be unique, stored uppercase
+  description?: string
+}
+
+export interface UpdateRegionRequest {
+  name?: string
+  code?: string
+  description?: string | null
+}
