@@ -14,7 +14,7 @@ import {
   setPrimaryOutlet,
   setOperatingHours,
 } from "../services/vendor.outlet.service"
-import type { CreateOutletInput, UpdateOutletInput, OperatingHoursEntry } from "@/types/vendor"
+import type { CreateOutletRequest, UpdateOutletRequest, OperatingHoursEntry } from "@repo/types/backend"
 
 type idParam = { id: string }
 
@@ -62,7 +62,7 @@ export const handleCreateOutlet = async (req: Request, res: Response, next: Next
       throw new ApiError(400, "name, addressLine1, cityId, latitude, and longitude are required", "MISSING_FIELDS")
     }
 
-    const input: CreateOutletInput = {
+    const input: CreateOutletRequest = {
       name, addressLine1, addressLine2, cityId, neighborhood,
       postalCode,
       latitude     : Number(latitude),
@@ -89,7 +89,7 @@ export const handleUpdateOutlet = async (req: Request, res: Response, next: Next
       latitude, longitude,
     } = req.body
 
-    const input: UpdateOutletInput = {
+    const input: UpdateOutletRequest = {
       ...(name           != null ? { name           }                             : {}),
       ...(addressLine1   != null ? { addressLine1   }                             : {}),
       ...(addressLine2   != null ? { addressLine2   }                             : {}),

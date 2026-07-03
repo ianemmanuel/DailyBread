@@ -1,7 +1,7 @@
 import { prisma, PayoutVerificationStatus, PaymentDirection } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
-import { AddPayoutAccountInput } from "@/types/vendor"
+import { AddPayoutAccountRequest } from "@repo/types/backend"
 
 const serviceLog = logger.child({ module: "vendor-payout-service" })
 
@@ -29,7 +29,7 @@ async function assertValidPayoutMethod(
 
 export async function addPayoutAccount(
   vendorId: string,
-  input   : AddPayoutAccountInput,
+  input   : AddPayoutAccountRequest,
 ) {
   const vendor = await prisma.vendorAccount.findUnique({
     where : { id: vendorId },

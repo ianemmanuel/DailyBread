@@ -1,6 +1,6 @@
 import { prisma, Prisma } from "@repo/db"
-import { logger }          from "@/lib/pino/logger"
-import { SYSTEM_USER_ID }  from "@/lib/pino/constants"
+import { logger } from "@/lib/pino/logger"
+import { SYSTEM_USER_ID } from "@/lib/pino/constants.js"
 
 const auditLog = logger.child({ module: "audit-service" })
 

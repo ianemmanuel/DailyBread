@@ -1,10 +1,8 @@
 {
-    "extends": "@repo/typescript-config/base.json",
+    "extends": "@repo/typescript-config/node.json",
     "compilerOptions": {
-        "baseUrl": ".",
-        "ignoreDeprecations": "6.0",    
         "paths": {
-            "@/*": ["src/*"],
+            "@/*": ["./src/*"],
             "@repo/types":           ["../../packages/types/src/index.ts"],
             "@repo/types/backend":   ["../../packages/types/src/backend/index.ts"],
             "@repo/types/*":         ["../../packages/types/src/*"]
@@ -13,3 +11,4 @@
   }
 
 }
+ 

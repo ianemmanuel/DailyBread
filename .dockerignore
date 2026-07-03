@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Node
+node_modules
+.pnpm-store
+
+# Turbo
+.turbo
+
+# Build outputs
+dist
+build
+.next
+out
+coverage
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Documentation
+README.md
+
+# Docker
+docker-compose*.yml

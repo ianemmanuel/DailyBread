@@ -10,7 +10,7 @@ import {
   getPayoutAccount,
   getAvailablePayoutMethods,
 } from "../services/vendor.payout.service"
-import type { AddPayoutAccountInput, idParam } from "@/types/vendor"
+import type { AddPayoutAccountRequest, idParam } from "@repo/types/backend"
 
 
 //* GET available payout methods for the vendor's country
@@ -67,7 +67,7 @@ export const handleAddPayoutAccount = async (req: Request, res: Response, next: 
       throw new ApiError(400, "countryPaymentMethodId and accountHolderName are required", "MISSING_FIELDS")
     }
 
-    const input: AddPayoutAccountInput = {
+    const input: AddPayoutAccountRequest = {
       countryPaymentMethodId, accountHolderName,
       mobileNetwork, mobileNumber,
       bankName, branchName, bankCode, accountNumber, swiftCode, iban, routingNumber,
