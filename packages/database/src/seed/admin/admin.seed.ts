@@ -13,7 +13,7 @@
  *   this permission allows the user to do — no ambiguity.
  */
 import 'dotenv/config'
-import { prisma } from '../index'
+import { prisma } from '../../index'
 
 // ─── Roles ────────────────────────────────────────────────────────────────────
 
