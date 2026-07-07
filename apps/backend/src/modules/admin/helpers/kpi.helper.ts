@@ -1,4 +1,4 @@
-import type { KPITrend } from "@/types/kpi.types"
+import type { KPITrend } from "@repo/types/backend"
 
 /**
  * Returns the start of the current calendar month (UTC midnight).

@@ -1,0 +1,43 @@
+# Git
+.git
+.gitignore
+
+# Node
+**/node_modules
+.pnpm-store
+
+# Turbo
+.turbo
+
+# Build output
+**/dist
+**/build
+**/.next
+coverage
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App environment files
+**/.env
+!/.env.example
+
+# Keep the root compose env
+!/.env
+
+# Documentation
+README.md
+
+# Local prune output
+out

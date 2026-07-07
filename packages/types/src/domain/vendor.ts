@@ -284,7 +284,7 @@ export interface UpsertDocumentResponse {
 }
 
 
-export interface CreateOutletInput {
+export interface CreateOutletRequest {
   name         : string
   addressLine1 : string
   addressLine2?: string
@@ -301,7 +301,7 @@ export interface CreateOutletInput {
   deliveryFee?    : number
 }
 
-export interface UpdateOutletInput {
+export interface UpdateOutletRequest {
   name?        : string
   addressLine1?: string
   addressLine2?: string
@@ -325,7 +325,7 @@ export interface OperatingHoursEntry {
   isClosed  : boolean
 }
 
-export interface AddPayoutAccountInput {
+export interface AddPayoutAccountRequest {
   countryPaymentMethodId: string
   accountHolderName     : string
   // Mobile money

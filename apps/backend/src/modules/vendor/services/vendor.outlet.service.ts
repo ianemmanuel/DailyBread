@@ -5,7 +5,7 @@ import { auditService } from "@/modules/admin/services/admin.audit.service"
 import { SYSTEM_USER_ID } from "@/constants/system"
 import { Filter } from "bad-words"
 import { OUTLET_PROXIMITY_DEGREES, MAX_TEMP_CLOSURE_DAYS } from "@/constants/vendor"
-import type { CreateOutletInput, UpdateOutletInput, OperatingHoursEntry } from "@/types/vendor"
+import type { CreateOutletRequest, UpdateOutletRequest, OperatingHoursEntry, BoundingBox } from "@repo/types/backend"
 
 const serviceLog = logger.child({ module: "vendor-outlet-service" })
 const profanityFilter = new Filter()
@@ -31,32 +31,36 @@ function isInsideBoundingBox(
 // This matches how Uber Eats and Glovo work: each city has a defined service area
 // and outlets outside it simply cannot be registered.
 
+
+function isValidBoundingBox(box: unknown): box is BoundingBox {
+  if (box == null || typeof box !== "object") return false
+  const b = box as Record<string, unknown>
+  return (
+    typeof b.north === "number" &&
+    typeof b.south === "number" &&
+    typeof b.east  === "number" &&
+    typeof b.west  === "number"
+  )
+}
+
 async function assertCoordinatesInCity(cityId: string, latitude: number, longitude: number) {
   const city = await prisma.city.findUnique({
     where : { id: cityId },
-    select: {
-      boundingBoxNorth: true,
-      boundingBoxSouth: true,
-      boundingBoxEast : true,
-      boundingBoxWest : true,
-    },
+    select: { boundingBox: true },
   })
 
-  if (
-    city?.boundingBoxNorth == null ||
-    city?.boundingBoxSouth == null ||
-    city?.boundingBoxEast  == null ||
-    city?.boundingBoxWest  == null
-  ) {
-    return // Bounding box not yet configured — skip
+  if (!isValidBoundingBox(city?.boundingBox)) {
+    return // Bounding box not yet configured (or malformed) — skip
   }
+
+  const box = city.boundingBox
 
   const inBox = isInsideBoundingBox(
     latitude, longitude,
-    city.boundingBoxNorth,
-    city.boundingBoxSouth,
-    city.boundingBoxEast,
-    city.boundingBoxWest,
+    box.north,
+    box.south,
+    box.east,
+    box.west,
   )
 
   if (!inBox) {
@@ -133,7 +137,7 @@ function logFlagEvent(outletId: string, flagReasons: string[], context: "created
 
 //* Create outlet
 
-export async function createOutlet(vendorId: string, input: CreateOutletInput) {
+export async function createOutlet(vendorId: string, input: CreateOutletRequest) {
   const {
     name, addressLine1, addressLine2, cityId, neighborhood,
     postalCode, latitude, longitude, phone, email, bio,
@@ -198,7 +202,7 @@ export async function createOutlet(vendorId: string, input: CreateOutletInput) {
 
 //* Update outlet
 
-export async function updateOutlet(vendorId: string, outletId: string, input: UpdateOutletInput) {
+export async function updateOutlet(vendorId: string, outletId: string, input: UpdateOutletRequest) {
   const existing = await assertVendorOwnsOutlet(outletId, vendorId)
 
   if (existing.adminStatus === OutletAdminStatus.BANNED) {

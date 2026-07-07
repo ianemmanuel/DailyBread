@@ -277,13 +277,13 @@ export async function deactivateRegion(
   const id = await resolveRegionId(idOrSlug)
 
   const activeCountryCount = await prisma.country.count({
-    where: { regionId: id, status: GeoStatus.ACTIVE, deletedAt: null },
+    where: { regionId: id, status: GeoStatus.ACTIVE },
   })
 
   const region = await prisma.region.update({
     where: { id },
     data:  { status: GeoStatus.INACTIVE },
-  })
+  }) 
 
   serviceLog.info({ regionId: region.id, adminId }, "Region deactivated")
   auditService.log({

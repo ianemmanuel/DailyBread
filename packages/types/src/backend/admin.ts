@@ -4,6 +4,7 @@
 import type { Request } from "express"
 import type { AdminUserWithRole, AdminScopeContext } from "../domain/admin"
 import type { AdminPermissionKey } from "../enums/admin"
+export type { AdminPermissionKey } from "../enums/admin"
 
 export type {
   AdminPermission,
@@ -41,6 +42,16 @@ export type {
   VendorAccountDetail,
   SuspendVendorRequest,
 } from "../domain/admin";
+
+
+export type {
+  CreateOutletRequest,
+  UpdateOutletRequest,
+  AddPayoutAccountRequest,
+  OperatingHoursEntry,
+  idParam,
+  
+} from "../domain/vendor" 
 
 
 export type { 

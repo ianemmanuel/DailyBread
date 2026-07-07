@@ -156,9 +156,8 @@ export const upsertApplication = async (req: Request, res: Response, next: NextF
         rejectionReason: null,
         revisionNotes: null,
         reviewedAt: null,
-        reviewedBy: null,
       },
-    })
+    }) 
 
     await ClerkVendorStateService.setVendorApplicationStatus(clerkUserId, VendorApplicationStatus.DRAFT)
 
