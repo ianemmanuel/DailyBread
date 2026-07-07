@@ -3,17 +3,16 @@
 .gitignore
 
 # Node
-node_modules
+**/node_modules
 .pnpm-store
 
 # Turbo
 .turbo
 
-# Build outputs
-dist
-build
-.next
-out
+# Build output
+**/dist
+**/build
+**/.next
 coverage
 
 # Logs
@@ -30,13 +29,15 @@ yarn-debug.log*
 .DS_Store
 Thumbs.db
 
-# Environment
-.env
-.env.*
-!.env.example
+# App environment files
+**/.env
+!/.env.example
+
+# Keep the root compose env
+!/.env
 
 # Documentation
 README.md
 
-# Docker
-docker-compose*.yml
+# Local prune output
+out

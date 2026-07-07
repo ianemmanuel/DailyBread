@@ -5,33 +5,47 @@
   "scripts": {
 
     "dev": "turbo run dev",
-
     "build": "turbo run build",
-
     "lint": "turbo run lint",
-
-    "check-types:all": "turbo run check-types",
-
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    
+
+    "check-types": "turbo run check-types",
+
 
     "docker:dev:up": "docker compose --env-file .env -f docker/compose/compose.dev.yaml up -d",
-    "docker:dev:config": "docker compose --env-file .env -f docker/compose/compose.dev.yaml config",
+
     "docker:dev:down": "docker compose --env-file .env -f docker/compose/compose.dev.yaml down",
-    "docker:dev:restart": "docker compose --env-file .env -f docker/compose/compose.dev.yaml restart",
-    "docker:dev:logs": "docker compose --env-file .env -f docker/compose/compose.dev.yaml logs -f",
-    "docker:dev:ps": "docker compose --env-file .env -f docker/compose/compose.dev.yaml ps",
-    "docker:dev:pull": "docker compose --env-file .env -f docker/compose/compose.dev.yaml pull",
-    "docker:dev:stop": "docker compose --env-file .env -f docker/compose/compose.dev.yaml stop",
+
     "docker:dev:start": "docker compose --env-file .env -f docker/compose/compose.dev.yaml start",
 
+    "docker:dev:stop": "docker compose --env-file .env -f docker/compose/compose.dev.yaml stop",
 
-    "db:generate": "pnpm --filter @repo/db generate",
-    "db:migrate": "pnpm --filter @repo/db migrate",
-    "db:deploy": "pnpm --filter @repo/db deploy",
-    "db:seed": "pnpm --filter @repo/db seed",
+    "docker:dev:restart": "docker compose --env-file .env -f docker/compose/compose.dev.yaml restart",
+
+    "docker:dev:logs": "docker compose --env-file .env -f docker/compose/compose.dev.yaml logs -f",
+
+    "docker:dev:ps": "docker compose --env-file .env -f docker/compose/compose.dev.yaml ps",
+
+    "docker:dev:config": "docker compose --env-file .env -f docker/compose/compose.dev.yaml config",
+
+    "docker:dev:pull": "docker compose --env-file .env -f docker/compose/compose.dev.yaml pull",
+
+
+    "docker:backend:prune": "turbo prune backend --docker",
+
+    "docker:backend:build": "docker build -f docker/backend/Dockerfile .",
+
+
+    "db:generate": "pnpm --filter @repo/db db:generate",
+
+    "db:migrate": "pnpm --filter @repo/db db:migrate",
+
+    "db:deploy": "pnpm --filter @repo/db db:deploy",
+
     "db:seed:countries": "pnpm --filter @repo/db seed:countries",
+
     "db:seed:admin": "pnpm --filter @repo/db seed:admin",
+
     "db:super-admin": "pnpm --filter @repo/db create-super-admin"
   },
 
