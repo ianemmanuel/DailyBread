@@ -45,10 +45,11 @@
     "db:seed": "pnpm --filter @repo/db db:seed",
 
     "db:seed:admin": "pnpm --filter @repo/db db:seed:admin",
-
+    "db:seed:system": "pnpm --filter @repo/db db:seed:system",
     "db:seed:geography": "pnpm --filter @repo/db db:seed:geography",
 
     "db:super-admin": "pnpm --filter @repo/db db:super-admin"
+    
   },
 
   "packageManager": "pnpm@9.0.0",

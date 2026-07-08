@@ -8,9 +8,10 @@
  *   1. Creates AdminUser row (status: pending, firstName/lastName)
  *   2. Grants all super_admin permissions
  *   3. Assigns GLOBAL scope
- *   4. Sends Clerk invitation
- *   5. Updates status → invited
- *   6. User accepts → webhook fires → status: active, clerkUserId populated
+ *   4. Writes a bootstrap AuditLog entry
+ *   5. Sends Clerk invitation
+ *   6. Updates status → invited
+ *   7. User accepts → webhook fires → status: active, clerkUserId populated
  *
  * Usage:
  *   pnpm --filter @repo/db create-super-admin \
@@ -22,6 +23,7 @@
  *        --middle "Middle Name"
  */
 
+import { input, confirm }          from "@inquirer/prompts"
 import { createClerkClient }       from "@clerk/backend"
 import { prisma, AdminUserStatus } from "../index"
 
@@ -41,41 +43,99 @@ console.log("✓ DATABASE_URL:", process.env.DATABASE_URL!.replace(/:([^:@]+)@/,
 console.log("✓ CLERK_ADMIN_SECRET_KEY: loaded\n")
 
 // ─── CLI arg parser ───────────────────────────────────────────────────────────
+//
+// Arguments override prompts; anything missing from argv is asked for
+// interactively. Both `--first/--middle/--last` and a single `--name`
+// are supported — `--name` wins if both happen to be passed.
 
-function getArg(flag: string, required = true): string {
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function getArg(flag: string): string | null {
   const idx = process.argv.indexOf(flag)
-  if (idx === -1 || !process.argv[idx + 1]) {
-    if (required) {
-      console.error(`\nMissing required argument: ${flag}`)
-      console.error(
-        'Usage: pnpm --filter @repo/db create-super-admin -- \\\n' +
-        '         --email admin@example.com \\\n' +
-        '         --first "First" \\\n' +
-        '         --last  "Last"\n',
-      )
-      process.exit(1)
-    }
-    return ""
-  }
+  if (idx === -1 || !process.argv[idx + 1]) return null
   return process.argv[idx + 1]!
 }
 
-const email      = getArg("--email")
-const firstName  = getArg("--first")
-const lastName   = getArg("--last")
-const middleName = getArg("--middle", false) // optional
+async function resolveEmail(): Promise<string> {
+  const flagValue = getArg("--email")
 
-if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-  console.error(`\nInvalid email: ${email}\n`)
-  process.exit(1)
+  if (flagValue !== null) {
+    if (!EMAIL_RE.test(flagValue)) {
+      console.error(`\n❌ Invalid email: ${flagValue}\n`)
+      process.exit(1)
+    }
+    return flagValue
+  }
+
+  return input({
+    message : "Email",
+    validate: (v) => EMAIL_RE.test(v.trim()) || "Enter a valid email address",
+  })
 }
 
-const displayName = [firstName, middleName || null, lastName].filter(Boolean).join(" ")
+type NameParts = { firstName: string; middleName: string | null; lastName: string }
+
+async function resolveName(): Promise<NameParts> {
+  const nameFlag = getArg("--name")
+
+  // Style 2: a single --name flag is split into first / middle / last
+  if (nameFlag !== null) {
+    const parts = nameFlag.trim().split(/\s+/).filter(Boolean)
+
+    if (parts.length < 2) {
+      console.error(`\n❌ --name must include at least a first and last name: "${nameFlag}"\n`)
+      process.exit(1)
+    }
+
+    return {
+      firstName : parts[0]!,
+      middleName: parts.length > 2 ? parts.slice(1, -1).join(" ") : null,
+      lastName  : parts[parts.length - 1]!,
+    }
+  }
+
+  // Style 1: --first / --middle / --last, each falling back to a prompt
+  const firstFlag  = getArg("--first")
+  const middleFlag = getArg("--middle")
+  const lastFlag   = getArg("--last")
+
+  const firstName = firstFlag ?? await input({
+    message : "First name",
+    validate: (v) => v.trim().length > 0 || "First name is required",
+  })
+
+  const middleInput = middleFlag ?? await input({ message: "Middle name (optional)" })
+  const middleName  = middleInput.trim().length > 0 ? middleInput.trim() : null
+
+  const lastName = lastFlag ?? await input({
+    message : "Last name",
+    validate: (v) => v.trim().length > 0 || "Last name is required",
+  })
+
+  return { firstName, middleName, lastName }
+}
+
+function printSummary(email: string, name: NameParts) {
+  console.log("─".repeat(58))
+  console.log("  Super Admin")
+  console.log()
+  console.log(`  Email        : ${email}`)
+  console.log(`  First Name   : ${name.firstName}`)
+  console.log(`  Middle Name  : ${name.middleName ?? "—"}`)
+  console.log(`  Last Name    : ${name.lastName}`)
+  console.log(`  Role         : Super Admin`)
+  console.log(`  Scope        : GLOBAL`)
+  console.log("─".repeat(58))
+  console.log()
+}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`🔐 Creating super admin: ${displayName} <${email}>\n`)
+  const email = await resolveEmail()
+  const name  = await resolveName()
+  const { firstName, middleName, lastName } = name
+  const displayName = [firstName, middleName, lastName].filter(Boolean).join(" ")
 
   // 1. Verify seed has been run
   const superAdminRole = await prisma.adminRole.findUnique({
@@ -89,6 +149,15 @@ async function main() {
     process.exit(1)
   }
 
+  // 1b. Guard against a partially-run seed — a super admin with zero
+  // permissions would succeed silently otherwise.
+  if (superAdminRole.permissions.length === 0) {
+    console.error("❌ super_admin role exists but has no permissions attached.")
+    console.error("   The role-permissions seed step appears not to have run:\n")
+    console.error("   pnpm --filter @repo/db db:seed:admin\n")
+    process.exit(1)
+  }
+
   // 2. Check for duplicate
   const existing = await prisma.adminUser.findUnique({ where: { email } })
   if (existing) {
@@ -97,7 +166,17 @@ async function main() {
     process.exit(1)
   }
 
-  // 3. Create user row + all permissions + GLOBAL scope
+  // 3. Confirm before writing anything
+  printSummary(email, name)
+  const proceed = await confirm({ message: "Continue?", default: true })
+  if (!proceed) {
+    console.log("\nAborted — nothing was created.\n")
+    process.exit(0)
+  }
+
+  console.log(`\n🔐 Creating super admin: ${displayName} <${email}>\n`)
+
+  // 4. Create user row + all permissions + GLOBAL scope + bootstrap audit entry
   console.log("  [1/3] Creating admin user record...")
 
   const adminUser = await prisma.$transaction(async (tx) => {
@@ -119,15 +198,37 @@ async function main() {
     })
 
     // Grant all permissions in the super_admin pool
-    if (superAdminRole.permissions.length > 0) {
-      await tx.adminUserPermission.createMany({
-        data: superAdminRole.permissions.map((rp) => ({
-          adminUserId : user.id,
-          permissionId: rp.permissionId,
-          grantedById : user.id,  // self-granted for bootstrap
-        })),
-      })
-    }
+    await tx.adminUserPermission.createMany({
+      data: superAdminRole.permissions.map((rp) => ({
+        adminUserId : user.id,
+        permissionId: rp.permissionId,
+        grantedById : user.id,  // self-granted for bootstrap — this account
+                                  // genuinely is its own first grantor.
+      })),
+    })
+
+    // Bootstrap audit entry — distinguishes this account from ones created
+    // through the normal invite-by-an-existing-admin flow.
+    //
+    // adminUserId is left null on purpose: this action wasn't performed by
+    // an existing admin (none exist yet) and it isn't a system/cron job
+    // either — it's a developer running a local/deploy-time script. The
+    // "via" field in metadata plus entityId (pointing at the new user)
+    // is enough to reconstruct what happened.
+    await tx.auditLog.create({
+      data: {
+        adminUserId: null,
+        action: "admin_user.bootstrap_created",
+        entityType: "AdminUser",
+        entityId: user.id,
+        metadata: {
+          role: "super_admin",
+          scope: "GLOBAL",
+          via: "create-super-admin script",
+          createdEmail: email,
+        },
+      },
+    })
 
     return user
   })
@@ -135,8 +236,9 @@ async function main() {
   console.log(`         ✓ AdminUser row created  (id: ${adminUser.id})`)
   console.log(`         ✓ ${superAdminRole.permissions.length} permissions granted`)
   console.log(`         ✓ GLOBAL scope assigned`)
+  console.log(`         ✓ bootstrap audit entry written`)
 
-  // 4. Send Clerk invitation
+  // 5. Send Clerk invitation
   console.log("  [2/3] Sending Clerk invitation...")
 
   const clerk = createClerkClient({ secretKey: process.env.CLERK_ADMIN_SECRET_KEY! })
@@ -171,7 +273,14 @@ async function main() {
     console.log(`         ✓ Invitation sent  (Clerk id: ${invitation.id})`)
     console.log(`         ✓ Status updated: pending → invited`)
   } catch (err: any) {
-    // Roll back the DB row if Clerk fails
+    // Roll back the DB row if Clerk fails.
+    // Cascades: AdminUserScope + AdminUserPermission both delete via
+    // onDelete: Cascade on adminUserId. AuditLog does NOT cascade off
+    // AdminUser (and the bootstrap entry has adminUserId: null anyway),
+    // so it's matched by entityId/entityType and deleted explicitly first.
+    await prisma.auditLog.deleteMany({
+      where: { entityType: "AdminUser", entityId: adminUser.id },
+    })
     await prisma.adminUser.delete({ where: { id: adminUser.id } })
 
     const msg = err?.errors?.[0]?.longMessage
@@ -183,7 +292,7 @@ async function main() {
     process.exit(1)
   }
 
-  // 5. Summary
+  // 6. Summary
   console.log("  [3/3] Done.\n")
   console.log("─".repeat(58))
   console.log(`  Name         : ${displayName}`)

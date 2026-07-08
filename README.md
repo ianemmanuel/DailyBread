@@ -1,135 +1,121 @@
-# Turborepo starter
+# @repo/db
 
-This Turborepo starter is maintained by the Turborepo core team.
-
-## Using this example
-
-Run the following command:
-
-```sh
-npx create-turbo@latest
-```
-
-## What's inside?
-
-This Turborepo includes the following packages/apps:
-
-### Apps and Packages
-
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
+Shared Prisma database package for DailyBread. Backend apps and services
+(Express API, admin dashboard, vendor dashboard) all consume this package
+rather than talking to Postgres directly.
 
 ```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+exports: "." → ./src/index.ts   (prisma client + enums, e.g. AdminUserStatus)
 ```
 
-You can build a specific package by using a [filter](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters):
+## Environment variables
 
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build --filter=docs
+| Variable                  | Required for                                  |
+| -------------------------- | ---------------------------------------------- |
+| `DATABASE_URL`             | Everything (Prisma connection string)          |
+| `CLERK_ADMIN_SECRET_KEY`   | `db:super-admin` (sends the Clerk invitation)  |
+| `ADMIN_APP_URL`            | `db:super-admin` (invite redirect URL; falls back to `http://localhost:3002`) |
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
+## Scripts
 
-### Develop
+Run these from the repo root via the pass-through scripts in the root
+`package.json` (`pnpm db:generate`, `pnpm db:migrate`, etc.), or directly
+from this package with `pnpm --filter @repo/db <script>`.
 
-To develop all apps and packages, run the following command:
+| Script                | What it does                                                  |
+| ---------------------- | -------------------------------------------------------------- |
+| `db:generate`          | `prisma generate` — regenerate the Prisma client                |
+| `db:migrate`           | `prisma migrate dev` — create/apply a migration in development  |
+| `db:deploy`            | `prisma migrate deploy` — apply migrations in CI/production      |
+| `db:seed`              | Runs the full seed pipeline (`src/seed/index.ts`)                |
+| `db:seed:admin`        | Seeds admin roles/permissions                                    |
+| `db:seed:geography`    | Seeds countries/cities                                           |
+| `db:seed:vendor`       | Seeds vendor fixtures                                             |
+| `db:seed:system`       | Seeds system/reference data                                       |
+| `db:super-admin`       | Interactive CLI to bootstrap the first Super Admin (see below)   |
 
-```
-cd my-turborepo
+## Creating the first super admin
 
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev
+`src/commands/create-super-admin.ts` creates the initial `AdminUser` row,
+grants it every `super_admin` permission, assigns `GLOBAL` scope, writes a
+bootstrap `AuditLog` entry, and sends the Clerk invitation. It's meant to be
+run once per environment, by a developer, from a terminal — **never** wire
+it up as an API route.
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
-```
+Prerequisites:
 
-You can develop a specific package by using a [filter](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters):
+- `db:seed:admin` must have already run (the `super_admin` role + its
+  permissions need to exist).
+- `DATABASE_URL` and `CLERK_ADMIN_SECRET_KEY` must be set.
 
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev --filter=web
+### Usage
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
+The CLI accepts email/name as flags, prompts for anything you leave out,
+and always shows a confirmation summary before writing anything to the
+database.
 
-### Remote Caching
+**Fully interactive — just run it and answer the prompts:**
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo login
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
+```powershell
+pnpm db:super-admin --
 ```
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+**Email supplied, name prompted:**
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo link
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
+```powershell
+pnpm db:super-admin -- --email admin@dailybread.co.ke
 ```
 
-## Useful Links
+**Everything supplied, no prompts — explicit name parts:**
 
-Learn more about the power of Turborepo:
+```powershell
+pnpm db:super-admin -- --email admin@dailybread.co.ke --first Emmanuel --middle Ian --last Odhiambo
+```
 
-- [Tasks](https://turborepo.com/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.com/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.com/docs/reference/configuration)
-- [CLI Usage](https://turborepo.com/docs/reference/command-line-reference)
+**Everything supplied, no prompts — single `--name` flag:**
+
+```powershell
+pnpm db:super-admin -- --email admin@dailybread.co.ke --name "Emmanuel Ian Odhiambo"
+```
+
+`--name` splits on whitespace: first token → first name, last token → last
+name, anything in between → middle name. `--middle` is always optional —
+if you leave it out entirely, you'll get an optional prompt you can skip
+by pressing Enter.
+
+You can mix flags and prompts freely — e.g. pass `--email` and `--first`
+and it'll only ask you for the last name.
+
+> **PowerShell notes:** the `--` immediately after `db:super-admin` is
+> required so pnpm forwards the flags to the script instead of trying to
+> parse them itself. PowerShell also doesn't support `\` line continuation
+> the way bash does — keep the command on one line, or use a backtick
+> `` ` `` at the end of each line if you want to split it up.
+
+### What happens on success
+
+```
+✓ AdminUser row created (status: invited)
+✓ All super_admin permissions granted
+✓ GLOBAL scope assigned
+✓ Bootstrap AuditLog entry written (adminUserId: null — no acting admin exists yet)
+✓ Clerk invitation sent
+```
+
+The account stays in `invited` status until the person accepts the Clerk
+invitation and signs up; the Clerk webhook then flips it to `active` and
+populates `clerkUserId`.
+
+### If it fails partway
+
+If the Clerk invitation fails after the database row is created, the
+script rolls back everything it wrote (the `AdminUser` row, its scopes,
+its permissions, and the bootstrap audit entry) so re-running the command
+doesn't hit a duplicate-email error.
+
+### Re-running
+
+The script checks for an existing `AdminUser` with the same email before
+doing anything, so it's safe to re-run — you'll just get a clear error
+telling you the account already exists (with its id and status) instead of
+a database constraint failure.
