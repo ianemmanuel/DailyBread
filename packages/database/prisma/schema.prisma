@@ -125,16 +125,16 @@ model AdminUserScope {
 //* Append-only audit log across all models. Written asynchronously — never blocks a request.
 
 model AuditLog {
-  id          String   @id @default(uuid())
-  adminUserId String
+  id          String    @id @default(uuid())
+  adminUserId String?
   action      String
   entityType  String
   entityId    String?
   changes     Json?
   metadata    Json?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
-  adminUser   AdminUser @relation(fields: [adminUserId], references: [id])
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id])
 
   @@index([adminUserId, createdAt])
   @@index([action, createdAt])

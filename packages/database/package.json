@@ -3,16 +3,15 @@
     "version": "0.0.0",
     "type": "module",
     "scripts": {
-        "generate": "prisma generate",
-        "migrate:dev": "prisma migrate dev",
-        "migrate:deploy": "prisma migrate deploy",
-        "seed:countries": "tsx src/seed/countries.seed.ts",
-        "seed:vendortypes": "tsx src/seed/vendorTypes.seed.ts",
-        "seed:vendortypecountry": "tsx src/seed/vendorTypeCountry.seed.ts",
-        "seed:documenttypeconfig": "tsx src/seed/documentTypeConfig.seed.ts",
-        "seed:documenttypevendortype": "tsx src/seed/documentTypeVendorType.seed.ts",
-        "seed:admin": "tsx src/seed/admin.seed.ts",
-        "create-super-admin": "tsx src/scripts/create-super-admin.ts"
+        "db:generate": "prisma generate",
+        "db:migrate": "prisma migrate dev",
+        "db:deploy": "prisma migrate deploy",
+        "db:seed": "tsx src/seed/index.ts",
+        "db:seed:admin": "tsx src/seed/admin/index.ts",
+        "db:seed:geography": "tsx src/seed/geography/index.ts",
+        "db:seed:vendor": "tsx src/seed/vendor/index.ts",
+        "db:seed:system": "tsx src/seed/system/index.ts",
+        "db:super-admin":  "tsx --env-file=../../.env --env-file=.env src/commands/create-super-admin.ts"
     },
     "devDependencies": {
         "@repo/typescript-config": "workspace:*",
@@ -23,6 +22,7 @@
     },
     "dependencies": {
         "@clerk/backend": "^2.29.5",
+        "@inquirer/prompts": "^8.5.2",
         "@prisma/adapter-pg": "^7.3.0",
         "@prisma/client": "^7.2.0",
         "pg": "^8.17.2"
