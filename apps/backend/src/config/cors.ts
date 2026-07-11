@@ -2,7 +2,7 @@ import cors from "cors"
 
 /**
  * CORS configuration.
- *
+ *8
  * Origins are driven by environment variables so local, staging, and
  * production environments each have their own allowed list without
  * touching source code.
