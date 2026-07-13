@@ -38,8 +38,8 @@ export async function drainAuditQueue(): Promise<void> {
   auditLog.info("Audit queue drained")
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
 
+//* Public API 
 export const auditService = {
   log(input: AuditLogInput): void {
     // Prisma's Json fields require explicit casting from Record<string, unknown>.
@@ -71,3 +71,4 @@ export const auditService = {
     })
   },
 }
+
