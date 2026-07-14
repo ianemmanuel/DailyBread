@@ -1,10 +1,8 @@
 import pino from "pino"
 
 /**
- * Application logger — single pino instance shared across the entire backend.
- *
  * In development: human-readable output via pino-pretty.
- * In production:  structured JSON → stdout → captured by infra → forwarded to Logtail.
+ * In production: structured JSON → stdout → captured by infra → forwarded to Logtail.
  *
  * Usage:
  *   import { logger } from "@/lib/logger"
@@ -21,10 +19,10 @@ import pino from "pino"
  *   Development: debug+
  */
 
-const isDev        = process.env.NODE_ENV !== "production"
+const isDev = process.env.NODE_ENV !== "production"
 const isProduction = process.env.NODE_ENV === "production"
 
-// ─── Logtail transport (production only) ──────────────────────────────────────
+// Logtail transport (production only) 
 // Streams JSON log lines to Logtail. Requires LOGTAIL_SOURCE_TOKEN in .env.
 // If the token is missing in production, we fall back to stdout with a warning.
 
@@ -64,7 +62,7 @@ function buildTransport(): pino.TransportSingleOptions | pino.TransportPipelineO
   return undefined
 }
 
-// ─── Logger instance ──────────────────────────────────────────────────────────
+//* Logger instance 
 
 export const logger = pino(
   {

@@ -1,7 +1,9 @@
 import type { Server } from "node:http"
-
+import { prisma } from "@repo/db"
 import { logger } from "@/lib/pino/logger"
-import { drainAuditQueue } from "@/modules/admin/services/admin.audit.service"
+import { drainAuditQueue } from "@/services/audit"
+import { stopExternalServices } from "./externalServices"
+import { markNotReady } from "./readiness"
 
 async function shutdown(server: Server, signal: string) {
   logger.info(
@@ -9,11 +11,16 @@ async function shutdown(server: Server, signal: string) {
     "Shutdown signal received — starting graceful shutdown",
   )
 
+  //* Flip readiness first — a load balancer polling /ready stops
+  //* routing new traffic here before we even start draining
+  markNotReady()
+
+  //* Stop the cron job so it can't fire mid-shutdown
+  stopExternalServices()
+
   server.close(async () => {
     try {
       await drainAuditQueue()
-
-      const { prisma } = await import("@repo/db")
 
       await prisma.$disconnect()
 

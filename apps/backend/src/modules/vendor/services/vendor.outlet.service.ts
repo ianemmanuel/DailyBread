@@ -1,7 +1,7 @@
 import { prisma, OutletReviewStatus, OutletAdminStatus } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
-import { auditService } from "@/modules/admin/services/admin.audit.service"
+import { auditService } from "@/services/audit"
 import { SYSTEM_USER_ID } from "@/constants/system"
 import { Filter } from "bad-words"
 import { OUTLET_PROXIMITY_DEGREES, MAX_TEMP_CLOSURE_DAYS } from "@/constants/vendor"

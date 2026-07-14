@@ -1,7 +1,7 @@
 import { prisma, VendorApplicationStatus, VendorStatus, DocumentStatus  } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
-import { auditService } from "./admin.audit.service"
+import { auditService } from "@/services/audit"
 import type { AdminScopeContext } from "@repo/types/backend"
 import { getCountryIdFromSlug } from "../helpers/get-country-id.helper"
 

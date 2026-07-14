@@ -1,8 +1,8 @@
-import { createClerkClient }       from "@clerk/backend"
+import { createClerkClient } from "@clerk/backend"
 import { prisma, AdminUserStatus } from "@repo/db"
-import { Request }                 from "express"
-import { logger }                  from "@/lib/pino/logger"
-import { auditService }            from "@/modules/admin/services/admin.audit.service"
+import { Request } from "express"
+import { logger } from "@/lib/pino/logger"
+import { auditService } from "@/services/audit"
 import {
   verifyWebhookRequest,
   extractPrimaryEmail,

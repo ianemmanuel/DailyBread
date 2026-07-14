@@ -8,7 +8,7 @@ import type {
   RegionBreakdown,
   RegionBreakdownItem,
 } from "@repo/types/backend"
-import { auditService } from "./admin.audit.service"
+import { auditService } from "@/services/audit"
 import { ApiError } from "@/middleware/error"
 import { UUID_RE } from "@/constants/system"
 

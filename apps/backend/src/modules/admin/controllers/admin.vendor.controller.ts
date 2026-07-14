@@ -1,8 +1,5 @@
 import { RequestHandler } from "express"
-import { 
-  VendorApplicationStatus, 
-  VendorStatus 
-} from "@repo/db"
+import { VendorApplicationStatus, VendorStatus } from "@repo/db"
 import type { AdminRequest } from "@repo/types/backend"
 import { sendSuccess } from "@/helpers/api-response/response"
 import { ApiError } from "@/middleware/error"
@@ -19,10 +16,7 @@ import {
   banVendor,
 } from "../services/admin.vendor.service"
 
-import {
-  approveDocument,
-  rejectDocument,
-} from "../services/admin.vendor.service"
+import { approveDocument, rejectDocument } from "../services/admin.vendor.service"
 
 //*Application
  

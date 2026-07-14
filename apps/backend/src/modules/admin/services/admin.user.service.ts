@@ -2,7 +2,7 @@ import { createClerkClient } from "@clerk/backend"
 import { prisma, AdminUserStatus } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
-import { auditService } from "@/modules/admin/services/admin.audit.service"
+import { auditService } from "@/services/audit"
 import { validateScopeForRole, getDefaultScopeType } from "@/lib/scope/scope-rules"
 import type { AdminScopeContext, CreateAdminUserRequest }  from "@repo/types/backend"
 

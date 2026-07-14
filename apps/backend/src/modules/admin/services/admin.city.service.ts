@@ -6,7 +6,7 @@ import { UUID_RE } from "@/constants/system"
 import { ApiError } from "@/middleware/error"
 import { SaveCityBoundaryRequest } from "@repo/types/backend"
 import { logger } from "@/lib/pino/logger"
-import { auditService } from "./admin.audit.service"
+import { auditService } from "@/services/audit"
 import {
   deriveBoundingBoxFromGeoJson,
   searchCityBoundary,

@@ -112,6 +112,8 @@ export type {
  UpdateRegionRequest,
 } from "../domain/region"
 
+export type { AuditLogInput } from "../domain/audit"
+
 export type { ServiceAreaMode } from "../enums/geography"
 
 

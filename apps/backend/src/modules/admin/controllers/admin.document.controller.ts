@@ -1,10 +1,10 @@
-import { RequestHandler }    from "express"
-import { prisma }            from "@repo/db"
+import { RequestHandler } from "express"
+import { prisma } from "@repo/db"
 import type { AdminRequest } from "@repo/types/backend"
-import { R2Service }         from "@/lib/r2/r2.service"
-import { sendSuccess }       from "@/helpers/api-response/response"
-import { ApiError }          from "@/middleware/error"
-import { logger }            from "@/lib/pino/logger"
+import { R2Service } from "@/lib/r2/r2.service"
+import { sendSuccess } from "@/helpers/api-response/response"
+import { ApiError } from "@/middleware/error"
+import { logger } from "@/lib/pino/logger"
 
 const docLog = logger.child({ module: "admin:vendor-document" })
 

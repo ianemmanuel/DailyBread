@@ -1,22 +1,10 @@
 import { prisma, Prisma } from "@repo/db"
 import { logger } from "@/lib/pino/logger"
-import { SYSTEM_USER_ID } from "@/lib/pino/constants.js"
+import { SYSTEM_USER_ID } from "@repo/db"
+import type { AuditLogInput } from "@repo/types/backend"
 
-const auditLog = logger.child({ module: "audit-service" })
 
-export interface AuditLogInput {
-  adminUserId : string
-  action      : string
-  entityType  : string
-  entityId    : string | null
-  changes?    : {
-    before?: Record<string, unknown>
-    after?  : Record<string, unknown>
-  }
-  metadata?   : Record<string, unknown>
-}
-
-//* ─── Queue ───────────────────────────────
+const auditLog = logger.child({ module: "audit-platform-service" })
 
 const pendingWrites: Promise<unknown>[] = []
 
@@ -31,15 +19,6 @@ function enqueue(p: Promise<unknown>): void {
   })
 }
 
-export async function drainAuditQueue(): Promise<void> {
-  if (pendingWrites.length === 0) return
-  auditLog.info({ pending: pendingWrites.length }, "Draining audit queue before shutdown")
-  await Promise.allSettled(pendingWrites)
-  auditLog.info("Audit queue drained")
-}
-
-
-//* Public API 
 export const auditService = {
   log(input: AuditLogInput): void {
     // Prisma's Json fields require explicit casting from Record<string, unknown>.
@@ -71,4 +50,3 @@ export const auditService = {
     })
   },
 }
-

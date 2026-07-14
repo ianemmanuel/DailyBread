@@ -2,7 +2,7 @@
 import { prisma, GeoStatus } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
-import { auditService } from "./admin.audit.service"
+import { auditService } from "@/services/audit"
 import { isPointInServiceArea } from "@repo/geo"
 import type { ServiceAreaBoundary, DeliveryZoneBoundary }from "@repo/geo/types"
 import type { AdminScopeContext }  from "@repo/types/backend"

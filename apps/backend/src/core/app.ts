@@ -10,6 +10,8 @@ import { requestLogger } from "@/middleware/logger/requestLogger"
 import clerkWebhookRouter from "@/modules/integrations/clerk/webhooks"
 import router from "@/routes"
 
+import { healthRouter } from "./health"
+
 export const app : express.Application = express()
 
 
@@ -22,6 +24,12 @@ app.use(requestLogger)
 app.use(cors(corsOptions))
 app.use(helmet())
 app.use(cookieParser())
+
+
+//* Health / readiness — before the rate limiter, so k8s/LB probes
+//* hitting this every few seconds never get throttled
+
+app.use(healthRouter)
 
 
 //* Clerk Webhooks Must be BEFORE express.json()

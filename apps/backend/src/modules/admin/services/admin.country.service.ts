@@ -5,7 +5,7 @@ import { getCountryIdFromSlug } from "../helpers/get-country-id.helper"
 import { prisma, GeoStatus } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { UUID_RE } from "@/constants/system"
-import { auditService } from "./admin.audit.service"
+import { auditService } from "@/services/audit"
 import { logger } from "@/lib/pino/logger"
 import { buildCountrySlug } from "@/utils/geo-slug.utils"
 
