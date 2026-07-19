@@ -1,9 +1,13 @@
+import "./bootstrap/processTimer"
 import "./env"
 
-import { bootstrap } from "./core/startup"
-import { registerShutdownHandlers } from "./core/shutdown"
+import { registerProcessHandlers } from "./bootstrap/processHandlers"
+import { bootstrap } from "./bootstrap/startup"
+import { registerShutdownHandlers } from "./bootstrap/shutdown"
 
 import { logger } from "@/lib/pino/logger"
+
+registerProcessHandlers()
 
 bootstrap()
   .then((server) => {

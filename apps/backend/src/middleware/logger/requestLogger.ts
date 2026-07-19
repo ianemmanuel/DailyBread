@@ -3,13 +3,12 @@ import { randomUUID } from "node:crypto"
 import { logger } from "@/lib/pino/logger"
 
 /**
- * HTTP request logger middleware (pino-http).
- *
  * What it does on every request:
  *   1. Generates a unique correlationId (UUID) for the request
  *   2. Attaches it to res.getHeader("x-correlation-id") — returned to clients
  *   3. Creates a child logger at req.log with { correlationId } pre-bound
- *   4. Logs request start (at debug level) and request completion (at info/error)
+ *   4. Logs request start (at debug level) and request completion (at info/error),
+ *      including how long the request took
  *
  * The correlationId flows through every log line emitted during a request:
  *   req.log.info({ vendorId }, "Application approved")
@@ -40,14 +39,13 @@ export const requestLogger = pinoHttp({
     return "info"
   },
 
-  // Shape of the "request received" log line
+
   customReceivedMessage(req) {
     return `← ${req.method} ${req.url}`
   },
 
-  // Shape of the "request completed" log line
-  customSuccessMessage(req, res) {
-    return `→ ${req.method} ${req.url} ${res.statusCode}`
+  customSuccessMessage(req, res, responseTime) {
+    return `→ ${req.method} ${req.url} ${res.statusCode} ${responseTime}ms`
   },
 
   customErrorMessage(req, res, err) {

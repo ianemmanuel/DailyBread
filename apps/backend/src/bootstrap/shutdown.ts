@@ -5,8 +5,10 @@ import { drainAuditQueue } from "@/services/audit"
 import { stopExternalServices } from "./externalServices"
 import { markNotReady } from "./readiness"
 
+const shutdownLog = logger.child({ module: "shutdown" })
+
 async function shutdown(server: Server, signal: string) {
-  logger.info(
+  shutdownLog.info(
     { signal },
     "Shutdown signal received — starting graceful shutdown",
   )
@@ -24,18 +26,18 @@ async function shutdown(server: Server, signal: string) {
 
       await prisma.$disconnect()
 
-      logger.info("Graceful shutdown complete")
+      shutdownLog.info("Graceful shutdown complete")
 
       process.exit(0)
     } catch (err) {
-      logger.error({ err }, "Error during shutdown")
+      shutdownLog.error({ err }, "Error during shutdown")
 
       process.exit(1)
     }
   })
 
   setTimeout(() => {
-    logger.error("Shutdown timeout exceeded — forcing exit")
+    shutdownLog.error("Shutdown timeout exceeded — forcing exit")
 
     process.exit(1)
   }, 15_000).unref()

@@ -1,28 +1,22 @@
 import cors from "cors"
+import { env } from "@/env"
 
 /**
- * CORS configuration.
- *8
+ *
  * Origins are driven by environment variables so local, staging, and
  * production environments each have their own allowed list without
  * touching source code.
  *
- * CORS_ORIGINS (comma-separated) is required in production.
- * Falls back to localhost ports in development only.
+ * CORS_ORIGINS (comma-separated) is required in production — enforced
+ * by env.ts at boot, so a missing value fails startup instead of the
+ * first cross-origin request.
  */
-function getAllowedOrigins(): string[] {
-  if (process.env.CORS_ORIGINS) {
-    return process.env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+function resolveAllowedOrigins(): string[] {
+  if (env.CORS_ORIGINS) {
+    return env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
   }
 
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "CORS_ORIGINS env var is required in production. " +
-      "Set it to a comma-separated list of allowed origins."
-    )
-  }
-
-  // Development fallback — vendor dashboard, admin dashboard, customer app
+  //? Development fallback — vendor dashboard, admin dashboard, customer app
   return [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -30,12 +24,17 @@ function getAllowedOrigins(): string[] {
   ]
 }
 
+//* Computed once at module load (O(n)) instead of re-splitting the
+//* env var string on every request. Set lookup below is O(1).
+
+const allowedOrigins = new Set(resolveAllowedOrigins())
+
 export const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     // Allow server-to-server requests (no origin header)
     if (!origin) return callback(null, true)
 
-    if (getAllowedOrigins().includes(origin)) {
+    if (allowedOrigins.has(origin)) {
       return callback(null, true)
     }
 

@@ -38,14 +38,10 @@ router.get('/', (req, res) => {
   })
 })
 
-router.get('/health', (req, res) => {
-  res.json({
-    service: 'backend-service',
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  })
-})
+//* Real liveness/readiness checks live at /health and /ready
+//* (see src/routes/health.ts, mounted directly on the app — not
+//* nested under /api). Removed the old /health here to avoid two
+//* endpoints named /health with different meanings.
 
 //* Service info
 router.get('/info', (req, res) => {

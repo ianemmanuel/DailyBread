@@ -8,48 +8,37 @@ import { apiRateLimiter } from "@/config/rateLimit"
 import { errorHandler } from "@/middleware/error/error.middleware"
 import { requestLogger } from "@/middleware/logger/requestLogger"
 import clerkWebhookRouter from "@/modules/integrations/clerk/webhooks"
+import { healthRouter } from "@/routes/health"
 import router from "@/routes"
-
-import { healthRouter } from "./health"
 
 export const app : express.Application = express()
 
-
-//* HTTP request logger (must be first)
-
+//* Observability
 app.use(requestLogger)
 
 //* Security
-
 app.use(cors(corsOptions))
 app.use(helmet())
 app.use(cookieParser())
 
-
-//* Health / readiness — before the rate limiter, so k8s/LB probes
-//* hitting this every few seconds never get throttled
-
+//* Health — before the rate limiter, so k8s/LB probes hitting this
+//* every few seconds never get throttled
 app.use(healthRouter)
 
-
-//* Clerk Webhooks Must be BEFORE express.json()
-
+//* Webhooks — must be BEFORE express.json(), Clerk needs the raw body
 app.use(
   "/webhooks/clerk",
   express.raw({ type: "application/json" }),
   clerkWebhookRouter,
 )
 
-//* API
-
+//* Body parsing
 app.use(express.json({ limit: "1mb" }))
 app.use(express.urlencoded({ extended: true, limit: "1mb" }))
 
+//* API
 app.use(apiRateLimiter)
-
 app.use("/api", router)
 
-
-//* Error handler (must be last)
-
+//* Errors — must be last
 app.use(errorHandler)
