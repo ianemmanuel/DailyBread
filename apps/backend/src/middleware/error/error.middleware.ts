@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import { Prisma }  from "@repo/db"
 import { logger }  from "@/lib/pino/logger"
+import { sendError } from "@/helpers/api-response/response"
 
 const errorLog = logger.child({ module: "error-handler" })
 
@@ -39,61 +40,37 @@ export const errorHandler = (
     } else {
       errorLog.warn({ statusCode: err.statusCode, code: err.code, correlationId: req.id }, err.message)
     }
-    return res.status(err.statusCode).json({
-      status : "error",
-      message: err.message,
-      code   : err.code,
-    })
+    return sendError(res, err.statusCode, err.message, err.code)
   }
 
   // ── Prisma: unique constraint violation ────────────────────────────────────
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
     const fields = (err.meta?.target as string[])?.join(", ") ?? "unknown field"
     errorLog.warn({ prismaCode: "P2002", fields, correlationId: req.id }, "Duplicate record")
-    return res.status(409).json({
-      status : "error",
-      message: `A record with this ${fields} already exists.`,
-      code   : "DUPLICATE_RECORD",
-    })
+    return sendError(res, 409, `A record with this ${fields} already exists.`, "DUPLICATE_RECORD")
   }
 
   // ── Prisma: record not found ───────────────────────────────────────────────
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
     errorLog.warn({ prismaCode: "P2025", correlationId: req.id }, "Record not found")
-    return res.status(404).json({
-      status : "error",
-      message: "Record not found.",
-      code   : "NOT_FOUND",
-    })
+    return sendError(res, 404, "Record not found.", "NOT_FOUND")
   }
 
   // ── Prisma: foreign key constraint ────────────────────────────────────────
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
     errorLog.warn({ prismaCode: "P2003", correlationId: req.id }, "FK constraint failed")
-    return res.status(400).json({
-      status : "error",
-      message: "Referenced record does not exist.",
-      code   : "INVALID_REFERENCE",
-    })
+    return sendError(res, 400, "Referenced record does not exist.", "INVALID_REFERENCE")
   }
 
   // ── Prisma: validation error ───────────────────────────────────────────────
   if (err instanceof Prisma.PrismaClientValidationError) {
     errorLog.warn({ correlationId: req.id }, "Prisma validation error")
-    return res.status(400).json({
-      status : "error",
-      message: "Invalid data provided.",
-      code   : "VALIDATION_ERROR",
-    })
+    return sendError(res, 400, "Invalid data provided.", "VALIDATION_ERROR")
   }
 
   // ── Unexpected error ───────────────────────────────────────────────────────
   // Always log at error level with the full stack in production
   errorLog.error({ err, correlationId: req.id }, "Unhandled exception")
 
-  return res.status(500).json({
-    status : "error",
-    message: "Internal server error.",
-    code   : "INTERNAL_SERVER_ERROR",
-  })
+  return sendError(res, 500, "Internal server error.", "INTERNAL_SERVER_ERROR")
 }
