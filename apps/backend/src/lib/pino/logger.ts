@@ -13,10 +13,6 @@ import pino from "pino"
  *   const log = logger.child({ module: "vendor-service" })
  *   log.info({ applicationId }, "Application approved")
  *
- * Log levels (only levels >= configured level are emitted):
- *   trace | debug | info | warn | error | fatal
- *   Production: info+
- *   Development: debug+
  */
 
 const isDev = process.env.NODE_ENV !== "production"
@@ -71,7 +67,7 @@ export const logger = pino(
     // Base fields added to every log line
     base: {
       service: "dailybread-backend",
-      env    : process.env.NODE_ENV ?? "development",
+      env : process.env.NODE_ENV ?? "development",
     },
 
     // Rename pino's default "msg" to "message" for Logtail compatibility
@@ -91,9 +87,6 @@ export const logger = pino(
   buildTransport() ? pino.transport(buildTransport()!) : undefined,
 )
 
-// ─── Type augmentation ────────────────────────────────────────────────────────
-// Attach the logger to Express req so handlers can access the request-scoped
-// child logger (with correlationId) via req.log — set by pino-http middleware.
 
 declare global {
   namespace Express {
