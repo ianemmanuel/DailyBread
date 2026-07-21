@@ -56,7 +56,7 @@ database.
 
 **Fully interactive — just run it and answer the prompts:**
 
-```powershell
+```powershell 
 pnpm db:super-admin --
 ```
 

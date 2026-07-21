@@ -8,7 +8,6 @@ import type { AdminScopeContext, CreateAdminUserRequest }  from "@repo/types/bac
 
 const serviceLog = logger.child({ module: "admin-user-service" })
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ScopeEntry {
   scopeType : "GLOBAL" | "COUNTRY" | "CITY"
@@ -16,16 +15,7 @@ export interface ScopeEntry {
   cityId?   : string
 }
 
-// interface CreateAdminUserInput {
-//   firstName      : string
-//   middleName?    : string
-//   lastName       : string
-//   email          : string
-//   employeeId?    : string
-//   roleId         : string
-//   permissionKeys : string[]
-//   scopes?        : ScopeEntry[]
-// }
+
 
 interface UpdateAdminUserPermissionsInput {
   adminUserId    : string
@@ -42,7 +32,7 @@ interface UpdateAdminUserScopesInput {
   scopes      : ScopeEntry[]
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+
 
 export function formatDisplayName(user: {
   firstName : string
@@ -58,7 +48,7 @@ function getAdminClerkClient() {
   return createClerkClient({ secretKey })
 }
 
-//* ─── Create ─────────────────
+
 
 export async function createAdminUser(
   input: CreateAdminUserRequest,

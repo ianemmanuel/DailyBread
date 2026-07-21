@@ -18,7 +18,6 @@ import {
   listRoles,
 } from "../services/admin.user.service"
 
-//* ─── List ─────────────────
 
 export const handleListAdminUsers: RequestHandler = async (req, res, next) => {
   try {
@@ -38,8 +37,6 @@ export const handleListAdminUsers: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err) }
 }
 
-//* ─── Get one ────────────────
-
 export const handleGetAdminUser: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
@@ -48,8 +45,6 @@ export const handleGetAdminUser: RequestHandler = async (req, res, next) => {
     return sendSuccess(res, user, "Admin user fetched")
   } catch (err) { next(err) }
 }
-
-//* ─── Create ────────────────
 
 export const handleCreateAdminUser: RequestHandler = async (req, res, next) => {
   try {
@@ -70,8 +65,6 @@ export const handleCreateAdminUser: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err) }
 }
 
-//* ─── Send invitation ──────────
-
 export const handleSendInvitation: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
@@ -80,8 +73,6 @@ export const handleSendInvitation: RequestHandler = async (req, res, next) => {
     return sendSuccess(res, result, "Invitation sent")
   } catch (err) { next(err) }
 }
-
-//* ─── Update permissions ───────────
 
 export const handleUpdatePermissions: RequestHandler = async (req, res, next) => {
   try {
@@ -97,8 +88,6 @@ export const handleUpdatePermissions: RequestHandler = async (req, res, next) =>
   } catch (err) { next(err) }
 }
 
-//* ─── Update role ────────────────────
-
 export const handleUpdateRole: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
@@ -109,8 +98,6 @@ export const handleUpdateRole: RequestHandler = async (req, res, next) => {
     return sendSuccess(res, result, "Role updated")
   } catch (err) { next(err) }
 }
-
-//* ─── Update scopes ──────────────
 
 export const handleUpdateScopes: RequestHandler = async (req, res, next) => {
   try {
@@ -124,8 +111,6 @@ export const handleUpdateScopes: RequestHandler = async (req, res, next) => {
     return sendSuccess(res, result, "Scopes updated")
   } catch (err) { next(err) }
 }
-
-//* ─── Lifecycle ─────────────────
 
 export const handleSuspendAdminUser: RequestHandler = async (req, res, next) => {
   try {
@@ -157,8 +142,6 @@ export const handleDeactivateAdminUser: RequestHandler = async (req, res, next) 
     return sendSuccess(res, result, "User deactivated")
   } catch (err) { next(err) }
 }
-
-//* ─── Meta ──────────────
 
 export const handleGetRolePermissionPool: RequestHandler = async (req, res, next) => {
   try {

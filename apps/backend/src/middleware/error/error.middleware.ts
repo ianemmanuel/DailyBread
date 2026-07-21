@@ -1,76 +1,52 @@
 import { Request, Response, NextFunction } from "express"
-import { Prisma }  from "@repo/db"
-import { logger }  from "@/lib/pino/logger"
+import { ZodError } from "zod"
+import { logger } from "@/lib/pino/logger"
 import { sendError } from "@/helpers/api-response/response"
+import { ApiError } from "@/core/errors/apiError"
+import { zodErrorToApiError } from "@/core/errors/zodError"
+import { mapPrismaError } from "@/core/errors/prismaError"
 
 const errorLog = logger.child({ module: "error-handler" })
 
 /**
- * Application error with HTTP status code and optional machine-readable code.
- * Throw this anywhere in route handlers or services:
- *
- *   throw new ApiError(404, "Vendor not found", "VENDOR_NOT_FOUND")
+ * Converts any thrown value into an ApiError. Everything the app
+ * already recognizes (ApiError itself, Zod validation errors, known
+ * Prisma errors) becomes an operational ApiError. Anything else is
+ * genuinely unknown — isOperational: false — and gets treated as a bug.
  */
-export class ApiError extends Error {
-  statusCode : number
-  code       : string
+function toApiError(err: unknown): ApiError {
+  if (err instanceof ApiError) return err
+  if (err instanceof ZodError) return zodErrorToApiError(err)
 
-  constructor(statusCode: number, message: string, code = "API_ERROR") {
-    super(message)
-    this.statusCode = statusCode
-    this.code       = code
-    Object.setPrototypeOf(this, ApiError.prototype)
-  }
+  const prismaError = mapPrismaError(err)
+  if (prismaError) return prismaError
+
+  return new ApiError(500, "Internal server error.", "INTERNAL_SERVER_ERROR", undefined, false)
 }
 
-/**
- * Global error handler. Must be the last middleware registered.
- */
+//* Global error handler. Must be the last middleware registered.
+
 export const errorHandler = (
   err  : unknown,
   req  : Request,
   res  : Response,
   _next: NextFunction,
 ) => {
-  // ── Known application error ────────────────────────────────────────────────
-  if (err instanceof ApiError) {
-    // 4xx errors are expected — log at warn, not error
-    if (err.statusCode >= 500) {
-      errorLog.error({ err, correlationId: req.id }, err.message)
+  const apiError = toApiError(err)
+
+  if (apiError.isOperational) {
+    // Still worth an `error`-level log if it's a 5xx — e.g. an
+    // upstream dependency being down is operational, but you still
+    // want it in your alerting, not silently at warn.
+    if (apiError.statusCode >= 500) {
+      errorLog.error({ err, correlationId: req.id }, apiError.message)
     } else {
-      errorLog.warn({ statusCode: err.statusCode, code: err.code, correlationId: req.id }, err.message)
+      errorLog.warn({ statusCode: apiError.statusCode, code: apiError.code, correlationId: req.id }, apiError.message)
     }
-    return sendError(res, err.statusCode, err.message, err.code)
+  } else {
+    //* Not something we recognize — treat as a bug, not routine traffic.
+    errorLog.error({ err, correlationId: req.id }, "Unhandled exception")
   }
 
-  // ── Prisma: unique constraint violation ────────────────────────────────────
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-    const fields = (err.meta?.target as string[])?.join(", ") ?? "unknown field"
-    errorLog.warn({ prismaCode: "P2002", fields, correlationId: req.id }, "Duplicate record")
-    return sendError(res, 409, `A record with this ${fields} already exists.`, "DUPLICATE_RECORD")
-  }
-
-  // ── Prisma: record not found ───────────────────────────────────────────────
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
-    errorLog.warn({ prismaCode: "P2025", correlationId: req.id }, "Record not found")
-    return sendError(res, 404, "Record not found.", "NOT_FOUND")
-  }
-
-  // ── Prisma: foreign key constraint ────────────────────────────────────────
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
-    errorLog.warn({ prismaCode: "P2003", correlationId: req.id }, "FK constraint failed")
-    return sendError(res, 400, "Referenced record does not exist.", "INVALID_REFERENCE")
-  }
-
-  // ── Prisma: validation error ───────────────────────────────────────────────
-  if (err instanceof Prisma.PrismaClientValidationError) {
-    errorLog.warn({ correlationId: req.id }, "Prisma validation error")
-    return sendError(res, 400, "Invalid data provided.", "VALIDATION_ERROR")
-  }
-
-  // ── Unexpected error ───────────────────────────────────────────────────────
-  // Always log at error level with the full stack in production
-  errorLog.error({ err, correlationId: req.id }, "Unhandled exception")
-
-  return sendError(res, 500, "Internal server error.", "INTERNAL_SERVER_ERROR")
+  return sendError(res, apiError.statusCode, apiError.message, apiError.code, apiError.errors)
 }
