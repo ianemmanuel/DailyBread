@@ -74,7 +74,7 @@ export default async function VendorsPage() {
     count: activeAccounts.total, countLabel: "active on the platform",
   })
   if (canReadOutlets) cards.push({
-    href: "/vendors/outlets", icon: MapPin, badgeClass: "icon-badge-warning",
+    href: "/outlets", icon: MapPin, badgeClass: "icon-badge-warning",
     title: "Outlets", description: "Cross-vendor outlet moderation and suspend/ban controls.",
     count: flaggedOutlets.total, countLabel: "flagged for review", urgent: true,
   })

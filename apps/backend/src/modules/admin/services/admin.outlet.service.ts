@@ -5,7 +5,10 @@ import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
 import { getCountryIdFromSlug } from "../helpers/get-country-id.helper"
 import { getOutletGoLiveStatus, getOutletMealPlanReadiness } from "@/modules/vendor/services/vendor.outlet.service"
+import { resolveCapabilitiesForPoint } from "@/modules/vendor/services/vendor.geography.service"
+import { describePlacement, zoneCoverageStatus } from "@/modules/vendor/services/vendor.placement"
 import { toCsv } from "@/lib/csv"
+import type { AdminOutletCoverage, AdminCoverageZone, ZoneBoundary } from "@repo/types/backend"
 
 const serviceLog = logger.child({ module: "admin-outlet-service" })
 
@@ -158,14 +161,90 @@ async function getOutletWithScope(outletId: string, scope: AdminScopeContext) {
   return outlet
 }
 
+/** A stored boundary that isn't a well-formed polygon reads as "not drawn yet"
+ *  — the same normalisation the vendor's coverage read applies, so the ERP map
+ *  and the vendor's map agree about whether a city is mapped at all. */
+function normalizeBoundary(value: unknown): ZoneBoundary | null {
+  if (!value || typeof value !== "object") return null
+  const type = (value as { type?: unknown }).type
+  if (type !== "Polygon" && type !== "MultiPolygon") return null
+  const coordinates = (value as { coordinates?: unknown }).coordinates
+  if (!Array.isArray(coordinates) || coordinates.length === 0) return null
+  return value as ZoneBoundary
+}
+
+/*
+ * Where this outlet sits, for the detail page's map.
+ *
+ * Folded into the outlet response rather than exposed as its own endpoint on
+ * purpose: the city boundary and zone routes are gated on settings:geography:*
+ * and settings:zones:read, which the vendor_ops admins who moderate outlets do
+ * not hold — a map behind those gates would simply never render for the people
+ * who need it. Reading it here reuses vendors:outlets:read, which the caller has
+ * already been checked for, and the data is the same read-only geometry the
+ * vendor is shown for their own outlet.
+ *
+ * The pin is re-resolved against the polygons rather than read from
+ * Outlet.zoneId so the verdict can never disagree with the shapes drawn
+ * underneath it.
+ */
+async function getOutletCoverage(
+  cityId   : string,
+  latitude : number,
+  longitude: number,
+): Promise<AdminOutletCoverage | null> {
+  const city = await prisma.city.findUnique({
+    where : { id: cityId },
+    select: {
+      id: true, name: true, latitude: true, longitude: true, boundary: true,
+      zones: {
+        where  : { status: "ACTIVE" },
+        orderBy: { name: "asc" },
+        select : { id: true, name: true, boundaries: true, level: true, operationalStatus: true },
+      },
+    },
+  })
+  if (!city) return null
+
+  const zones: AdminCoverageZone[] = city.zones.map((z) => ({
+    id               : z.id,
+    name             : z.name,
+    status           : zoneCoverageStatus(z.level, z.operationalStatus),
+    level            : z.level,
+    operationalStatus: z.operationalStatus,
+    boundaries       : z.boundaries as unknown as ZoneBoundary,
+  }))
+
+  const resolved = await resolveCapabilitiesForPoint(city.id, { latitude, longitude })
+
+  return {
+    city: {
+      id      : city.id,
+      name    : city.name,
+      centroid: city.latitude != null && city.longitude != null
+        ? { latitude: city.latitude, longitude: city.longitude }
+        : null,
+      boundary: normalizeBoundary(city.boundary),
+    },
+    zones,
+    placement      : resolved ? describePlacement(resolved) : null,
+    placementZoneId: resolved?.zoneId ?? null,
+  }
+}
+
 export async function getOutletForAdmin(outletId: string, scope: AdminScopeContext) {
   const outlet = await getOutletWithScope(outletId, scope)
-  const [city, goLiveStatus, mealPlanReadiness] = await Promise.all([
+  const [city, goLiveStatus, mealPlanReadiness, coverage] = await Promise.all([
     prisma.city.findUnique({ where: { id: outlet.cityId }, select: { id: true, name: true } }),
     getOutletGoLiveStatus(outletId),
     getOutletMealPlanReadiness(outletId),
+    // Never let a geography read cost an admin the moderation page itself.
+    getOutletCoverage(outlet.cityId, outlet.latitude, outlet.longitude).catch((err) => {
+      logger.warn({ err, outletId }, "Failed to resolve outlet coverage for admin detail page")
+      return null
+    }),
   ])
-  return { ...outlet, city, goLiveStatus, mealPlanReadiness }
+  return { ...outlet, city, goLiveStatus, mealPlanReadiness, coverage }
 }
 
 //* Review — resolves a vendor-side flag. Approve doesn't undo the flag

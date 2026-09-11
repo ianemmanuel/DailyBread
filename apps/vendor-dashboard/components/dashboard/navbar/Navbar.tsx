@@ -5,7 +5,6 @@ import { Button } from '@repo/ui/components/button'
 import { MobileSidebar } from '@/components/dashboard/sidebar/MobileSidebar'
 import NavbarNotifications from './NavbarNotifications'
 import ProfileButton from './ProfileButton'
-import { ThemeToggle } from '@/components/themes/theme-toggle'
 import { NavbarActions } from './NavbarActions'
 
 export function Navbar() {
@@ -36,9 +35,6 @@ export function Navbar() {
 
         {/* Divider */}
         <div className="mx-1 h-6 w-px bg-border/60" />
-
-        {/* Theme toggle — always visible */}
-        <ThemeToggle />
 
         <SignedIn>
           <NavbarNotifications />

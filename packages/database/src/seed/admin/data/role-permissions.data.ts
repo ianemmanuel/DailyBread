@@ -30,6 +30,11 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "settings:zones:receive_alert",
     "settings:vendor_types:read",
     "settings:vendor_types:write",
+    //* The global food taxonomy (cuisines + dietary tags) sits with the same
+    //* GLOBAL-only role that owns the vendor-type catalog. At GLOBAL scope
+    //* this write creates and edits catalog entries.
+    "settings:food_tags:read",
+    "settings:food_tags:write",
     "settings:documents:read",
     "settings:documents:write",
     "finance:payment_methods:read",
@@ -65,6 +70,13 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
   ],
 
   vendor_ops: [
+    //* Food taxonomy. vendor_ops is COUNTRY/CITY-scoped, so this write can
+    //* only ever reach the per-country enablement path — assertGlobalScope
+    //* refuses the catalog mutations outright. That is the whole point: a
+    //* country team curates which cuisines and dietary tags their market
+    //* offers, without being able to invent global vocabulary.
+    "settings:food_tags:read",
+    "settings:food_tags:write",
     "vendors:accounts:read",
     "vendors:accounts:create",
     "vendors:accounts:suspend",
@@ -102,6 +114,8 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "vendors:appeals:receive_stale_alert",
     "vendors:profiles:read",
     "vendors:profiles:moderate",
+    "vendors:meals:read",
+    "vendors:meals:moderate",
     "vendors:outlets:read",
     "vendors:outlets:moderate",
     "vendors:outlets:inspect",

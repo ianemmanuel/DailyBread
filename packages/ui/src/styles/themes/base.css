@@ -82,75 +82,14 @@
 }
 
 
-/* ── DARK MODE ───────────────────────────────────────────────── */
-.dark {
-  --background:             var(--color-dark-bg);
-  --foreground:             var(--color-dark-text);
-
-  --card:                   var(--color-dark-card);
-  --card-foreground:        var(--color-dark-text);
-
-  --popover:                var(--color-dark-card-2);
-  --popover-foreground:     var(--color-dark-text);
-
-  --sidebar:                var(--color-dark-sidebar);
-  --sidebar-foreground:     var(--color-dark-muted);
-  --sidebar-border:         var(--color-dark-border);
-  --sidebar-icon:           var(--color-dark-muted);
-  --sidebar-active-bg:      var(--color-dark-card-2);
-  --sidebar-active-fg:      var(--color-dark-text-2);
-  --sidebar-active-icon:    var(--color-dark-text-2);
-  --sidebar-hover-bg:       var(--color-dark-card);
-
-  --primary:                var(--color-brand-500);
-  --primary-foreground:     var(--color-neutral-900);
-  --primary-hover:          var(--color-brand-400);
-  --primary-subtle:         oklch(0.700 0.155 52 / 12%);
-  --primary-subtle-fg:      var(--color-brand-400);
-
-  --secondary:              var(--color-dark-card-2);
-  --secondary-foreground:   var(--color-dark-text);
-
-  --muted:                  var(--color-dark-card);
-  --muted-foreground:       var(--color-dark-muted);
-
-  --accent:                 var(--color-dark-card-2);
-  --accent-foreground:      var(--color-dark-text);
-
-  --border:                 var(--color-dark-border);
-  --border-strong:          var(--color-dark-border-2);
-
-  --input:                  var(--color-dark-input);
-  --input-border:           var(--color-dark-border);
-  --input-placeholder:      var(--color-dark-muted);
-
-  --ring:                   var(--color-brand-500);
-
-  --topbar:                 var(--color-dark-card);
-  --topbar-border:          var(--color-dark-border);
-
-  --icon-bg:                var(--color-dark-card-2);
-  --icon-fg:                var(--color-dark-muted);
-
-  --success:                oklch(0.640 0.150 148);
-  --success-foreground:     var(--color-dark-bg);
-  --success-bg:             oklch(0.640 0.150 148 / 14%);
-  --warning:                oklch(0.750 0.135 72);
-  --warning-foreground:     var(--color-dark-bg);
-  --warning-bg:             oklch(0.750 0.135 72 / 14%);
-  --info:                   oklch(0.640 0.130 240);
-  --info-foreground:        var(--color-dark-bg);
-  --info-bg:                oklch(0.640 0.130 240 / 14%);
-  --destructive:            oklch(0.630 0.190 22);
-  --destructive-foreground: var(--color-dark-bg);
-  --destructive-bg:         oklch(0.630 0.190 22 / 14%);
-
-  --shadow-primary:         color-mix(in oklch, var(--primary) 45%, transparent);
-  --chart-1:                var(--color-brand-500);
-  --chart-2:                oklch(0.640 0.130 240);
-
-  --radius:                 var(--radius-base);
-}
+/* No .dark palette, deliberately. Both consuming apps (admin-dashboard,
+ * vendor-dashboard) are light-only by product decision, so nothing ever
+ * adds the class -- a dark palette here would be a complete, coherent
+ * theme that could never activate. Each app's globals.css also pins
+ * Tailwind's `dark:` variant to this class rather than the OS media
+ * query, which is what actually stops shadcn's built-in dark utilities
+ * firing for a user whose system is in dark mode. Reinstate both
+ * together if a dark theme is ever wanted. */
 
 
 /* ── MINIMAL ELEMENT RESET ───────────────────────────────────── */

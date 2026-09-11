@@ -1,8 +1,10 @@
-import { prisma, PayoutVerificationStatus, PayoutHoldStatus } from "@repo/db"
+import { prisma, PayoutVerificationStatus, PayoutHoldStatus, AdminUserStatus, AdminScopeType } from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
+import { AdminPermissions } from "@repo/types/enums"
 import { ApiError } from "@/errors/ApiError"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
+import { createAdminNotification } from "./admin.notification.service"
 import { assertPayoutReviewClaimedByActor } from "./admin.payoutReview.service"
 
 const serviceLog = logger.child({ module: "admin-vendor-payout-service" })
@@ -306,4 +308,129 @@ export async function rejectPayoutAccount(
   })
 
   return updated
+}
+
+/*
+ * ─── After a verification is final ───────────────────────────────────────────
+ *
+ * Reject is the wrong tool for an account that is already VERIFIED: it writes
+ * verificationStatus FAILED, which claims the verification never succeeded and
+ * leaves a timeline that contradicts itself. What an admin actually needs at
+ * that point is either to take the account out of service, or to get a second
+ * opinion without touching the vendor's ability to be paid.
+ */
+
+/**
+ * Takes a payout account out of service.
+ *
+ * Deliberately NOT a verification failure — verificationStatus is untouched and
+ * the deactivation is recorded on its own fields, mirroring City's
+ * deactivatedAt / deactivationReason convention. The account stops being a
+ * payout destination immediately (resolvePayoutDestination only considers
+ * active accounts) and loses its default flag, so the vendor is prompted to
+ * choose another rather than silently having none.
+ */
+export async function deactivatePayoutAccount(
+  accountId : string,
+  reason    : string,
+  actorId   : string,
+  actorScope: AdminScopeContext,
+  expectedVendorId?: string,
+) {
+  if (!reason?.trim()) throw new ApiError(400, "reason is required", "MISSING_FIELDS")
+
+  const account = await loadPayoutAccountInScope(accountId, actorScope, expectedVendorId)
+  if (!account.isActive) {
+    throw new ApiError(400, "This payout account is already deactivated", "ALREADY_DEACTIVATED")
+  }
+
+  const updated = await prisma.vendorPayoutAccount.update({
+    where: { id: accountId },
+    data : {
+      isActive          : false,
+      isDefault         : false,
+      deactivatedAt     : new Date(),
+      deactivatedById   : actorId,
+      deactivationReason: reason.trim(),
+    },
+  })
+
+  serviceLog.warn({ vendorId: account.vendorId, accountId, actorId, reason }, "Payout account deactivated")
+  auditService.log({
+    adminUserId: actorId,
+    action     : "vendor_payout_account.deactivated",
+    entityType : "VendorPayoutAccount",
+    entityId   : accountId,
+    changes    : { before: { isActive: true }, after: { isActive: false, deactivationReason: reason.trim() } },
+    metadata   : { vendorId: account.vendorId, verificationStatus: account.verificationStatus },
+  })
+
+  return updated
+}
+
+/**
+ * Raises a concern about an account whose review is already closed, for a
+ * senior in-country finance admin to look at.
+ *
+ * Deliberately changes NOTHING about the account. It is not an escalation in
+ * the review-workflow sense — that machinery only governs a live review, and
+ * reopening a terminal verificationStatus would give "is this resolved?" two
+ * answers. This is a notification plus an audit entry, which is exactly what
+ * "get a second pair of eyes on this" means when the decision itself stands.
+ *
+ * Recipients are the same in-country holders of
+ * VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION that a live escalation reaches —
+ * the ceiling-only permission granted individually to senior reviewers.
+ */
+export async function flagPayoutAccountForReview(
+  accountId : string,
+  reason    : string,
+  actorId   : string,
+  actorScope: AdminScopeContext,
+  expectedVendorId?: string,
+) {
+  if (!reason?.trim()) throw new ApiError(400, "reason is required", "MISSING_FIELDS")
+
+  const account = await loadPayoutAccountInScope(accountId, actorScope, expectedVendorId)
+
+  const vendor = await prisma.vendorAccount.findUniqueOrThrow({
+    where : { id: account.vendorId },
+    select: { countryId: true, legalBusinessName: true },
+  })
+
+  const recipients = await prisma.adminUser.findMany({
+    where : {
+      status     : AdminUserStatus.active,
+      permissions: {
+        some: { permission: { key: AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION, isActive: true } },
+      },
+      scopes     : { some: { scopeType: AdminScopeType.COUNTRY, countryId: vendor.countryId } },
+      // The admin raising the concern doesn't need to be told about it.
+      id         : { not: actorId },
+    },
+    select: { id: true },
+  })
+
+  await Promise.all(recipients.map((r) => createAdminNotification({
+    adminUserId: r.id,
+    type       : "PAYOUT_ACCOUNT_ESCALATED",
+    title      : "Verified payout account flagged",
+    message    : `${vendor.legalBusinessName}'s verified payout account was flagged for a second look: ${reason.trim()}`,
+    metadata   : { accountId },
+  })))
+
+  serviceLog.info(
+    { vendorId: account.vendorId, accountId, actorId, notified: recipients.length },
+    "Verified payout account flagged for senior review",
+  )
+  auditService.log({
+    adminUserId: actorId,
+    action     : "vendor_payout_account.flagged_for_review",
+    entityType : "VendorPayoutAccount",
+    entityId   : accountId,
+    changes    : { after: { reason: reason.trim() } },
+    metadata   : { vendorId: account.vendorId, notifiedAdmins: recipients.length },
+  })
+
+  return { flagged: true, notified: recipients.length }
 }

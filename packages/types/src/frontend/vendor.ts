@@ -46,6 +46,11 @@ export type {
   VendorProfile,
   ProfileReviewStatus,
   UpsertVendorProfileRequest,
+  VendorFoodTag,
+  VendorFoodTagOptions,
+  ProfileMediaKind,
+  ProfileMediaPresignRequest,
+  ProfileMediaPresignResponse,
   VendorGoLiveStatus,
   VendorGoLiveBlocker,
   OutletGoLiveStatus,
@@ -70,6 +75,22 @@ export type {
   UpdateVendorApplicationRequest,
   ChangeVendorApplicationScopeRequest,
 } from "../domain/vendor"
+
+//* Operational-geography shapes the outlet location picker consumes.
+//* Sourced from domain/geography.ts, the shared source of truth — the
+//* vendor-facing subset only (no ZoneLevel, no admin metadata).
+export type {
+  GeoPoint,
+  GeoJsonPolygon,
+  GeoJsonMultiPolygon,
+  ZoneBoundary,
+  OutletPlacement,
+  OutletPlacementStatus,
+  OutletPlacementCapabilities,
+  CityCoverage,
+  CityCoverageZone,
+} from "../domain/geography"
+
 
 import type { VendorApplicationWithDetails } from "../domain/vendor"
 

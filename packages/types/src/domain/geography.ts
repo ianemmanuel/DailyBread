@@ -48,7 +48,6 @@ export interface ServiceArea {
   createdByAdminId: string | null
   createdAt : string
   updatedAt : string
-  _count?   : { outlets: number }
 }
 
 export interface ListServiceAreasParams {
@@ -263,3 +262,107 @@ export interface UpdateMarketSignalStatusRequest {
 }
 
 
+
+//* ─── Vendor-facing coverage & placement ──────────────────────────────────────
+//* What a vendor is told about a candidate outlet location. Deliberately a
+//* narrower vocabulary than the admin-facing ZoneLevel ladder: the vendor is
+//* told what they can DO somewhere, not which rung of the internal capability
+//* ladder the area sits on. Codes only — the vendor-friendly wording lives in
+//* apps/vendor-dashboard (placement-meta.ts), same convention as
+//* VendorGoLiveBlocker and lib/readiness.ts.
+
+export type OutletPlacementStatus =
+  //* Everything, including meal-plan subscriptions.
+  | "FULL_OPERATIONS"
+  //* On-demand orders with platform couriers.
+  | "PLATFORM_DELIVERY"
+  //* On-demand orders, but the vendor delivers them.
+  | "SELF_DELIVERY"
+  //* Registration works; no orders flow here yet. Also what an unmapped city
+  //* reports, since nothing is configured to say otherwise.
+  | "REGISTRATION_ONLY"
+  //* The area is set up for orders but operations are currently paused
+  //* (suspended / maintenance / emergency). Registration still allowed.
+  | "PAUSED"
+  //* Outside the city's operational boundary — an outlet cannot be registered.
+  | "OUTSIDE_COVERAGE"
+
+//* Structural capabilities of the area — what it is configured for, not what is
+//* happening at this instant. `status: "PAUSED"` carries the interruption.
+export interface OutletPlacementCapabilities {
+  //* Customers can place on-demand orders from an outlet here.
+  orders     : boolean
+  //* Platform couriers deliver those orders.
+  weDeliver  : boolean
+  //* The vendor delivers those orders themselves.
+  selfDeliver: boolean
+  //* Meal-plan subscriptions can be offered from here.
+  mealPlans  : boolean
+}
+
+export interface OutletPlacement {
+  status      : OutletPlacementStatus
+  //* Whether an outlet may be created at this point at all. False only for
+  //* OUTSIDE_COVERAGE — every other status permits registration.
+  canRegister : boolean
+  //* Shown to orient the vendor ("Westlands"). Null when unzoned or unmapped.
+  zoneName    : string | null
+  capabilities: OutletPlacementCapabilities
+}
+
+//* One coverage polygon as the vendor sees it — no level, no operational
+//* status, no admin metadata; just the shape and what it means for them.
+export interface CityCoverageZone {
+  id        : string
+  name      : string
+  status    : OutletPlacementStatus
+  boundaries: ZoneBoundary
+}
+
+//* Everything the outlet-location map needs for one city, in one read.
+export interface CityCoverage {
+  cityId   : string
+  cityName : string
+  //* Map fly-to hint. Null when the admin never set a centroid; the map then
+  //* falls back to the boundary's bounds.
+  centroid : GeoPoint | null
+  //* Null when no operational boundary has been drawn yet. The vendor may
+  //* still register anywhere in the city in that case (see OutletPlacement).
+  boundary : ZoneBoundary | null
+  zones    : CityCoverageZone[]
+}
+
+//* ---------------------------------------------------------------------------
+//* Admin-facing outlet coverage
+//* ---------------------------------------------------------------------------
+//* The ERP's read-only view of where one outlet sits. Deliberately a superset
+//* of what the vendor gets rather than a second vocabulary: `status` is the
+//* same shading the vendor's own map uses, so the two never disagree about what
+//* an area supports, while `level`/`operationalStatus` are the internal fields
+//* an admin legitimately needs and a vendor never sees.
+export interface AdminCoverageZone {
+  id               : string
+  name             : string
+  status           : OutletPlacementStatus
+  level            : ZoneLevel
+  operationalStatus: ZoneOperationalStatus
+  boundaries       : ZoneBoundary
+}
+
+export interface AdminOutletCoverage {
+  city: {
+    id      : string
+    name    : string
+    //* Map fly-to hint; null when no centroid was ever set.
+    centroid: GeoPoint | null
+    //* Null when the city has no operational boundary drawn yet.
+    boundary: ZoneBoundary | null
+  }
+  zones: AdminCoverageZone[]
+  //* The outlet's own pin resolved live against the polygons above — never
+  //* stored, same rule as every other go-live answer in this codebase.
+  placement: OutletPlacement | null
+  //* Which zone above the pin actually fell in, so the map can highlight it
+  //* without matching on a name an admin can rename.
+  placementZoneId: string | null
+}

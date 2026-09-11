@@ -125,6 +125,12 @@ export type {
   UpdateMarketSignalStatusRequest,
 } from "../domain/geography"
 
+//* Where one outlet sits, for the ERP's read-only outlet map.
+export type {
+  AdminOutletCoverage, AdminCoverageZone,
+  OutletPlacement, OutletPlacementStatus, OutletPlacementCapabilities,
+} from "../domain/geography"
+
 export type {
   Country,
   UpdateCountryRequest,

@@ -376,12 +376,22 @@ export default async function VendorAccountDetailPage({ params }: Props) {
             <h2 className="text-sm font-semibold text-foreground">
               Outlets ({outlets.length})
             </h2>
-            <Link
-              href={`/vendors/outlets?vendor=${account.id}&vendorName=${encodeURIComponent(account.legalBusinessName)}`}
-              className="view-all-link text-xs"
-            >
-              View in Outlet Moderation →
-            </Link>
+            {/* Both destinations carry the vendor filter, so an admin lands on
+                this vendor's outlets or inspections rather than everyone's. */}
+            <div className="flex items-center gap-3">
+              <Link
+                href={`/outlets/inspections?vendor=${account.id}&vendorName=${encodeURIComponent(account.legalBusinessName)}&status=`}
+                className="view-all-link text-xs"
+              >
+                Inspections →
+              </Link>
+              <Link
+                href={`/outlets?vendor=${account.id}&vendorName=${encodeURIComponent(account.legalBusinessName)}`}
+                className="view-all-link text-xs"
+              >
+                Moderation →
+              </Link>
+            </div>
           </div>
           <Table>
             <TableHeader>
@@ -396,7 +406,7 @@ export default async function VendorAccountDetailPage({ params }: Props) {
               {outletsByRevenue.map((outlet) => (
                 <TableRow key={outlet.id} className="hover:bg-muted/10">
                   <TableCell className="font-medium text-foreground">
-                    <Link href={`/vendors/outlets/${outlet.id}`} className="hover:text-primary hover:underline">{outlet.name}</Link>
+                    <Link href={`/outlets/${outlet.id}`} className="hover:text-primary hover:underline">{outlet.name}</Link>
                   </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
                     {outlet.city?.name ?? "—"}

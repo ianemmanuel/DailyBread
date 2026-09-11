@@ -134,6 +134,8 @@ interface ListFilters {
   status?     : InspectionStatus
   countrySlug?: string
   search?     : string
+  /** Narrow to one vendor's outlets — how the queue is grouped per vendor. */
+  vendorId?   : string
   page?       : number
   pageSize?   : number
 }
@@ -151,6 +153,9 @@ export async function listInspections(scope: AdminScopeContext, params: ListFilt
     ...(status ? { status } : {}),
     outlet: {
       deletedAt: null,
+      ...(params.vendorId ? { vendorId: params.vendorId } : {}),
+      // The vendor filter is layered ON TOP of the scope filter, never instead
+      // of it — passing a vendorId from another country still resolves to zero.
       vendor   : { ...vendorCountryFilter, deletedAt: null },
       ...(search
         ? {

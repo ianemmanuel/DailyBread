@@ -19,6 +19,13 @@ interface Props {
   canVerify: boolean
   verifyBlockedReason: string | null
   canManage: boolean
+  /**
+   * Whether the viewer holds the claim on this review. The backend requires it
+   * (assertPayoutReviewClaimedByActor) — exactly one owner when money is
+   * decided — so showing the buttons to anyone else offers an action that can
+   * only 403. Undefined means "not applicable", e.g. the compact list row.
+   */
+  isClaimedByMe?: boolean
   /** compact = inline row buttons (list view); full = the detail page */
   variant?: "compact" | "full"
 }
@@ -30,7 +37,8 @@ interface Props {
  * hidden entirely when the provider definitively rejected the account (§12).
  */
 export function PayoutAccountReviewActions({
-  accountId, identifier, verificationStatus, canVerify, verifyBlockedReason, canManage, variant = "full",
+  accountId, identifier, verificationStatus, canVerify, verifyBlockedReason, canManage,
+  isClaimedByMe = false, variant = "full",
 }: Props) {
   const router = useRouter()
   const [pending, setPending] = useState<null | "verify" | "reject">(null)
@@ -38,6 +46,23 @@ export function PayoutAccountReviewActions({
   const [reason, setReason] = useState("")
 
   if (!canManage) return null
+
+  /*
+   * A decided account is past this control entirely. Reject would write
+   * FAILED over a completed verification, which claims it never succeeded —
+   * the post-decision actions (deactivate, flag for senior review) live in
+   * PayoutDecidedActions instead.
+   */
+  const isDecided = verificationStatus === "VERIFIED" || verificationStatus === "FAILED"
+  if (isDecided) return null
+
+  if (!isClaimedByMe) {
+    return variant === "full" ? (
+      <p className="text-xs text-muted-foreground">
+        Claim this review before you can verify or reject it.
+      </p>
+    ) : null
+  }
 
   async function run(op: "verify" | "reject", body?: unknown) {
     setPending(op)
@@ -66,7 +91,7 @@ export function PayoutAccountReviewActions({
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      {verificationStatus !== "VERIFIED" && canVerify && (
+      {canVerify && (
         <Button
           type="button" variant="outline" size={size} className="gap-1.5 rounded-full"
           disabled={pending !== null} onClick={() => run("verify")}
@@ -75,19 +100,17 @@ export function PayoutAccountReviewActions({
           Verify
         </Button>
       )}
-      {verificationStatus !== "VERIFIED" && !canVerify && verifyBlockedReason && variant === "full" && (
+      {!canVerify && verifyBlockedReason && variant === "full" && (
         <p className="text-xs text-muted-foreground">{verifyBlockedReason}</p>
       )}
-      {verificationStatus !== "FAILED" && (
-        <Button
-          type="button" variant="outline" size={size}
-          className="gap-1.5 rounded-full text-destructive hover:bg-destructive-bg"
-          disabled={pending !== null} onClick={() => { setReason(""); setRejectOpen(true) }}
-        >
-          <ShieldX className="h-3.5 w-3.5" />
-          Reject
-        </Button>
-      )}
+      <Button
+        type="button" variant="outline" size={size}
+        className="gap-1.5 rounded-full text-destructive hover:bg-destructive-bg"
+        disabled={pending !== null} onClick={() => { setReason(""); setRejectOpen(true) }}
+      >
+        <ShieldX className="h-3.5 w-3.5" />
+        Reject
+      </Button>
 
       <AlertDialog open={rejectOpen} onOpenChange={(o) => !pending && setRejectOpen(o)}>
         <AlertDialogContent className="rounded-2xl">

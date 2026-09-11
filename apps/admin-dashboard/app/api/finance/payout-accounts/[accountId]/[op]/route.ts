@@ -8,8 +8,14 @@ type P = { params: Promise<{ accountId: string; op: string }> }
 
 // Decision actions plus the review-workflow hand-offs. escalate/reassign
 // carry a body; claim/release/verify don't.
-const OPS = new Set(["verify", "reject", "claim", "release", "escalate", "reassign"])
-const OPS_WITH_BODY = new Set(["reject", "escalate", "reassign"])
+const OPS = new Set([
+  "verify", "reject", "claim", "release", "escalate", "reassign",
+  // Post-decision, where reject would misrecord a completed verification as a
+  // failure: take the account out of service, or ask a senior in-country
+  // reviewer to look again without changing anything.
+  "deactivate", "flag",
+])
+const OPS_WITH_BODY = new Set(["reject", "escalate", "reassign", "deactivate", "flag"])
 
 export async function POST(req: NextRequest, { params }: P) {
   const { accountId, op } = await params

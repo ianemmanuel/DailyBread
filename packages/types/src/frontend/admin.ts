@@ -46,7 +46,6 @@ export { DocumentStatus } from "../enums/document"
 
 export type { ServiceAreaMode } from "../enums/geography"
 export type { GeoStatus } from "../enums/geography"
-export type { OutletServiceMode } from "../enums/geography"
 export type { BoundarySource } from "../enums/geography"
 export type { ZoneLevel } from "../enums/geography"
 export type { ZoneOperationalStatus } from "../enums/geography"
@@ -121,6 +120,12 @@ export type { ServiceAreaBoundary } from "../domain/geography"
 export type { DeliveryZoneBoundary } from "../domain/geography" 
 export type { BoundingBox } from "../domain/geography"
 export type { GeoPoint } from "../domain/geography"
+
+//* Where one outlet sits, for the ERP's read-only outlet map.
+export type {
+  AdminOutletCoverage, AdminCoverageZone,
+  OutletPlacement, OutletPlacementStatus, OutletPlacementCapabilities,
+} from "../domain/geography"
 
 export type { ApiSuccess, ApiErrorResponse } from "../shared/common"
 

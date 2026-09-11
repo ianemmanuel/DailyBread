@@ -3,7 +3,7 @@
 import { useState, type ComponentType } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useTransition } from "react"
-import { Search, SlidersHorizontal, X, Loader2, ArrowDownAZ, ArrowDownUp, Check, ChevronsUpDown, Globe2, Tag, FileText } from "lucide-react"
+import { Search, SlidersHorizontal, X, Loader2, ArrowDownAZ, ArrowDownUp, Globe2, Tag, FileText, ListFilter, Store, CalendarDays, CircleCheck, MapPin, type LucideIcon } from "lucide-react"
 import { Input }         from "@repo/ui/components/input"
 import { Button }        from "@repo/ui/components/button"
 import { Label }         from "@repo/ui/components/label"
@@ -14,20 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@repo/ui/components/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@repo/ui/components/popover"
 import { cn } from "@repo/ui/lib/utils"
+import { SearchableSelect } from "@/components/shared/SearchableSelect"
 
 export interface FilterStatusOption {
   value: string
@@ -39,6 +27,51 @@ export interface FilterStatusOption {
 export interface FilterSelectOption {
   value: string
   label: string
+}
+
+/**
+ * A generic searchable filter, for anything the three named fields below
+ * (country / category / docType) don't already cover.
+ *
+ * Those three exist as named props because they came first and 25 pages pass
+ * them; they are kept exactly as-is so none of those pages change. Everything
+ * NEW should use this instead, so the component stops growing a prop trio per
+ * filter kind.
+ */
+/*
+ * Icons are named, not passed.
+ *
+ * A FilterField is written in a SERVER component and handed to this client
+ * component, so it crosses the RSC boundary as JSON — a component reference
+ * there is a hard runtime error ("Only plain objects can be passed to Client
+ * Components"). A string key is serializable, and the mapping lives on this
+ * side of the boundary where the components actually are. Add a key here when
+ * a new filter needs an icon this list doesn't cover.
+ */
+export type FilterIconName =
+  | "filter" | "globe" | "tag" | "document" | "store" | "date" | "status" | "place"
+
+const FILTER_ICONS: Record<FilterIconName, LucideIcon> = {
+  filter  : ListFilter,
+  globe   : Globe2,
+  tag     : Tag,
+  document: FileText,
+  store   : Store,
+  date    : CalendarDays,
+  status  : CircleCheck,
+  place   : MapPin,
+}
+
+export interface FilterField {
+  /** The query-string key this field reads and writes. */
+  name         : string
+  label        : string
+  options      : FilterSelectOption[]
+  /** Shown for "no selection". Defaults to `All {label}`. */
+  allLabel?    : string
+  defaultValue?: string
+  /** A key from FILTER_ICONS — never a component, see the note above. */
+  icon?        : FilterIconName
 }
 
 export interface FilterSortOption {
@@ -67,6 +100,9 @@ interface Props {
   docTypeLabel?: string
   docTypeOptions?: FilterSelectOption[]
   defaultDocType?: string
+
+  /** Any additional searchable filters — see FilterField. */
+  extraFilters?: FilterField[]
 
   sortOptions?: FilterSortOption[]
   defaultSort?: string
@@ -101,73 +137,31 @@ interface SearchableComboFieldProps {
   options: FilterSelectOption[]
   value: string
   onChange: (value: string) => void
-  open: boolean
-  onOpenChange: (open: boolean) => void
 }
 
 /**
- * Searchable Command+Popover combobox — extracted from the original
- * country-only picker so any select-like filter (country, category, …) can
- * search a long option list instead of scrolling a plain <Select>.
+ * One filter field, rendered by the shared SearchableSelect. The hidden input
+ * is what puts the value into the form submit — the popover's own trigger is a
+ * button, so it can't carry a form value itself.
  */
 function SearchableComboField({
-  fieldName, label, icon: Icon, allLabel, options, value, onChange, open, onOpenChange,
+  fieldName, label, icon, allLabel, options, value, onChange,
 }: SearchableComboFieldProps) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
       <input type="hidden" name={fieldName} value={value} />
-      <Popover open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            className="w-full justify-between rounded-full font-normal sm:w-52"
-            style={selectStyle}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">
-                {value === "all" ? allLabel : (options.find((o) => o.value === value)?.label ?? allLabel)}
-              </span>
-            </span>
-            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[--radix-popover-trigger-width] rounded-xl p-0" style={contentStyle} align="start">
-          <Command style={{ backgroundColor: "var(--popover)" }}>
-            <CommandInput placeholder={`Search ${label.toLowerCase()}…`} className="h-9 text-sm" style={{ color: "var(--popover-foreground)" }} />
-            <CommandList>
-              <CommandEmpty className="py-4 text-center text-sm text-muted-foreground">No {label.toLowerCase()} found.</CommandEmpty>
-              <CommandGroup>
-                <CommandItem
-                  value={allLabel}
-                  onSelect={() => { onChange("all"); onOpenChange(false) }}
-                  className="cursor-pointer"
-                  style={{ color: "var(--popover-foreground)" }}
-                >
-                  <Check className={cn("h-4 w-4 shrink-0 text-primary", value === "all" ? "opacity-100" : "opacity-0")} />
-                  {allLabel}
-                </CommandItem>
-                {options.map(({ value: optValue, label: optLabel }) => (
-                  <CommandItem
-                    key={optValue}
-                    value={optLabel}
-                    onSelect={() => { onChange(optValue); onOpenChange(false) }}
-                    className="cursor-pointer"
-                    style={{ color: "var(--popover-foreground)" }}
-                  >
-                    <Check className={cn("h-4 w-4 shrink-0 text-primary", value === optValue ? "opacity-100" : "opacity-0")} />
-                    {optLabel}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
+      <SearchableSelect
+        options={options}
+        value={value}
+        onChange={onChange}
+        allOption={{ value: "all", label: allLabel }}
+        icon={icon}
+        searchPlaceholder={`Search ${label.toLowerCase()}…`}
+        emptyLabel={`No ${label.toLowerCase()} found.`}
+        className="sm:w-52"
+        aria-label={label}
+      />
     </div>
   )
 }
@@ -193,6 +187,7 @@ export function TableFilterBar({
   docTypeLabel = "Document Type",
   docTypeOptions,
   defaultDocType = "",
+  extraFilters,
   sortOptions,
   defaultSort = "",
   defaultDir = "",
@@ -206,11 +201,16 @@ export function TableFilterBar({
   const searchParams                 = useSearchParams()
   const [isPending, startTransition] = useTransition()
   const [country, setCountry]        = useState(defaultCountry || "all")
-  const [countryOpen, setCountryOpen] = useState(false)
   const [category, setCategory]       = useState(defaultCategory || "all")
-  const [categoryOpen, setCategoryOpen] = useState(false)
   const [docType, setDocType]         = useState(defaultDocType || "all")
-  const [docTypeOpen, setDocTypeOpen] = useState(false)
+
+  /*
+   * One record for every generic field rather than a state pair each, so adding
+   * a filter is a config entry and never a component change.
+   */
+  const [extraValues, setExtraValues] = useState<Record<string, string>>(
+    () => Object.fromEntries((extraFilters ?? []).map((f) => [f.name, f.defaultValue || "all"])),
+  )
 
   const hasSearchField    = showSearch
   const hasStatusField    = !!statusOptions && statusOptions.length > 0
@@ -252,6 +252,11 @@ export function TableFilterBar({
       if (docType && docType !== "all") params.set("docType", docType)
       else params.delete("docType")
     }
+    for (const field of extraFilters ?? []) {
+      const value = (data.get(field.name) as string) ?? "all"
+      if (value && value !== "all") params.set(field.name, value)
+      else params.delete(field.name)
+    }
     if (hasSortField) {
       const sort = (data.get("sort") as string) || (sortOptions?.[0]?.value ?? "")
       const dir  = (data.get("dir")  as string) || "desc"
@@ -278,6 +283,7 @@ export function TableFilterBar({
     (defaultCountry && defaultCountry !== "all") ||
     (defaultCategory && defaultCategory !== "all") ||
     (defaultDocType && defaultDocType !== "all") ||
+    (extraFilters ?? []).some((f) => f.defaultValue && f.defaultValue !== "all") ||
     defaultDateFrom ||
     defaultDateTo
   )
@@ -325,8 +331,6 @@ export function TableFilterBar({
           options={countryOptions!}
           value={country}
           onChange={setCountry}
-          open={countryOpen}
-          onOpenChange={setCountryOpen}
         />
       )}
 
@@ -339,8 +343,6 @@ export function TableFilterBar({
           options={categoryOptions!}
           value={category}
           onChange={setCategory}
-          open={categoryOpen}
-          onOpenChange={setCategoryOpen}
         />
       )}
 
@@ -353,10 +355,21 @@ export function TableFilterBar({
           options={docTypeOptions!}
           value={docType}
           onChange={setDocType}
-          open={docTypeOpen}
-          onOpenChange={setDocTypeOpen}
         />
       )}
+
+      {(extraFilters ?? []).map((field) => (
+        <SearchableComboField
+          key={field.name}
+          fieldName={field.name}
+          label={field.label}
+          icon={FILTER_ICONS[field.icon ?? "filter"]}
+          allLabel={field.allLabel ?? `All ${field.label.toLowerCase()}`}
+          options={field.options}
+          value={extraValues[field.name] ?? "all"}
+          onChange={(v) => setExtraValues((prev) => ({ ...prev, [field.name]: v }))}
+        />
+      ))}
 
       {hasDateRangeField && (
         <div className="space-y-1.5">

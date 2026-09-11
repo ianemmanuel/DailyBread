@@ -135,7 +135,6 @@ export async function getCity(idOrSlug: string, scope: AdminScopeContext) {
           status    : true,
           createdAt : true,
           updatedAt : true,
-          _count    : { select: { outlets: true } },
         },
       },
       deliveryZones: {

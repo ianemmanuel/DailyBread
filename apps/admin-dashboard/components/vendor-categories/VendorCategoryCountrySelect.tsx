@@ -1,14 +1,9 @@
 "use client"
 
+import { useTransition } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Globe2 } from "lucide-react"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
+import { SearchableSelect } from "@/components/shared/SearchableSelect"
 
 interface Props {
   options : Array<{ slug: string; name: string }>
@@ -25,29 +20,31 @@ interface Props {
  * only renders when the caller has more than one option to offer.
  */
 export function VendorCategoryCountrySelect({ options, selected, paramKey = "country" }: Props) {
-  const router = useRouter()
-  const pathname = usePathname()
+  const router       = useRouter()
+  const pathname     = usePathname()
   const searchParams = useSearchParams()
+  const [isPending, startTransition] = useTransition()
 
   function onChange(value: string) {
     const params = new URLSearchParams(searchParams.toString())
     if (value === "all") params.delete(paramKey)
     else params.set(paramKey, value)
-    router.push(`${pathname}?${params.toString()}`)
+    startTransition(() => router.push(`${pathname}?${params.toString()}`))
   }
 
   return (
-    <Select value={selected} onValueChange={onChange}>
-      <SelectTrigger className="w-52 rounded-full" style={{ backgroundColor: "var(--input)", color: "var(--foreground)" }}>
-        <Globe2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <SelectValue placeholder="All countries" />
-      </SelectTrigger>
-      <SelectContent className="rounded-xl" style={{ backgroundColor: "var(--popover)", color: "var(--popover-foreground)", border: "1px solid var(--border)" }}>
-        <SelectItem value="all" className="rounded-lg">All Countries</SelectItem>
-        {options.map((o) => (
-          <SelectItem key={o.slug} value={o.slug} className="rounded-lg">{o.name}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <SearchableSelect
+      options={options.map((o) => ({ value: o.slug, label: o.name }))}
+      value={selected}
+      onChange={onChange}
+      allOption={{ value: "all", label: "All countries" }}
+      icon={Globe2}
+      loading={isPending}
+      searchPlaceholder="Search countries…"
+      emptyLabel="No country found."
+      className="sm:w-52"
+      align="end"
+      aria-label="Country"
+    />
   )
 }

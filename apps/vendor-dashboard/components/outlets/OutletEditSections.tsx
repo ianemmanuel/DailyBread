@@ -1,49 +1,61 @@
-import { Clock, FileText } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card"
-import { SectionGrid } from "@/components/dashboard/layout/DashboardShell"
+import { FileText, Settings2 } from "lucide-react"
 import { UpdateOutletForm } from "@/components/outlets/UpdateOutletForm"
-import { OperatingHoursForm } from "@/components/outlets/OperatingHoursForm"
 import { OutletDocumentsSection } from "@/components/outlets/OutletDocumentsSection"
 import type { Outlet } from "@/types/outlet"
 
 /*
- * The three editable panels of an outlet — details, hours, documents.
- * Grouped because they're always shown together and share one card shell;
- * the page just places this block.
+ * The editable half of an outlet page: details (which now carries a full-width
+ * map picker) and documents.
+ *
+ * Both are full width. They used to sit in a 3-column grid with the edit form
+ * at 2/3 and the hours editor crammed into the remaining third, which is what
+ * made hours cut off. Hours moved out to its own summary card near the top of
+ * the page, and a form containing a map has no business being two thirds of a
+ * row anyway.
  */
+
+function Panel({
+  icon: Icon, title, description, children,
+}: {
+  icon        : React.ElementType
+  title       : string
+  description : string
+  children    : React.ReactNode
+}) {
+  return (
+    <section className="dash-card overflow-hidden">
+      <header className="flex items-start gap-3 border-b border-[var(--border)]/60 px-5 py-4">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+          <Icon className="size-4 text-[var(--primary)]" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-[var(--foreground)]">{title}</h2>
+          <p className="text-xs text-[var(--muted-foreground)]">{description}</p>
+        </div>
+      </header>
+      <div className="p-4 sm:p-5">{children}</div>
+    </section>
+  )
+}
+
 export function OutletEditSections({ outlet }: { outlet: Outlet }) {
   return (
     <>
-      <SectionGrid cols={3}>
-        <div className="lg:col-span-2">
-          <Card className="dash-card border-0">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold">Edit Details</CardTitle>
-            </CardHeader>
-            <CardContent><UpdateOutletForm outlet={outlet} /></CardContent>
-          </Card>
-        </div>
+      <Panel
+        icon={Settings2}
+        title="Outlet details"
+        description="Address, contact, delivery settings and where your pin sits"
+      >
+        <UpdateOutletForm outlet={outlet} />
+      </Panel>
 
-        <Card className="dash-card border-0">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base font-semibold">
-              <Clock className="size-4 text-[var(--primary)]" />Hours
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <OperatingHoursForm outletId={outlet.id} existing={outlet.operatingHours} />
-          </CardContent>
-        </Card>
-      </SectionGrid>
-
-      <Card className="dash-card border-0">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold">
-            <FileText className="size-4 text-[var(--primary)]" />Documents
-          </CardTitle>
-        </CardHeader>
-        <CardContent><OutletDocumentsSection outletId={outlet.id} /></CardContent>
-      </Card>
+      <Panel
+        icon={FileText}
+        title="Documents"
+        description="Permits and licences required for this location"
+      >
+        <OutletDocumentsSection outletId={outlet.id} />
+      </Panel>
     </>
   )
 }

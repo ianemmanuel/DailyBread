@@ -231,8 +231,10 @@ export function CountryFinancialConfigManager({
                     onClick={() => call(`${base}/bank-verification-mode`, "PATCH", { mode }, "verification-mode")}
                     className={
                       active
-                        ? "rounded-md border border-primary bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary"
-                        : "rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                        // The active mode is its own state, not a target — a
+                        // pointer there would promise an action that does nothing.
+                        ? "cursor-default rounded-md border border-primary bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary"
+                        : "cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                     }
                   >
                     {mode === "PROVIDER" ? "Automatic (provider)" : "Manual (document review)"}

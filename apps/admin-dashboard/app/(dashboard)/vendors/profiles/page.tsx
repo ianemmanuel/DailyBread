@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import Link from "next/link"
-import { UserCheck, Flag, CheckCircle2, XCircle, FileDown } from "lucide-react"
+import { UserCheck, Flag, CheckCircle2, XCircle, FileDown, ChevronRight } from "lucide-react"
 import {
   Table,
   TableBody,
@@ -16,7 +16,7 @@ import { getFilterableCountries } from "@/lib/countries/filterable-countries"
 import { TableFilterBar } from "@/components/shared/TableFilterBar"
 import { TablePagination } from "@/components/shared/TablePagination"
 import { EmptyState } from "@/components/shared/EmptyState"
-import { VendorProfileActions } from "@/components/vendors/VendorProfileActions"
+import { flagSummary } from "@/components/vendors/profile-flag-meta"
 import { QueueDot } from "@/components/shared/QueueDot"
 import { AdminPermissions } from "@repo/types/admin-app"
 import type { VendorProfileListResult, ProfileReviewStatus } from "@/types"
@@ -24,7 +24,7 @@ import type { VendorProfileListResult, ProfileReviewStatus } from "@/types"
 export const metadata: Metadata = { title: "Vendor Profiles" }
 export const revalidate = 60
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 10
 
 interface PageProps {
   searchParams: Promise<{ page?: string; search?: string; country?: string; status?: string }>
@@ -49,32 +49,12 @@ const STATUS_LABEL: Record<ProfileReviewStatus, string> = {
   AUTO_APPROVED: "Auto-approved", FLAGGED: "Flagged", MANUALLY_APPROVED: "Approved", MANUALLY_REJECTED: "Rejected",
 }
 
-const FLAG_REASON_LABEL: Record<string, string> = {
-  INAPPROPRIATE_CONTENT : "Inappropriate content",
-  POSSIBLE_IMPERSONATION: "Possible impersonation",
-  DUPLICATE_DISPLAY_NAME: "Duplicate name",
-}
-
-function flagSummary(profile: { flagDetails: { field: string; reason: string; match?: string }[] | null; flagReasons: string[] }): string {
-  if (profile.flagDetails && profile.flagDetails.length > 0) {
-    return profile.flagDetails
-      .map((d) => {
-        const base = FLAG_REASON_LABEL[d.reason] ?? d.reason
-        const where = d.field !== "displayName" ? ` · ${d.field}` : ""
-        return d.match ? `${base} ("${d.match}")${where}` : `${base}${where}`
-      })
-      .join(", ")
-  }
-  return profile.flagReasons.length > 0
-    ? profile.flagReasons.map((r) => FLAG_REASON_LABEL[r] ?? r).join(", ")
-    : "—"
-}
-
 export default async function VendorProfilesPage({ searchParams }: PageProps) {
   const session = await getAdminSession()
 
+  // Moderation itself lives on the detail page now, so the queue only needs
+  // READ — the MODERATE check moved to where the buttons are.
   if (!session.permissions.includes(AdminPermissions.VENDORS_PROFILES_READ)) redirect("/vendors")
-  const canModerate = session.permissions.includes(AdminPermissions.VENDORS_PROFILES_MODERATE)
 
   const params  = await searchParams
   const page    = params.page   ?? "1"
@@ -192,15 +172,14 @@ export default async function VendorProfilesPage({ searchParams }: PageProps) {
                   <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
                   <TableHead className="hidden text-xs uppercase tracking-wide lg:table-cell">Flag reasons</TableHead>
                   <TableHead className="hidden text-xs uppercase tracking-wide sm:table-cell">Published</TableHead>
-                  <TableHead className="hidden text-xs uppercase tracking-wide md:table-cell">Updated</TableHead>
-                  <TableHead className="text-right text-xs uppercase tracking-wide">Actions</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-wide">Review</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {result.profiles.map((profile) => (
                   <TableRow key={profile.id} className="hover:bg-muted/10">
                     <TableCell className="font-medium text-foreground">
-                      <Link href={`/vendors/accounts/${profile.vendorAccountId}`} className="hover:text-primary hover:underline">
+                      <Link href={`/vendors/profiles/${profile.vendorAccountId}`} className="hover:text-primary hover:underline">
                         {profile.displayName}
                       </Link>
                       <p className="text-xs font-normal text-muted-foreground">{profile.vendor.legalBusinessName}</p>
@@ -216,11 +195,17 @@ export default async function VendorProfilesPage({ searchParams }: PageProps) {
                         {profile.isPublished ? "Live" : "Not live"}
                       </span>
                     </TableCell>
-                    <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
-                      {new Date(profile.updatedAt).toLocaleDateString()}
-                    </TableCell>
                     <TableCell className="text-right">
-                      <VendorProfileActions profile={profile} canModerate={canModerate} />
+                      {/* One obvious way in. Moderating from the row meant
+                          deciding without ever seeing the profile — including
+                          its logo and cover, which the row cannot show. */}
+                      <Link
+                        href={`/vendors/profiles/${profile.vendorAccountId}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-card px-3.5 py-1.5 text-xs font-medium text-foreground shadow-[var(--shadow-xs)] transition-colors hover:border-primary/40 hover:text-primary"
+                      >
+                        View
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Link>
                     </TableCell>
                   </TableRow>
                 ))}

@@ -55,6 +55,13 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
       // light up while actually viewing Applications/Accounts.
       : href === "/vendors"
         ? pathname === "/vendors"
+        // "/outlets" is both the Outlets list link and a prefix of
+        // "/outlets/inspections", which has its own nav entry — same pattern
+        // as "/countries" below. Detail pages (/outlets/[outletId]) still
+        // correctly light up the list link.
+        : href === "/outlets"
+          ? pathname === "/outlets" ||
+            (pathname.startsWith("/outlets/") && !pathname.startsWith("/outlets/inspections"))
         // "/countries" is a prefix of "/countries/activation" and
         // "/countries/revenue", which have their own nav entries — don't
         // double-light more than one Locations item at once.

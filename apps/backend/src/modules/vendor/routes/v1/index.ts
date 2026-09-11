@@ -6,6 +6,7 @@ import outletRouter from "./vendor.outlet.routes"
 import cityRouter from "./vendor.city.routes"
 import payoutRouter from "./vendor.payout.routes"
 import profileRouter from "./vendor.profile.routes"
+import menuRouter from './vendor.menu.routes'
 import authRouter from "../vendor.auth.routes"
 import { requireVendorState, NON_BANNED_STATES } from "../../middlewares"
 
@@ -27,6 +28,7 @@ v1Router.use('/outlets',outletRouter)
 v1Router.use('/cities',cityRouter)
 v1Router.use('/payouts',payoutRouter)
 v1Router.use('/profile',profileRouter)
+v1Router.use('/menu',menuRouter)
 
 // Vendor module info endpoint (optional)
 v1Router.get('/', (req: Request, res: Response) => {

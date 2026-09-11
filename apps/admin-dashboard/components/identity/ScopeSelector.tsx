@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select"
+import { SearchableSelect } from "@/components/shared/SearchableSelect"
 import type { Country, City, ScopeEntry } from "@/types"
 
 interface Props {
@@ -116,47 +117,41 @@ export function ScopeSelector({ isGlobalActor, actorCountries, value, onChange, 
             </SelectContent>
           </Select>
 
-          {/* Country picker */}
+          {/* Country picker — searchable: this list is every country the actor
+              can assign, up to 193 of them, which is unusable as a scroll. */}
           {(scope.scopeType === "COUNTRY" || scope.scopeType === "CITY") && (
-            <Select
-              value={scope.countryId ?? ""}
-              onValueChange={(v) => {
-                updateScope(index, { countryId: v, cityId: undefined })
-                fetchCities(v)
-              }}
-            >
-              <SelectTrigger
-                className="flex-1"
-                style={{ backgroundColor: "var(--input)", color: "var(--foreground)" }}
-              >
-                <SelectValue placeholder="Select country…" />
-              </SelectTrigger>
-              <SelectContent style={{ backgroundColor: "var(--popover)", color: "var(--popover-foreground)" }}>
-                {countries.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex-1">
+              <SearchableSelect
+                options={countries.map((c) => ({ value: c.id, label: c.name }))}
+                value={scope.countryId ?? ""}
+                onChange={(v) => {
+                  updateScope(index, { countryId: v, cityId: undefined })
+                  fetchCities(v)
+                }}
+                placeholder="Select country…"
+                searchPlaceholder="Search countries…"
+                emptyLabel="No country found."
+                className="rounded-md"
+                aria-label="Country"
+              />
+            </div>
           )}
 
-          {/* City picker */}
+          {/* City picker — same treatment, since it sits in the same row and a
+              large country's city list is just as long. */}
           {scope.scopeType === "CITY" && scope.countryId && (
-            <Select
-              value={scope.cityId ?? ""}
-              onValueChange={(v) => updateScope(index, { cityId: v })}
-            >
-              <SelectTrigger
-                className="flex-1"
-                style={{ backgroundColor: "var(--input)", color: "var(--foreground)" }}
-              >
-                <SelectValue placeholder="Select city…" />
-              </SelectTrigger>
-              <SelectContent style={{ backgroundColor: "var(--popover)", color: "var(--popover-foreground)" }}>
-                {(cities[scope.countryId] ?? []).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex-1">
+              <SearchableSelect
+                options={(cities[scope.countryId] ?? []).map((c) => ({ value: c.id, label: c.name }))}
+                value={scope.cityId ?? ""}
+                onChange={(v) => updateScope(index, { cityId: v })}
+                placeholder="Select city…"
+                searchPlaceholder="Search cities…"
+                emptyLabel="No city found."
+                className="rounded-md"
+                aria-label="City"
+              />
+            </div>
           )}
 
           <Button

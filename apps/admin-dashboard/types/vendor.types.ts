@@ -366,6 +366,22 @@ export interface VendorProfileAdmin {
   vendor: { id: string; legalBusinessName: string; countryId: string }
 }
 
+/** The moderation detail page's read — every field a customer would see, plus
+ *  signed media URLs and the resolved reviewer. See getVendorProfileForAdmin. */
+export interface VendorProfileAdminDetail extends VendorProfileAdmin {
+  story         : string | null
+  coverImageUrl : string | null
+  publicEmail   : string | null
+  publicPhone   : string | null
+  website       : string | null
+  socialLinks   : Record<string, string> | null
+  publishedAt   : string | null
+  staleNotifiedAt: string | null
+  cuisines      : { id: string; name: string; status: string }[]
+  dietaryTags   : { id: string; name: string; status: string }[]
+  reviewedBy    : { name: string; email: string } | null
+}
+
 export interface VendorProfileListResult {
   profiles: VendorProfileAdmin[]
   counts: { flagged: number; autoApproved: number; manuallyApproved: number; manuallyRejected: number }
@@ -420,6 +436,9 @@ export interface AdminOutlet {
   /** Present on the single-outlet detail response (getOutletForAdmin). */
   goLiveStatus?         : import("@repo/types/admin-app").OutletGoLiveStatus
   mealPlanReadiness?    : import("@repo/types/admin-app").OutletMealPlanReadiness
+  /** City boundary, zones and the pin's resolved placement — null when the
+   *  geography read failed, which never costs the page itself. */
+  coverage?             : import("@repo/types/admin-app").AdminOutletCoverage | null
 }
 
 export interface AdminOutletListResult {

@@ -554,3 +554,418 @@ Deliberately unchanged: onboarding gating stays as-is (it gates because the vend
 **Two deliberate deviations from the literal request, both flagged:**
 - **No `/profile/create` + `/profile/update` split** — the backend is a single `upsertVendorProfile` (full-form save, not partial PATCH). Two routes rendering the same form against the same operation is duplication, which contradicts the DRY instruction that came with the request. One page, `/settings/profile`.
 - **`/outlets/revenue` is an honest placeholder, not a chart.** There is no `Order` or `Payment` model in the schema, so every figure would be invented. Mock revenue is acceptable in an internal admin tool (and is used there); showing a *vendor* fabricated earnings for their own business is not. The route and page exist so the real report drops in once orders are captured.
+
+## Vendor outlet location picker — map-based placement with live coverage feedback (2026-09-09)
+
+The first vendor-facing consumer of the operational-geography engine built in the 2026-08-29 series. Until now `Zone` / `ZONE_CAPABILITIES` / `resolveCapabilitiesForPoint` were admin-configured and admin-visible only: a vendor creating an outlet was told to **right-click their location in Google Maps and paste the latitude and longitude into two number inputs** (`CreateOutletForm.tsx`), and only discovered a bad location as a 400 (`OUTSIDE_CITY_BOUNDARY`) after filling in the whole form. No schema change — this is entirely a surface over what already existed.
+
+**The vendor's vocabulary is deliberately not `ZoneLevel`.** New `OutletPlacementStatus` (`packages/types/src/domain/geography.ts`): `FULL_OPERATIONS` / `PLATFORM_DELIVERY` / `SELF_DELIVERY` / `REGISTRATION_ONLY` / `PAUSED` / `OUTSIDE_COVERAGE`. The internal capability ladder (L0–L3), operational-status reasons, pause windows and every admin audit field stay server-side; the zone's **name** is exposed, on purpose, purely so the vendor can orient themselves ("Westlands") next to the verdict. Same codes-in-`@repo/types`, wording-in-the-app split as `VendorGoLiveBlocker` / `lib/readiness.ts`: the backend returns codes only, `components/outlets/placement-meta.ts` owns every user-facing string, colour and icon.
+
+**`vendor.placement.ts`** — pure, no I/O, unit-tested (`vendor.placement.test.ts`, 10 cases), same convention as `vendor.outletClearance.ts` and `decideProofRequirement`. Two functions: `zoneCoverageStatus(level, operationalStatus)` (how a zone is shaded on the map) and `describePlacement(resolved)` (the verdict for one pin), both collapsing through one private `statusFromFlags` so the legend, the shading and the pin's answer can never disagree. Two rules the tests pin down:
+- **`canRegister` must mirror `createOutlet`'s own guard exactly, including its leniency.** `resolveCapabilities` reports `withinCityBoundary: false` both for "outside the boundary" and for "no boundary drawn yet" — conflating them would either block a pin the backend accepts or invite one it rejects. Only `boundaryConfigured && !withinCityBoundary` refuses.
+- **Reported capabilities are STRUCTURAL, not live** — what the area is configured for, with `status: PAUSED` carrying the interruption. `selfDeliver` is only ever true where `weDeliver` is false, so the two never contradict each other on screen. Live order acceptance stays `getOutletGoLiveStatus`'s job.
+
+**Two new vendor reads** (`vendor.city.service.ts`, routes on the existing `cityRouter`): `GET /vendor/v1/cities/:cityId/coverage` (boundary + vendor-safe zones, one read per city selection) and `GET /vendor/v1/cities/:cityId/placement?latitude=&longitude=` (one verdict, called as the pin moves, records nothing). Both go through `assertCityAvailableToVendor`, which scopes to the vendor's own `countryId` + `status: ACTIVE` and **404s rather than 403s** a city outside it — a vendor has no business learning that a guessed city id exists in another market. The guard deliberately does **not** select zone polygons: the preview path calls it on every pin move and only needs existence, while coverage fetches geometry once. Next proxies at `app/api/cities/[cityId]/{coverage,placement}` — coverage `revalidate: 300` (admin-curated, changes rarely), placement `no-store` (a stale verdict is worse than none).
+
+**Vendor interest is now captured automatically** (`captureVendorInterest`, `vendor.outlet.service.ts`). Per explicit product direction: a vendor may create a **fully functional** outlet in a `REGISTRATION_ONLY` or unzoned area — it simply never receives orders until the area is promoted, at which point it starts serving with no further action. An outlet created where `canListOnDemand` is false writes a `MarketSignal` (`VENDOR_INTEREST`, `source: "vendor_dashboard"`, tagged with the resolved zone and boundary containment) — which lights up `CityLaunchSignalsPanel`, an admin panel that existed with **no vendor-facing writer** until now. Best-effort inside a try/catch: a failure here must never cost a vendor an outlet they successfully created. Written via `prisma` directly, keeping the vendor-module-never-imports-admin rule intact (same precedent as `notifyAdminsProfileFlagged`). `resolveOutletZone` became `resolveOutletPlacement` and now returns the whole `ResolvedZoneCapabilities` so create both throws and captures off one resolution.
+
+**`OutletLocationPicker.tsx`** — shared verbatim by the create and edit forms. City select drives everything below it (so it moved out of "Outlet details" and now leads the Location section; changing city clears the pin rather than silently carrying coordinates across cities). Mapbox address search proximity-biased to the city centroid, "Use my location", click-to-drop, draggable marker, reverse geocode into the address fields. **The city boundary is rendered as a world-sized polygon with the boundary punched out of it** so everything uncovered is dimmed — far more legible than an outline the vendor has to trace. Zones fill/stroke off one `placementColorExpression()` keyed on each feature's vendor-facing `status`; the legend only lists coverage kinds the city actually has.
+
+Three things worth not re-deriving later:
+- **The form stays the single source of truth for the pin.** The marker follows `latitude`/`longitude`, so the manual-coordinate fallback moves it too. Those inputs survive as a collapsed `<details>` — the map is unavailable without a Mapbox token, and a vendor who already knows their coordinates shouldn't be forced through it. `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` added to `apps/vendor-dashboard`, same env var and "map unavailable" fallback convention as `CityLocationMap`.
+- **Latest-wins guards on both async paths** (`placementSeq` / `searchSeq` refs). A vendor drags faster than the round trip; a late response for an abandoned position would show a verdict for a place the marker no longer sits on. Map click/drag handlers read the current callbacks through refs so a parent re-render never rebuilds the map or detaches a drag mid-gesture.
+- **A failed preview never blocks the vendor.** `createOutlet` re-resolves the point on save and remains the only real gate; the disabled submit button and the `outsideCoverage` toast are UX on top of it, not the enforcement.
+
+**Address auto-fill respects what the vendor typed**: a search result is a deliberate choice so it replaces `addressLine1`/`neighborhood`/`postalCode`; a dragged pin only fills blanks. Same rule in both forms.
+
+**`UpdateOutletForm` uses the same picker**, locked to the outlet's own city (an outlet never changes city, so there's no city control there) — `updateOutlet` already re-resolved `zoneId` on a coordinate change, so this needed no backend work.
+
+**Found during recon, not acted on** — `ServiceArea` / `OutletServiceArea` / `Outlet.serviceMode` / `Outlet.isUnzoned` / `resolveServiceMode` (`@repo/geo`) look superseded by `Zone`. `ServiceArea` has full backend CRUD with zero frontend consumption anywhere; `serviceMode`/`isUnzoned` have **zero references in the entire repo** outside `schema.prisma`, so every outlet sits at the enum default forever. `Zone` now does the job `ServiceArea` was designed for. Flagged as the clearest dead weight in the geography layer; deliberately left alone this pass.
+
+## Legacy outlet-geography cleanup + outlet detail page rebuild (2026-09-10)
+
+### Dead weight removed — migration `20260909160000_drop_outlet_service_area`
+
+Acted on the removal candidates flagged at the end of the location-picker pass, scoped to what was **provably** unreferenced rather than everything that looked legacy:
+
+**Dropped** (zero references anywhere outside `schema.prisma` and old migration SQL, grep-verified across every app and package):
+- `Outlet.serviceMode` (`OutletServiceMode`) and `Outlet.isUnzoned` — the field comment claimed serviceMode was "computed at outlet-creation and updated when service areas change", but nothing ever wrote either one, so **every outlet had sat at the `INACTIVE` default since the columns were added**. Any consumer reading them would have been reading a value that never reflected reality. `Zone` + `Outlet.zoneId` do this job now, resolved live.
+- `OutletServiceArea` (the outlet↔ServiceArea join) — no writer ever existed.
+- `enum OutletServiceMode` — schema, `packages/types/src/enums/geography.ts`, and its `frontend/admin.ts` re-export.
+- `resolveServiceMode`, `isPointInAnyServiceArea`, `ResolvedServiceMode`, `OutletServiceMode` (`@repo/geo`) — the parallel unused resolver `Zone`'s `resolveCapabilities` superseded.
+
+**Deliberately kept — `ServiceArea` is NOT dead**, contrary to how it looks from the frontend. Three live consumers found by tracing rather than assuming: `admin.deliveryzone.service.ts` validates every delivery zone sits inside a `FULL_SERVICE` area, `admin.city.service.ts` blocks clearing a city boundary while any exist, and the country launch checklist counts them. Folding it into `Zone` is a real architectural decision about the courier layer, not a cleanup, and would drag `DeliveryZone` (→ `MealPlanBatchZone`) with it. `isPointInServiceArea` also stays despite the misleading name — it is the generic point-in-polygon primitive that `Zone` matching and the draw-time overlap checks both call; renaming touches every caller for no behavioural gain, so the file header now says so explicitly.
+
+**Fallout fixed, not worked around**: `ServiceArea._count.outlets` counted the join table that just went away. It was structurally always `0`, which means `deleteServiceArea`'s "cannot delete, N outlets are linked" guard **could never fire** and `deactivateServiceArea`'s `linkedOutlets` in its log, audit metadata and return value were always zero. All removed rather than re-pointed at something else. `ServiceArea._count` also dropped from `packages/types`.
+
+### Operating hours — the answer is "after, not during", and why
+
+Creation stays identity + location only. Hours are set on the outlet's own page afterwards, matching Uber Eats, DoorDash and Shopify (and forced by mechanics anyway: `setOperatingHours` needs an `outletId` that does not exist yet, and `createOutlet` has no hours field). The create form now says so in one line rather than leaving the vendor wondering whether they missed a step. Backend support was already complete and untouched — `PUT /vendor/v1/outlets/:id/operating-hours` → `setOperatingHours`, upserting `OutletOperatingHours` per day in a transaction.
+
+**`OperatingHoursForm.tsx` deleted, replaced by `OutletHoursCard.tsx` + `lib/outlets/hours.ts`.** The old form rendered seven permanently-open rows of `day label + toggle + two time inputs` in a `lg:col-span-1` third of a 3-column grid — it could not fit at any breakpoint, and clipped. Now: a **grouped read-only summary** on the page (`summarizeHours` collapses consecutive identical days into runs, so a normal week is two or three rows — "Mon – Fri · 08:00 – 22:00" — the same thing Uber Eats / DoorDash / Google Business all show), with the seven-row editor in a right-side `Sheet` that has room for it. Rows stack on narrow screens instead of squeezing onto one line, the time inputs carry `min-w-0` so they shrink rather than forcing the container wider than the sheet, and only the day list scrolls. Open/closed is a **two-segment control, not a `Switch`** — a bare switch rendered as a pale pill on a pale row, so the state was present but nothing invited a click and the label beside it had to be read to know the setting. Segments name both options, colour the active one (emerald for open, solid grey for closed — deliberately not red, a shut Sunday is normal), and give a far bigger tap target. The row tints to match, so a whole week reads at a glance while editing.
+
+**A real bug fixed in passing**: `buildInitial` filled every unset day with `08:00`–`22:00`, so an outlet whose hours had *never been saved* displayed a confident-looking full schedule. `hasHoursSet` now distinguishes them — an outlet with no hours shows an explicit "No hours set yet" prompt, and the defaults survive only as the editor's starting point. `isClosedAllWeek` additionally warns when every day is closed, which otherwise silently makes an outlet unable to take a single order however healthy it looks elsewhere.
+
+### `/outlets/[id]` — responsive rebuild
+
+The page is now ~45 lines that import components and nothing else; every piece of markup moved into `components/outlets/*`.
+
+**What was actually broken**, not just untidy:
+- The header wrapped `PageHeader` in a `flex items-center` row with a back button. No `min-w-0` on the title, so a long outlet name pushed the status badges off-screen; `items-center` floated the back button beside the middle of a two-line header. New `OutletDetailHeader` puts the back link on its own row (the mobile-merchant-app pattern), truncates the title, and lets badges wrap underneath.
+- `OutletEditSections` put the edit form at `lg:col-span-2` and hours in the remaining third — the direct cause of the hours clipping. Both panels are full width now, which the edit form needs anyway since it carries the 420px map picker.
+- `UpdateOutletForm`'s internal `Section` rendered a `Card`, so once the form sat inside the page's own panel it was a card inside a card: two borders, two shadows, doubled padding eating the width the map needs. It is a plain `fieldset` with a top rule now. `CreateOutletForm` keeps its cards — it is standalone on its own page, not nested.
+- `OutletDetailHero`'s two stats sat in a boxed 3-column grid consuming the full card height to show two digits and a status dot. They are inline chips now, and the dot is gone: the outlet's status was already stated twice above it (header badges + go-live panel). Contact lines gained `min-w-0 break-words` so a long address wraps on a phone instead of widening the layout, and phone/email are now `tel:` / `mailto:` links.
+- The **flag notice moved from the very bottom of the page to just under the header** — a warning nobody scrolls to is not a warning.
+- The rating chip now states the review count behind the number, or "no reviews yet". A bare rating with no volume is misleading.
+
+Final order: header → flag notice → go-live panel → (glance card + hours, `lg:grid-cols-3`) → inspection → edit details → documents.
+
+**Performance — the outlet pages were shipping mapbox-gl in their first load (2026-09-10).** A reported "the hours sheet feels slow" turned out to be mostly page weight, not the sheet. `OutletLocationPicker` was statically imported by both `CreateOutletForm` and `UpdateOutletForm`, so **each route carried its own ~1.8 MB copy of mapbox-gl in its initial bundle** (3.6 MB across the two, verified by grepping the built chunks and the client-reference manifests) — parsed and executed on every visit to an outlet page, including the majority that never touch the map. Three fixes, no new abstractions:
+- **`next/dynamic` (`ssr: false`) on the picker in both forms.** The two copies collapse into one shared 1.7 MB chunk that now appears only in `react-loadable-manifest.json`, never in either route's `page_client-reference-manifest.js` — off the critical path. The next largest chunk on the page is 217 KB.
+- **The detail page doesn't load it at all until asked.** An existing outlet already has a pin, so `UpdateOutletForm` shows a `PinSummary` (the saved coordinates plus a "Move pin on map" button) and only mounts the picker — and fetches its chunk — when the vendor actually wants to move it. Same pattern Uber Eats uses: the address is text until you choose to edit it. The create form still renders the map immediately, since there it is the point.
+- **`SheetContent`'s animation was shadcn's stock 500 ms in / 300 ms out**, now 200/150. Half a second to slide a panel in reads as lag, not polish — the panel is still moving well after the click.
+
+**Two follow-ups from using it (2026-09-10).**
+- **"Checking what's available here…" span forever on an existing outlet.** `resolvePlacement` was only ever called from `commit`, i.e. on click / drag / search — so a picker mounting with coordinates already set had a pin, no verdict, and no request in flight, while `PlacementVerdict`'s `resolving || !placement` condition read that as "still loading". Fixed on both sides: the picker now resolves once on mount when a pin already exists (correct anyway — a vendor should see what their current location supports without having to move it), and the spinner is gated on `resolving` alone, so a failed or never-started lookup renders nothing instead of an endless spinner.
+- **`PinSummary` didn't look like a map.** As a thin row with an outline button it read as "no map here", and the risk was a vendor concluding the map was broken and typing coordinates by hand instead. It now shows an actual **Mapbox Static Images thumbnail** of the saved pin — one ~50 KB image, no mapbox-gl — with the "Move pin on map" button sitting on top of it. Seeing the location on a map is the clearest possible confirmation that the pin saved and the map works. Falls back to a prominent full button when no token is configured, and to a dashed "No location pinned yet" prompt when an outlet somehow has no coordinates.
+
+**Fixed in passing**: the hours editor kept abandoned edits. Its `useState(initial)` never re-synced and the sheet stays mounted so it can animate closed, so cancelling left the discarded values in place and showed them again on the next open. It now resyncs on open, which also picks up whatever the last save wrote underneath it.
+
+**Saving operating hours never worked (fixed 2026-09-10).** Reported as "invalid data provided" — the generic text `PrismaError.ts` maps every `PrismaClientValidationError` to. `setOperatingHours` upserted day by day on `where: { outletId_dayOfWeek_validFrom: { …, validFrom: null! } }`, and **Prisma rejects `null` inside a compound-unique input** (the `null!` assertion was silencing exactly that complaint at compile time), so every save threw before touching the database. Nothing caught it earlier because the old inline editor was clipped and effectively unusable.
+
+The constraint could not have helped anyway: `@@unique([outletId, dayOfWeek, validFrom])` does **not** deduplicate rows whose `validFrom` is NULL, since Postgres treats NULLs as distinct in a unique index — a working per-day upsert would still have accumulated duplicate Mondays. So the write is now a `deleteMany` + `createMany` in one transaction, scoped to `validFrom: null` (dated schedules are what that column is for; this endpoint owns only the standing week). That is correct and self-healing for any duplicates already stored.
+
+Also added `vendor.operatingHours.ts` — a pure `validateOperatingHours` (unit-tested, 12 cases), same convention as `vendor.outletClearance.ts` / `vendor.placement.ts`. The controller used to cast `req.body.hours` to `OperatingHoursEntry[]` and hand it straight to Prisma, so any malformed field surfaced as that same useless "Invalid data provided."; errors now name the day and the field ("Wednesday needs a valid closing time in HH:mm format."). Two rules worth knowing: an **overnight close is valid** (18:00 → 02:00 is a normal kitchen, so open < close is deliberately not required), and a **closed day's times are normalized, not validated** — a stale time on a day just marked closed must not block the save. Equal open and close is rejected and points at the closed toggle instead.
+
+**Note**: the request named `/orders/[id]`; that route does not exist (`/orders` is a `ComingSoon` stub and there is no `Order` model), and every specific complaint in it — outlet responsiveness, the operating-hours component — was about `/outlets/[id]`, so the work was applied there.
+
+## Food taxonomy catalogs + vendor profile media (2026-09-10)
+
+Two connected pieces: an admin-curated vocabulary replacing free text on the vendor profile, and real image uploads replacing URL text boxes. Migration `20260910120000_food_taxonomy_and_profile_media`.
+
+### Cuisines + dietary tags — the VendorType pattern, applied twice
+
+`VendorProfile.specialties` and `.dietaryOptions` were `String[]` a vendor typed into. That is unaggregatable by construction: two vendors writing "Vegetarian" and "vegetarian friendly" are invisible to each other and to any filter. Replaced with two admin-managed catalogs following `VendorType` / `VendorTypeCountry` **exactly** — a global catalog plus a per-country table saying which entries a market has switched on.
+
+**Specialties were folded into `Cuisine`, not built as a third taxonomy.** `Cuisine` already existed (schema-only: zero rows, zero seed, no admin surface) and is already wired to `OutletCuisine`, `MealCuisine` and `VendorProfile.primaryCuisineId`. A separate "specialties" vocabulary beside it would have overlapped immediately, and it is not a concept Uber Eats, DoorDash or Bolt Food have — they tag a store with cuisine categories and nothing else. So `Cuisine` gained a `slug` and finally got an admin surface, and free-text specialties is gone. New `DietaryTag` is its sibling, same shape.
+
+**The scope split is the whole design, and it is enforced by scope rather than by permission.** One key, `settings:food_tags:write`:
+- **catalog** create / edit / suspend → `assertGlobalScope`. Held by `operations_admin` (GLOBAL-only), the role that already owns the vendor-type catalog.
+- **per-country availability** → `assertCountryInScope` only. Held by `vendor_ops`, which is COUNTRY/CITY-scoped, so that grant can *only* ever reach this half.
+
+That is what was asked for ("global admin creates, country admin enables") without needing a globally-scoped `vendor_ops`, which does not exist — `ROLE_SCOPE_RULES` gives `vendor_ops` COUNTRY/CITY only. **No scope-rule change was made**; extending `vendor_ops` to GLOBAL would have made global vendor_ops possible for every other vendor permission too, which is its own decision.
+
+`admin.foodTag.service.ts` handles both catalogs. They are column-for-column identical, so every operation is written once and dispatched through one `configFor(kind)` table — the only place the two Prisma delegates are treated as interchangeable, asserted there and nowhere else. Routes: `/admin/v1/food-tags/:kind` where `:kind` is `cuisines` or `dietary-tags`.
+
+**There is deliberately no delete.** `VendorProfileCuisine` / `VendorProfileDietaryTag` are `onDelete: Restrict`, so a tag vendors are using cannot vanish and silently rewrite what they said about themselves. Suspending stops it being offered to anyone new while every existing selection stays intact; the confirmation dialog says exactly that, including how many vendors are affected. A globally suspended entry can still be switched *off* by a country (how a market cleans up after a global suspension) but never on.
+
+**Seeded** (`packages/database/src/seed/vendor/food-tags.seed.ts`, step `[2/2]` in `seedVendor`): 23 cuisines, 8 dietary tags, keyed on `code` — the stable identifier, since `name` and `slug` are both admin-editable and keying on either would duplicate on the first rename. Per-country availability is **not** seeded: every country starts with nothing switched on, which is what makes the enablement screen a real decision. The cuisine list is regional-first (Kenyan, Ethiopian, Nigerian, Swahili coast alongside the global categories) because "African" alone is a useless filter in the launch markets — the same reason DoorDash lists Cajun and Hawaiian separately from "American".
+
+**ERP**: new top-level **Food Tags** nav section (Cuisines, Dietary tags) — its own section for the identical reason Vendor Categories has one: nesting under Countries would put it behind `requiresGlobalTier + SETTINGS_GEOGRAPHY_WRITE` and cut off the country-scoped `vendor_ops` admins who curate it. One shared `FoodTagsCatalog` server component backs both routes, so each page file is about ten lines. **One table, two jobs**: with no country in view it is the global catalog (counts, status, edit); with a country in view the same rows gain an availability switch. A global admin picks a country to curate; a country-scoped admin has theirs resolved server-side by the backend, so the switches are simply there.
+
+### Vendor profile — file uploads, a gallery, and honest required/optional
+
+**Media is now uploaded, not typed.** `logoUrl` / `coverImageUrl` were text inputs a vendor pasted a URL into. They are now `logoStorageKey` / `coverStorageKey` / `galleryStorageKeys` — **renamed, not reinterpreted**, because a private-bucket key sitting in a column called `...Url` is an invitation to render it into an `<img src>` and get a 403. `presentVendorProfile` is the single exit point: it mints short-lived signed URLs per response and pairs each gallery URL with the key it came from, so an edit form can render an image and still know what to re-submit. Signing is best-effort per image — one unreadable object degrades to a null URL rather than failing the page.
+
+The pipeline is the app's existing one verbatim (presign → XHR `PUT` to R2 → submit the key), the third use after application documents and payout proofs. New `R2Service.generateProfileMediaKey` produces `profile-media/<kind>/<vendorId>/<uuid>.<ext>`.
+
+**The `vendorId` segment in that key is load-bearing, not decoration.** `assertOwnedProfileMediaKey` (`vendor.profileMedia.ts`, pure, 23 unit tests) is what stops `DELETE /profile/media` being a delete-anything primitive: the key must match this vendor's exact prefix, with one path segment after it, no traversal, and no prefix collision (`vendor-1` must not match `vendor-1-extra`). Discard additionally refuses any key the **saved** profile still points at, so a stale tab cannot delete a live logo out from under the row. Deleting a key that was never uploaded is a no-op success.
+
+**Removing an image actually deletes it from the bucket**, per the explicit ask, on both paths: removing a not-yet-saved upload discards it immediately, and saving a replacement deletes whatever key the previous save referenced and this one does not (`discardOrphanedMedia`, after the transaction and best-effort — a storage hiccup must never roll back a save the vendor was told succeeded).
+
+**Gallery** — `galleryStorageKeys`, capped at 8. Worth recording honestly: **Uber Eats, DoorDash and Bolt Food have no vendor profile gallery**; their photography is per-dish and a store gets one cover plus one logo. This follows the Google Business / Yelp convention instead, because it was asked for. Capped so it stays a curated set rather than an unmanaged photo dump.
+
+**Tag selection** is chips, not a dropdown — the lists are short and admin-curated, and the vendor is browsing rather than recalling a name they already know. Caps come from the backend (`maxCuisines` 5, `maxDietaryTags` 8) rather than being hardcoded in the form; at the cap the unselected chips disable instead of silently ignoring a click. `resolveSelectedFoodTags` **rejects** anything not enabled in the vendor's own country rather than dropping it silently — a vendor who ticked something and watched it vanish would reasonably assume the save was broken.
+
+**Story: kept, capped at 1000, collapsed.** Uber Eats and DoorDash have only a short store description; a business story is a Yelp / Google Business feature. So description stays the primary short field (300 chars, always visible) and story sits behind a collapsed "Your story · optional" section with a live counter, auto-expanded only for a vendor who already has one.
+
+**Zod validation** (`lib/validations/profile.ts`) mirrors the backend's rules rather than inventing softer ones, returns one error per field, and clears a field's error the moment it is touched. Required is a red asterisk; optional fields say nothing, with one legend above the submit button — marking both would make every row noisy. Layout is two columns from `lg`, one below, with inputs at their natural width rather than a 60-character name stretched across the screen.
+
+**A latent bug this surfaced**: `upsertVendorProfile` built its Prisma `data` as a plain object variable, so TypeScript's excess-property check never applied and unknown columns would have reached Prisma as a runtime `PrismaClientValidationError` — the same "Invalid data provided." class as the operating-hours bug. The controller now destructures field-by-field (a spread of `req.body` would let a client set `isPublished` and the moderation fields) and the save runs in one transaction with its tag joins.
+
+### Deliberately not done
+- **`VendorProfile.primaryCuisineId`** is left in place and still unused. A single "primary category" is a real Uber Eats concept and the column already exists; adopting or dropping it is a product decision, not cleanup. Noted in the schema so it is not mistaken for an oversight.
+- **`Meal.dietaryOptions` / `.specialties`** (also `String[]`) are untouched — `Meal` has no service, controller or page anywhere yet. They should move to the same catalogs when meals are built.
+- **Admin-side image moderation.** `/vendors/profiles` moderates flagged *text*; it does not show the logo, cover or gallery, so a moderator cannot act on an inappropriate image. The signed-URL presenter needed to fix that already exists (`presentVendorProfile`) but is vendor-scoped. Real image classification would need the `ImageModerationProvider` seam already noted in the external-API section.
+- **The "request a tag" flow** a country admin uses to ask a global admin for a new entry — mentioned as a later feature and not built.
+
+## Profile scope trim, payout post-decision actions, profanity coverage (2026-09-10)
+
+Migration `20260910140000_drop_profile_gallery_add_payout_deactivation`.
+
+### Gallery and reservation link removed
+
+Both shipped earlier the same day and both are gone, on the same reasoning: they advertise a **physical venue**, and this is a delivery-only marketplace. For a cloud kitchen (an existing `VendorType` here) a premises photo is a disclosure the vendor may not have intended, and a reservation link only makes sense for dine-in, which the platform does not sell. Uber Eats, DoorDash and Bolt Food carry neither field — a store gets a logo, a cover, and per-dish photography.
+
+Worth recording honestly, since it was my own copy that invited the problem: a gallery of *food* photos would not have leaked a location, but the field hint said "show your space, your counter" — which is exactly the premises disclosure being avoided. Enforcing food-only is not possible without image classification, which does not exist here (see the `ImageModerationProvider` gap). Removing the field was the right call rather than writing a rule nothing enforces.
+
+`ProfileMediaKind` is now `"logo" | "cover"`. The media test suite gained a case asserting a `profile-media/gallery/…` key is **refused** — that prefix was valid for a few hours, and the discard endpoint must stop reaching objects nothing references any more.
+
+### Payout review — the buttons now match what the backend allows
+
+Two separate corrections to `/finance/payout-accounts/[accountId]`.
+
+**Verify and reject are hidden until the viewer holds the claim.** `assertPayoutReviewClaimedByActor` has always required it — that is the point of the review workflow, exactly one owner when money is decided — but the page rendered both buttons to anyone with `VENDORS_PAYOUT_ACCOUNTS_MANAGE`, so a non-owner got a guaranteed 403. It now shows "Claim this review before you can verify or reject it" instead.
+
+**Reject disappears once a verification is final, replaced by two post-decision actions.** Rejecting a VERIFIED account writes `verificationStatus: FAILED`, which claims a completed verification never succeeded and leaves a self-contradicting timeline. What is actually needed at that point is different in kind, so it is two different actions:
+- **`deactivatePayoutAccount`** — takes the account out of service. `isActive: false`, `isDefault` cleared (so the vendor is prompted to pick another rather than silently having none), recorded on new `deactivatedAt` / `deactivationReason` / `deactivatedById` columns mirroring `City`'s convention. **`verificationStatus` is untouched** — a decommissioned account is not a failed verification.
+- **`flagPayoutAccountForReview`** — notifies in-country `VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION` holders (the ceiling-only permission granted individually to senior reviewers) and writes an audit entry. Changes **nothing** about the account.
+
+The flag is deliberately **not** a review-workflow escalation. That machinery governs a live review, and `payoutReviewState` derives RESOLVED from a terminal `verificationStatus`; reopening it would give "is this resolved?" two answers, which is the collapsed-axis problem the rest of this codebase avoids. Getting a second pair of eyes on a standing decision is a notification, not a state change.
+
+New audit actions: `vendor_payout_account.deactivated`, `.flagged_for_review`.
+
+**Audit history is paginated.** The trail grows for the life of the account — claim, release, escalate, reassign, verdict, deactivate, flag — so the page was getting heavier the longer an account had been managed, which is backwards. `getPayoutAccountAuditPage` (10 per page, scope re-checked since it is its own endpoint) backs `GET …/audit?page=`; the detail response now carries only the first page plus `auditTotal` / `auditPageSize`. The common case, where nobody scrolls the history, costs one count and one page.
+
+### Profanity screening — the library already existed, the coverage did not
+
+Answering the question directly: **no new dependency is needed.** `bad-words` has been in use since the profile-moderation pass, behind the swappable `ContentModerationProvider` interface (`apps/backend/src/lib/moderation/`), which is the seam a real classifier drops into. What was missing was reach — outlets used a **separate** `new Filter()` instantiated in `vendor.outlet.service.ts` and screened only the outlet **name**.
+
+- Outlets now go through `getModerationProvider()` like the profile does, and screen **name + bio**. Reasons are field-specific (`INAPPROPRIATE_NAME` / `INAPPROPRIATE_DESCRIPTION`) because `Outlet` has no `flagDetails` column — the reason string carries the granularity instead.
+- `updateOutlet` re-screens when the **bio** changes, not only the name or coordinates. A vendor could previously edit profanity into a description and it would never be checked.
+- Coverage is now every free-text field a vendor writes and an admin later reads: profile `displayName` / `tagline` / `description` / `story`, outlet `name` / `bio`.
+
+**Performance.** The `Filter` is built once at module load — `bad-words` compiles its wordlist on construction, so a per-call `new Filter()` would have been the entire cost. Screening is a tokenise plus hash lookups over fields already capped at a few hundred characters. `MAX_SCREEN_LENGTH` (4000) bounds it regardless, so a field that loses its own cap later can never turn a save into a slow request.
+
+**Non-blocking in the sense that matters**: a hit only ever raises a flag for review. Nothing is refused, nothing is auto-actioned, and the vendor's save succeeds either way — the same detect-and-surface stance the compliance framework takes. What an admin does once a flag is confirmed is deliberately not built yet.
+
+## Light-only, enforced (2026-09-10)
+
+Both dashboards are light-only by product decision. They were not actually light-only.
+
+**Tailwind v4's `dark:` variant defaults to the `prefers-color-scheme: dark` MEDIA QUERY**, not a class — and neither app defined `@custom-variant dark`. The vendored shadcn components ship `dark:` utilities as standard (19 occurrences in `packages/ui`, 24 more in the vendor app), so **every one of them fired for any user whose OS was in dark mode**: dark badges, inputs, menus and borders painted on top of a light theme. `next-themes` forcing `light` did nothing about this, because it only controls the `.dark` class, which the media-query variant never consults.
+
+Fixed with one line per app rather than stripping `dark:` out of two dozen vendored files a future `shadcn add` would repopulate:
+
+```css
+@custom-variant dark (&:where(.dark, .dark *));
+```
+
+Nothing anywhere adds `.dark` (grep-verified: no `classList.add`, no theme writer), so every `dark:` utility is now inert.
+
+**`next-themes` removed from `apps/vendor-dashboard`** — provider, `components/themes/*`, the navbar `ThemeToggle`, and the dependency. It was configured `forcedTheme="light"`, so its three-option menu (Light / Dark / System) could never change anything; it was a dead control sitting in the navbar. The admin dashboard never used it.
+
+**This is also the fix for the reported Radix `useId` hydration mismatch.** The evidence: both mismatching ids shared a differing *parent* tree id (client `…qitmtb_`, server `…abmrlb_`), so the divergence was in an **ancestor** of `Navbar`, not in the button, the sheet trigger or the theme dropdown that surfaced it. `DashboardLayout`, `VendorNavProvider`, `Sidebar`, `SidebarDesktop` and `SidebarNav` were all read and render identically server and client. That left the provider stack — and `next-themes` was the one provider the broken app had that the working one did not.
+
+**`packages/ui`'s `.dark` palette deleted** (`themes/base.css`) along with its `--color-dark-*` / `--shadow-dark-*` tokens (`primitives/tokens.css`, grep-confirmed used nowhere else). It was a complete, coherent theme that could never activate. A comment in its place says what to reinstate, and that the `@custom-variant` line has to come back with it.
+
+**`sonner.tsx` in the vendor app read `useTheme()` with a `"system"` default** — so a dark-OS user got dark toasts. Pinned to `theme="light"`, matching what the admin app already did.
+
+### Buttons had no pointer cursor, anywhere
+
+Tailwind v4's preflight no longer leaves `<button>` with the browser's pointer cursor, and none of the three Button components added it back — so every button in both dashboards showed an arrow. `cursor-pointer` added to the base class in `packages/ui/src/components/button.tsx` and each app's local `components/ui/button.tsx`, which covers every `<Button>` at once. No `disabled:cursor-not-allowed` alongside it: `disabled:pointer-events-none` is already in the base, so a disabled cursor rule could never apply.
+
+Raw `<button>` elements do not inherit that, so they were swept individually: the profile story toggle and tag chips, the opening-hours open/closed segments, the map search clear + result rows, the outlet filter clear, the payout review actions, the proof-sheet trigger, and the bank-verification mode buttons — where the already-active option got `cursor-default` instead, since a pointer there promises an action that does nothing.
+
+## Food-tag catalog — reachability fix, city-tier hole, and the "Other" decision (2026-09-10)
+
+### The feature was already built but unreachable
+
+Everything asked for here shipped in the food-taxonomy pass: a GLOBAL admin creates (`createFoodTag`), edits (`updateFoodTag`) and activates/deactivates (`setFoodTagStatus`) catalog entries; a country admin switches an entry on or off for their market (`setFoodTagCountryAvailability`); and every one of those writes an audit row (`cuisine.created` / `.updated` / `.status_changed`, `cuisine_country.enabled` / `.disabled`, and the `dietary_tag*` equivalents).
+
+What was missing was the **seed**. `settings:food_tags:read` / `:write` were added to `permissions.data.ts` and both role pools, but only the *vendor* seed had been re-run. Running `seedAdmin` inserted them and `syncSuperAdminPermissions` reported **2 permissions granted** to the existing super admin — confirming the Food Tags pages had been returning a redirect for everyone. A permission added to seed data is not live until `pnpm db:seed` runs; that is what makes the sync step in `seedAdmin` load-bearing rather than decorative.
+
+### A real authorization hole: city-tier admins could set country-wide policy
+
+`buildScopeContext` folds a CITY scope's own `countryId` into `countryIds` — deliberately, so city-scoped *reads* stay filtered to their country's data. The side effect is that **a city admin is indistinguishable from a country admin by `countryIds` alone**, and `vendor_ops` (which holds `settings:food_tags:write`) can be CITY-scoped. So a Nairobi-only admin could have decided what cuisines all of Kenya offers.
+
+`AdminScopeContext` gained an optional **`tier`** (`GLOBAL` / `COUNTRY` / `CITY`), computed in `buildScopeContext` with the same definition the frontend's `getScopeTier` already used — a country tier requires an actual `COUNTRY` scope row, not one inherited from a city. New `assertCountryPolicyScope` refuses `CITY` on the availability toggle, and `FoodTagsCatalog` stops rendering the switch for them rather than render-then-403.
+
+`tier` is optional so the handful of hand-built contexts (system jobs, unit tests) need no change; absent reads as "not city tier", which is correct for every one of them. **Note for future work**: `assignVendorTypeToCountry` / `removeVendorTypeFromCountry` have the identical shape and the identical hole — they were left alone this pass because they were not in scope, but they should gate on `tier` too.
+
+### A vendor-specific "Other, describe it" — deliberately NOT added
+
+Checked before answering, since it would have been a schema change. **No major delivery platform has it.** Uber Eats, DoorDash, Bolt Food, Deliveroo and Grubhub all assign a store a category from a fixed, platform-owned list; none offers a free-text alternative on the merchant profile.
+
+The reason is the reason this catalog exists at all. A controlled vocabulary is what customer filters, search facets and cross-vendor analytics run on. "Other: Ethiopian-Korean fusion" is invisible to every one of them, and it recreates exactly the `specialties String[]` problem the taxonomy replaced one pass earlier — with the added cost that it would render publicly, so it would need its own profanity screening, its own moderation queue and its own review status.
+
+The underlying need is real, though, and the platforms answer it a different way: a **suggestion channel**, not a profile field. The right shape here is the "request a tag" flow already noted as deferred — a vendor (or a country admin) proposes an entry, a global admin promotes it into the catalog or declines it, and until then nothing appears on the public profile. That keeps the vocabulary controlled while giving the vendor a route. Not built; it needs its own model and queue.
+
+## Catalog IA merge, Outlets promoted, bulk availability, inspections fix (2026-09-10)
+
+Four decisions were put to the user before implementing; all four recommendations were taken.
+
+### Dietary tags stay admin-managed — no vendor creation
+
+Same answer as the "Other" free-text field, and for a stronger reason. A dietary tag is a **safety claim**, not a description: halal, gluten-free, nut-free. A customer with a nut allergy filters on "Nut-free"; a vendor-written "no nuts (mostly)" is invisible to that filter and is an unauditable liability. Uber Eats, Deliveroo and DoorDash all own their allergen/dietary vocabulary for exactly this reason.
+
+### Sidebar: "Vendor Categories" + "Food Tags" merged into one "Catalog" section
+
+They were two top-level sections doing the identical job — a global catalog an ops admin owns, with per-country enablement a country admin controls. Now one section: Vendor categories · Cuisines · Dietary tags · Adoption. This **removes** a top-level entry rather than adding one, and no route changed.
+
+Still deliberately not nested under Countries: that section is gated `requiresGlobalTier + SETTINGS_GEOGRAPHY_WRITE`, which the country-scoped `vendor_ops` admins who actually curate these lists do not hold.
+
+### Outlets promoted to a top-level section, Inspections under it
+
+`/vendors/outlets` → **`/outlets`**, `/vendors/inspections` → **`/outlets/inspections`**, `/vendors/outlets/[id]` → `/outlets/[outletId]`.
+
+An outlet is a full domain here, not a vendor sub-list: its own detail page, documents, moderation, clearance, inspections, go-live status and location. Ops teams work outlet-first, which is why DoorDash and Uber Eats internal tooling is store-centric — and the Vendors section had grown to seven items. Inspections sits *under* Outlets rather than beside it, because an inspection is entirely about an outlet.
+
+Old paths are **thin redirects**, not deletions — same convention as `/vendors/revenue` → `/finance/vendors`. The list redirect preserves the query string, since the vendor-account page links in with `?vendor=`. Every inbound link was rewritten; the API paths (`/admin/v1/vendors/outlets`) are untouched, since only app routes moved. `SidebarNav`'s `isItemActive` gained the "`/outlets` is a prefix of its own sibling" case that `/countries` and `/vendor-categories` already needed.
+
+### `/vendors/inspections` "not working" — diagnosed, three real defects
+
+The endpoint, controller, service and route ordering were all correct. **The database has zero inspections** (verified: 1 outlet, 3 vendor accounts, 0 inspections), and the page defaults to the *Scheduled* tab — so it rendered an empty table with no explanation. Three things made that read as broken rather than empty:
+
+1. **`.catch(() => null)` swallowed every failure.** A 403 or backend error rendered identically to "no inspections". It now says so explicitly, the same fix the payout-accounts search got.
+2. **The empty state said nothing useful.** It now distinguishes "nothing in *this tab*, there are N scheduled / M in progress / K failed elsewhere — switch tabs" from "nothing has ever been scheduled", and in the latter case points at where scheduling actually happens (an outlet's own page, under Premises inspection) with a link to browse outlets. The counts come from the whole scope, not the current tab, which is what makes that possible.
+3. **No entry point.** Scheduling only exists on an outlet's detail page, so an ops person landing on the queue had nowhere to go. The empty state now names that path.
+
+### Grouping per vendor
+
+`listInspections` gained a `vendorId` filter, layered **on top of** the scope filter, never instead of it — a vendorId from another country still resolves to zero rows. Both `/outlets` and `/outlets/inspections` now show a "showing one vendor only · clear filter" banner, and the vendor account page links into both with the vendor pre-selected (Inspections → and Moderation →).
+
+### Food-tag catalogs: pagination, real filtering, and one bulk switch
+
+- **Server-side pagination**, 10 per page, on both tables (`page` / `pageSize`, `total` / `totalPages`). `activeTotal` and `countryEnabledCount` are counted against the **whole catalog, not the page** — the bulk switch has to know whether every active entry is already on, and a page-local count would flip it the moment someone typed in the search box.
+- **Search + status + availability filters** through the shared `TableFilterBar`. Availability (`Offered in X` / `Not offered`) is a predicate on the per-country *join*, not a column, so it is expressed as a relation filter and only offered once a country is in view.
+- **Country lock confirmed, not just assumed**: `getFilterableCountries` returns `showFilter: isGlobal && count > 1`, so a Kenyan admin never sees a country picker, and the backend resolves their own country and scope-checks any explicit id. They cannot look at or change another market.
+- **`setAllFoodTagsForCountry`** — "offer everything in Kenya" as one shadcn `Switch`, confirmed by an AlertDialog that names the number moving. Only **ACTIVE** entries are ever switched on, matching the per-row rule: a country cannot opt into vocabulary suspended platform-wide, so "offer everything" never resurrects an entry an admin deliberately withdrew. Soft-disabled links are **reactivated** rather than recreated, so whoever first enabled an entry survives a bulk pass. **One audit row for the whole action** (`cuisine_country.bulk_enabled` / `_disabled`, entity = the country, metadata carries the count) — an admin pressed one switch, and thirty near-identical rows would bury the decision.
+- The catalog page also stopped swallowing its fetch failure, same fix as the inspections page.
+
+### `TableFilterBar` gained a generic `extraFilters` prop
+
+The component already backed 25 pages, but its combo fields were hardcoded (country / category / docType), which is why each new filter kind meant a new prop trio. It now also accepts `extraFilters: FilterField[]` — `{ name, label, options, allLabel?, defaultValue?, icon? }` — held in one `Record<string, string>` of state so adding a filter is a config entry, never a component change.
+
+**Every existing named prop is untouched**, so none of the 25 call sites changed. The food-tag availability filter is the first user of the generic path, and everything new should use it. A full refactor to generic-only was considered and rejected: it would touch all 25 pages and risk breaking filters that currently work.
+
+**`FilterField.icon` is a NAME, not a component — corrected 2026-09-10.** As first shipped it was `ComponentType`, and `FoodTagsCatalog` passed `icon: Store`. That is a server component handing a component reference to a client component, so it crossed the RSC boundary as JSON and threw at runtime on every visit to Cuisines and Dietary tags: *"Only plain objects can be passed to Client Components"*, followed by *"Functions cannot be passed directly to Client Components"*. Typechecking could never catch it — the types line up perfectly, the boundary is what rejects it. Now `icon?: FilterIconName`, a string key into a `FILTER_ICONS` record that lives inside `TableFilterBar` where the components already are. `sortOptions.icon` had used string keys (`"az"` / `"updown"`) from the start, which is why it never had this problem — the generic field should have copied that and didn't. **Rule for this component and any other config-object prop written server-side: only JSON-serializable values, and name anything that isn't.**
+
+### A real authorization hole closed alongside
+
+City-tier admins could set country-wide food-tag availability — `buildScopeContext` folds a CITY scope's own `countryId` into `countryIds` (deliberately, so city-scoped reads stay filtered), which makes a city admin indistinguishable from a country admin to any check reading only `countryIds`. `AdminScopeContext` gained an optional **`tier`**, computed with the same definition the frontend's `getScopeTier` already used, and `assertCountryPolicyScope` refuses `CITY` on both the per-row and bulk availability actions. The UI hides the switches for them rather than render-then-403.
+
+**Still open, same shape**: `assignVendorTypeToCountry` / `removeVendorTypeFromCountry` have the identical hole and should gate on `tier` too.
+
+## Work-queue "All" tab, the ERP outlet map, catalog adoption, one searchable select (2026-09-10)
+
+### The "All" tab was unreachable on two pages — one defect, two symptoms
+
+Reported as "I can't fetch or filter outlets or inspections, and selecting Kenya shows no outlets". Both pages built their tab links as `if (value) qp.set("status", value)`, so the **All tab's href omitted the param entirely** — and the page then read `params.status ?? "FLAGGED"` (outlets) / `?? "SCHEDULED"` (inspections). An absent param is indistinguishable from a first visit, so the work-queue default was re-applied the instant All was clicked. All could never be selected, and since the only outlet in the database is `AUTO_APPROVED`, the default Flagged queue was legitimately empty however the country filter was set.
+
+Fixed by making the tab explicit rather than absent: `{ value: "all" }`, `statusTab = params.status ?? "FLAGGED"`, `status = statusTab === "all" ? "" : statusTab`. The default now only applies on first load and never overrides a deliberate choice. Both pages also grew a single `tabHref(value)` helper — the href was previously rebuilt inline in the tab loop, which is how the two fell out of step with the page's own default in the first place.
+
+**Empty states now distinguish three cases**, because "no rows" was doing the work of all three: a failed fetch (its own destructive card, the same fix `/finance/payout-accounts` and the inspections page already got), nothing in *this* tab while other tabs have rows (names the counts and offers View all), and nothing anywhere in scope. Counts come from the whole scope rather than the page, which is what makes that distinction possible. `/outlets` had been swallowing fetch failures with `.catch(() => null)` into an indistinguishable "No outlets to show".
+
+This is the same defect class as the payout-accounts search: **a work-queue default is right, and an escape hatch out of it has to be reachable.** Any new status-tab page should emit an explicit value for its All tab.
+
+### `/outlets/[outletId]` — the map, and why the data comes through the outlet response
+
+The admin outlet detail page had an `EmptyState` reading "Map coming soon". It now shows the outlet's pin inside its city's operational geography, the ERP counterpart to what the vendor sees while placing it.
+
+**The coverage is folded into `getOutletForAdmin`, not exposed as its own endpoint.** The city-boundary and zone routes are gated on `settings:geography:read` / `settings:zones:read`, which the `vendor_ops` admins who actually moderate outlets do not hold — a map behind those gates would never render for the people who need it. Reading it inside the outlet response reuses `vendors:outlets:read`, already checked, and the payload is the same read-only geometry the vendor is shown for their own outlet. New `AdminOutletCoverage` / `AdminCoverageZone` (`packages/types/src/domain/geography.ts`): the city's boundary + centroid, its ACTIVE zones, and the pin's `OutletPlacement`. The geography read is wrapped in its own `.catch` — a boundary problem must never cost an admin the moderation page.
+
+Three deliberate choices:
+- **The pin is re-resolved** with `resolveCapabilitiesForPoint`, not read from `Outlet.zoneId`. The map draws the polygons, so the verdict has to be computed against those same polygons or the two can disagree on screen. `placementZoneId` comes back so the map can outline the zone the pin landed in without matching on a name an admin can rename.
+- **Zones are shaded by `ZoneLevel`, not by the vendor-facing placement status.** This is the internal audience, and `components/cities/geography/zone-meta.ts` is already the one place level presentation lives — so the outlet map and the city geography workspace use identical colours. `vendor.placement.ts`'s `zoneCoverageStatus` still rides along on each zone, which is what keeps the vendor's map and this one from ever claiming different things about the same area.
+- **mapbox-gl is loaded on demand** (`OutletCoverageMapLazy`, `next/dynamic` + `ssr: false`). This page is opened to moderate an outlet far more often than to look at where it sits, and ~1.8 MB parsed on every visit is the same mistake the vendor outlet forms had.
+
+`OutletLocationCard` also states the zone at the pin (level + operational status + what that level means), the four structural capabilities of the area, and two warnings that were previously invisible: **a pin outside the city boundary** (an outlet created before the boundary was redrawn — it cannot serve customers from there) and **a city with no boundary drawn at all** (nothing is being rejected on location, which is the honest reading). Capability rows describe the *area*, not whether the outlet is live — that stays the go-live panel's job higher up the page.
+
+### Catalog adoption now covers all three catalogs, country-scoped and globally
+
+Answering "should the adoption page be country-scoped and globally-scoped too": **it already was** — `getFilterableCountries` gives global admins a picker defaulting to the aggregate and resolves a country-scoped admin's own country server-side. `/vendor-categories/adoption` is now "Catalog adoption" and covers vendor categories, cuisines and dietary tags on one page, since after the Catalog IA merge they answer one question: of the vocabulary we curate, what did vendors actually choose. The two halves are permission-gated independently (`SETTINGS_VENDOR_TYPES_READ` / `SETTINGS_FOOD_TAGS_READ`), so holding one shows that half rather than an error.
+
+**`getFoodTagAdoption` is deliberately not shaped like `getVendorTypeAdoption`.** A vendor has exactly one `vendorTypeId`, so that function can treat its counts as a partition and hand back percentages of a whole plus an "others" remainder. A vendor picks up to five cuisines and eight dietary tags, so the same arithmetic yields shares summing to several hundred percent. Here the denominator is stated explicitly — **share of vendor profiles**, not of selections — there is no "others" bucket because there is no whole to take a remainder of, and the panel header says so on screen. Scope is applied through `vendorProfile.vendorAccount.countryId`, never re-derived.
+
+**Zero-adoption entries are returned, not filtered out.** "We offer this in Kenya and nobody has picked it" is the finding an ops admin came for; dropping those rows hides exactly that. So the panel reports *offered here* / *picked at least once* / *offered, never picked*, and marks a row `Not offered` when a country is in view. Route: `GET /admin/v1/food-tags/:kind/adoption?countryId=`, same READ permission as the catalog list, registered before `/:kind/:tagRef` for the same ordering reason as the `countries` route.
+
+**Cuisine / dietary-tag detail pages listing adopting vendors — recommended, not built.** Each adoption row links into its catalog page instead. A real detail page needs one backend change that is worth doing deliberately rather than in passing: a `cuisineId` / `dietaryTagId` filter on `listVendorAccounts` (a `vendorProfile.cuisines.some` predicate layered on top of the existing scope filter, plus its `buildVendorAccountsWhere` sibling so the CSV export can't drift). Once that exists the page is the `/vendor-categories/[slug]/vendors` shape verbatim. Deliberately deferred — the metrics were the stated minimum bar and they are now on the page.
+
+**Server-side pagination on both catalogs — verified, not rebuilt.** `listFoodTags` really does `skip`/`take` with `total`/`totalPages`, and `FoodTagsCatalog` renders `TablePagination` against it; with 23 cuisines at 10 per page that is 3 pages. `activeTotal` / `countryEnabledCount` are still counted against the whole catalog, which is what keeps the "offer everything" switch honest while a search is active.
+
+### One searchable select, everywhere
+
+Three near-identical Command+Popover comboboxes existed (`TableFilterBar`'s country/category/docType fields, `RevenueCountrySelect`) while every other country picker was a plain `<Select>` — including `ScopeSelector`'s, which lists **up to 193 countries** as a scroll. Extracted `components/shared/SearchableSelect.tsx` as the single implementation: options + value + onChange, an optional "all" row, optional icon, and a `loading` state for an in-flight navigation. Deliberately unaware of URLs and forms, which is why the same component now serves a filter bar that pushes a query string, a dialog holding local state, and a form field.
+
+Converted: `TableFilterBar` (its `SearchableComboField` is now a thin wrapper — the hidden input still carries the value into the form submit, since a popover trigger is a button and can't), `RevenueCountrySelect`, `VendorCategoryCountrySelect`, `VendorCategoryCountryBreakdown`'s assign-to-country dialog, and `ScopeSelector`'s country **and** city pickers (the city one because it sits in the same row — one searchable control beside one that isn't reads as broken, and a large country's city list is just as long). Popover open state moved inside the primitive, so four `useState`s in `TableFilterBar` went away. **No call site of `TableFilterBar` changed** — all 25 pages keep their existing props.
+
+A plain `<Select>` is now correct only for a genuinely short fixed list: a status, a direction, a policy, an admin picker. Those were left alone.
+
+### Vendor-dashboard hydration mismatch — the actual cause, and an honest fix
+
+**The earlier attribution to next-themes was wrong** and the mismatch survived removing it. Decoded properly this time: React's `pushTreeContext` (`react-dom` 19.2) computes `id = (1 << length) | (index << baseLength) | baseIdWithLeadingBit`, so **deeper levels occupy the high bits and therefore the front of the base-32 string**. The two reported ids — server `radix-_R_2qitnlb_`, client `radix-_R_mitnlb_` — share the `itnlb` tail, so every shallow ancestor matches, and the server carries one extra multi-child level near the leaf. Radix's `useId` wraps React's in a `useState`, so that difference lands directly on the trigger's `aria-controls`.
+
+Nothing in app code above `MobileSidebar` renders conditionally (traced the whole path: root layout, `Providers`, the dashboard layout, `VendorNavProvider`, `Navbar`), so the extra level is a framework/provider wrapper we don't own. Rather than guess at it a second time, `MobileSidebar` now **stops depending on the two renders agreeing**: the burger renders immediately as a plain button, and the Radix Sheet behind it mounts client-side (`MobileSidebarSheet`, `next/dynamic` + `ssr: false`). The sheet's server HTML was never useful — it is hidden above `lg`, and a navigation drawer cannot open before its JavaScript loads — so nothing is lost, there is no pop-in and no layout shift.
+
+**Recorded honestly as a containment, not a root-cause fix.** If another SSR'd Radix trigger reports the same mismatch it is the same wrapper-level cause; React logs only the first one it finds, so this being the only report is not proof it is the only instance.
+
+## Vendor profile moderation detail page + the menu (2026-09-11)
+
+### `/vendors/profiles/[vendorId]` — the page, and what was already there
+
+No redundant page existed, and the backend was already built and unused: `getVendorProfileForAdmin` was routed at `GET /admin/v1/vendors/profiles/:vendorId` with nothing calling it. Separately, `getVendorAccount` fetches `vendorProfile: true` but the account detail page renders none of it — dead payload, not a competing view.
+
+**"Send back for revision" was already the mechanism, only the framing was wrong.** Rejecting has always required a reason, notified the vendor with it, unpublished, and — the part that matters — the vendor's next edit to a screened field clears the reason and re-screens, so it re-enters the queue with no admin action. Calling that "rejected" told a vendor their profile was finished when it was actually waiting on them. Renamed rather than duplicated into a second state, the same one-mechanism-two-framings choice document review already made. No backend behaviour changed.
+
+**The reason box is pre-filled from the flags** (`buildSuggestedReason`, `components/vendors/profile-flag-meta.ts`) and the moderator edits it before sending. A flag says `POSSIBLE_IMPERSONATION`; a vendor needs "your display name reads as an existing brand, please use your own". That file is now the single place a profile flag is put into words for either audience, so the queue, the detail page and the message the vendor receives can never describe the same finding differently.
+
+**This is the first admin surface anywhere that shows the logo and cover.** `/vendors/profiles` could only ever moderate flagged *text*, so an inappropriate image had nothing to act on — a gap CLAUDE.md had recorded since the profile-media pass. `getVendorProfileForAdmin` now returns signed media URLs, its cuisines and dietary tags, and the resolved reviewer name. It signs through `signProfileMediaUrls`, newly exported from `vendor.profile.service.ts` rather than copied, so admin and vendor degrade identically when an object is unreadable. Admin importing vendor is fine; the ban is the other direction. The page is `cache: "no-store"` because those URLs are short-lived and a cached page would hand out dead images.
+
+Layout is evidence left, decision right: `VendorProfilePreview` renders the storefront card a customer would meet, with each flagged field outlined **where it sits** so the finding and the text are never a scroll apart; `VendorProfileReviewPanel` carries status, findings, the message already sent, a history rail and the two buttons.
+
+**List page**: `PAGE_SIZE` 20 → **10** (it is a work queue, like `/finance/payout-accounts`), Actions and Updated columns removed, replaced by one visible **View** button. `VendorProfileActions.tsx` is deleted rather than left orphaned — moderating from a row meant deciding without ever seeing the profile, including images the row cannot show. The list now only needs `VENDORS_PROFILES_READ`; the `MODERATE` check moved to where the buttons are.
+
+### Menus belong to outlets — and the answer to "how do multi-outlet vendors author one"
+
+Asked directly, answered from the platforms rather than from preference. Uber Eats attaches a menu to a **store** and DoorDash's Menu Manager is per store, because price, availability and out-of-stock all vary by location. The schema had already committed to this: `Meal.outletId` was a required FK with `@@unique([outletId, name])`.
+
+The question was how a vendor with several outlets authors one dish, and the scalable answer — the one the industry actually runs — is a **vendor-level catalog with per-outlet overrides**. Deliveroo assigns one menu to many sites with site-level price overrides; Toast, Square and Olo hold a master item catalog and override price and availability per location; the per-store menu Uber Eats and DoorDash expose is a projection of that. Duplicating the whole dish per outlet was the alternative and was rejected because it makes an intentional local price indistinguishable from drift, multiplies every future variant and addon by the outlet count, and leaves "how is this dish doing across the business" unanswerable since no single row IS the dish.
+
+Migration `20260910160000_add_menu_catalog`. Safe destructively — `Meal`, `MealCuisine`, `MealPlan` and `MealPlanMeal` were all verified empty against the dev database first, and nothing referenced them anywhere.
+
+- **`MenuItem`** — the vendor's catalog entry and the dish itself: name, description, portion size, photos, cuisines, dietary tags, base price. The thing a variant, addon or discount will hang off.
+- **`Meal`** — one dish at one outlet, carrying **only** what genuinely varies by location: `priceMinorOverride` (null means "use the catalog price", which is precisely the distinction duplicated rows could not express), `isAvailable` (86-ing: off today, back tomorrow), and the platform `adminStatus`.
+- **`MenuSection`** — Starters / Mains / Drinks. Vendor-owned rather than outlet-owned so one business presents one menu structure everywhere; which *items* appear at an outlet is the `Meal` rows' job. `position` is authored, never alphabetical, because menus are ordered by intent.
+- **`MenuItemCuisine` / `MenuItemDietaryTag`** replace `MealCuisine` — a cuisine describes the dish, not one branch's copy of it. `onDelete: Restrict` on the catalog side, same rule as `VendorProfileCuisine`: a tag vendors are using must not vanish and silently rewrite what a dish claims.
+
+**Prices are integer minor units.** `Meal.price Float` is gone; `MenuItem.basePriceMinor` and `MealPlan.priceMinor` are `Int`. Float cannot hold 0.10 exactly and every payment provider takes an integer anyway. The scale comes from the vendor's country currency via `Currency.minorUnitDigits` and **is never assumed to be 2** — KES and USD use 2, UGX and JPY use 0, KWD uses 3. `lib/menu/money.ts` in the vendor dashboard is the only place in the entire stack where a price is a decimal at all, and it converts using the scale the backend handed it.
+
+**Soft-deleting, not deleting, a de-selected outlet row**: a `Meal` id is referenced by `MealPlanMeal`, so wiping and recreating the outlet rows on every save would take the vendor's meal plans with them. `updateMenuItem` reconciles instead.
+
+**Storage: `meal-images/<vendorId>/<uuid>.<ext>`**, keyed on the vendor account per explicit direction and deliberately **not** on the outlet — a dish is authored once and sold at any number of outlets, so an outlet segment would force the same photo to be re-uploaded per branch. No kind segment either, unlike profile media: main image and gallery are the same kind of object here, and which one a key currently serves as is a property of the row, so promoting a gallery shot to hero is a column change and never a copy. The `vendorId` segment is load-bearing — `assertOwnedMealImageKey` is what stops the discard endpoint being a delete-anything primitive, including the prefix-collision case a `startsWith` check would allow.
+
+**The gallery lives here.** Food photography, so none of the premises-disclosure reasoning that removed the profile gallery applies. Capped at 6, and **the first photo is the hero** — stated on the tile rather than hidden behind a separate "main image" control, because ordering and choosing are one decision (as Uber Eats, Square and Toast all present it) and two fields would let a vendor pick a hero that is not in the gallery, after which the cleanup pass could orphan an image the meal still renders.
+
+**Moderation mirrors outlets exactly**: `MenuItem` carries `reviewStatus` / `flagReasons` / `rejectionReason`, screened through the shared `ContentModerationProvider` on name and description. Non-blocking — a hit raises a flag and never refuses the save. Re-screening happens only when a screened field actually changed, so a price or photo edit never disturbs a status an admin granted, and any edit that does re-screen clears a prior rejection for a fresh look. `MealReviewNotice` tells the vendor why a dish is not selling and that editing puts it straight back in review, since otherwise they would have a dish that exists, looks fine, and quietly never reaches a customer.
+
+**Backend**: `vendor.menu.ts` (pure rules, 27 unit tests — pricing, key ownership, image sets, outlet selection), `vendor.menu.service.ts`, `vendor.menu.controller.ts`, routes at `/vendor/v1/menu/*` gated `requireVendorState("ACTIVE")` — **authoring, not go-live**, so a vendor builds their menu while banking is still being verified, which is the whole reason meals moved out of the operational tier. `resolveSelectedFoodTags` gained an optional caps parameter rather than a second copy: a meal is tagged more tightly than a whole business, but the availability rule is identical.
+
+**Vendor dashboard**: `/meals` (SSR list, photo-led cards, server-paginated), `/meals/create`, `/meals/[itemId]`. `MealForm` uses zod (`lib/validations/meal.ts`) and follows the profile form's shape deliberately — the `Section`/`Field` primitives were extracted out of `ProfileForm` into `components/dashboard/form/` so the two are the same by construction rather than by imitation. **The outlet picker only renders when there is more than one outlet**; a single-location vendor has it pre-selected and never sees a control with one option. An empty selection is an error, never a silent "all": a dish sold nowhere is invisible, and a vendor who saved one would reasonably think the save had failed.
+
+### Verification
+
+Three typechecks clean, 353 backend tests pass (27 new). The migration applied against the dev database, and the whole service was then exercised end to end against it — every Prisma query in this feature has actually run, not just typechecked:
+
+- **Currency resolves from the country, not a constant.** Kenya returns `{ code: "KES", symbol: "KSh", minorUnitDigits: 2 }`. Note the symbol comes from the `Currency` reference row, not `Country.currencySymbol`, which holds the less specific `"Sh"` — worth knowing before anyone "fixes" the precedence.
+- **Create** wrote the item, its cuisine and dietary joins, and one `Meal` row per selected outlet in a single transaction.
+- **Update** changed the base price, cleared the section back to null, cleared both tag sets, and wrote a per-outlet override of 99000 against a base of 130000 — the two prices coexisting is the whole point of the split.
+- **86-ing** flipped one outlet's `isAvailable` without touching the dish.
+- **Search** and **filter-by-outlet** both returned the row, the second proving the relation filter on the `Meal` join works.
+- **Screening flags without refusing**: a deliberately profane name saved successfully as `FLAGGED` with `INAPPROPRIATE_NAME`, which is the non-blocking behaviour the rest of the platform uses.
+
+The smoke test cleaned up after itself; the database was left exactly as found.
+
+## Meal moderation — closing the loop the menu opened (2026-09-11)
+
+Migration `20260911100000_add_meal_moderation`.
+
+**Why this came next rather than variants or addons.** The menu shipped with `MenuItem.reviewStatus` / `flagReasons` / `rejectionReason` and a vendor-facing notice reading *"someone will look at it shortly"* — with no queue behind it. A flag with no reviewer is worse than no flag: the dish is silently unsellable and the vendor is told to wait for something that cannot happen. That was a promise the platform could not keep, made by the previous pass, so it got fixed before anything new was built on top.
+
+**Two independent axes, same as Outlet** — `reviewStatus` (a verdict about the words: approve / send back for revision) and `adminStatus` (the operational call: suspend / ban / reinstate). Sending a meal back does **not** suspend it, and suspending one does **not** mark it rejected; "is this description acceptable" and "may this dish be sold at all" have different answers and different remedies.
+
+**Deliberately as simple as outlet and profile moderation** — no claim / escalate / reassign. Two admins clearing the same food photo is a non-event, not a race with consequences; that machinery stays reserved for payout decisions, where money moves.
+
+**"Send back for revision", not "reject"**, for the third time in this codebase and for the same reason: the vendor edits, screening re-runs, and the dish returns to the queue with no admin action. Verified live — a send-back followed by a vendor edit to the name cleared `rejectionReason`, re-screened clean, and flipped `MANUALLY_REJECTED` back to `AUTO_APPROVED` automatically.
+
+New permissions `VENDORS_MEALS_READ` / `VENDORS_MEALS_MODERATE` (`vendor_ops` pool, plus `super_admin` via `ALL_PERMISSION_KEYS`); running `seedAdmin` granted exactly 2 to the existing super admin, confirming the surface was unreachable before. New `VendorNotificationType.MEAL_REJECTED` / `MEAL_APPROVED` — named `MEAL_*` rather than `MENU_ITEM_*` because "meal" is the word the vendor sees throughout their dashboard; the model name is an internal detail.
+
+**Currency travels with the row.** A price is meaningless without it and this queue spans countries, so each row carries its own resolved currency rather than the page assuming one. Batched into a single read over the distinct codes on the page — never one query per row — and `minorUnitDigits` is read, not assumed.
+
+Backend `admin.menuItem.service.ts` (list with scope-aware filters + whole-scope counts, detail with signed images, approve, send-back, status, CSV export, plus `hasFlaggedMealsForCountries` ready for a sidebar dot), routes on `vendorRouter` at `/admin/v1/vendors/meals/*`. Frontend `/vendors/meals` (status tabs with an explicit `status=all`, stat cards, filters, one visible **View** button) and `/vendors/meals/[itemId]` (photo-led, because half of what there is to judge is the image — exactly what a table row cannot show, and why moderating from the queue was never the right shape).
+
+**Verified end to end against the live database**: a deliberately profane meal saved as `FLAGGED`, appeared in the admin queue with correct counts and KES currency, 404'd (not 403'd) for an out-of-country admin, was sent back with the vendor notified verbatim, self-healed on the vendor's edit, then took an approve and a suspend simultaneously to prove the two axes are independent. Audit trail read `menu_item.sent_back → menu_item.approved → menu_item.suspended`. Cleaned up after itself.
+
+### Deliberately not done
+- **Variants, addons, discounts.** Named as next by the user. They hang off `MenuItem`, which is the reason the catalog split happened now rather than later.
+- **Meal plans** still reference `Meal` and are otherwise untouched; `MealPlan.priceMinor` moved to minor units alongside everything else, and nothing reads it yet.

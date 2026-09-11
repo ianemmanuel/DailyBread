@@ -132,6 +132,10 @@ export const AdminPermissions = {
   // like VENDORS_ACCOUNTS_SUSPEND/REINSTATE/BAN) — a single outlet action
   // is lower-stakes than a whole-account action, same simplicity tier as
   // VENDORS_APPEALS_MANAGE/VENDORS_PROFILES_MODERATE.
+  //* Vendor-authored menu content. Separate from outlets because a dish is
+  //* vendor-owned catalog, not a location — see MenuItem vs Meal.
+  VENDORS_MEALS_READ      : "vendors:meals:read",
+  VENDORS_MEALS_MODERATE  : "vendors:meals:moderate",
   VENDORS_OUTLETS_READ    : "vendors:outlets:read",
   VENDORS_OUTLETS_MODERATE: "vendors:outlets:moderate",
   // Schedule and conduct physical premises inspections of an outlet (the
@@ -205,6 +209,20 @@ export const AdminPermissions = {
   SETTINGS_DOCUMENTS_WRITE   : "settings:documents:write",
   SETTINGS_VENDOR_TYPES_READ : "settings:vendor_types:read",
   SETTINGS_VENDOR_TYPES_WRITE: "settings:vendor_types:write",
+  //* Cuisines + dietary tags — the food taxonomy a vendor picks from. ONE
+  //* pair covers both catalogs: they are created, suspended and enabled per
+  //* country by the same admin in the same screen, so splitting them would be
+  //* two permissions that are always granted together.
+  //*
+  //* WRITE means different things at different scopes, and the service (not
+  //* the route) is what separates them: creating or editing a catalog entry
+  //* requires GLOBAL scope (assertGlobalScope), while switching an entry on or
+  //* off for a country requires only that the country is in the actor's scope
+  //* (assertCountryInScope). That is what lets a country-scoped vendor_ops
+  //* admin curate their own market without being able to invent new global
+  //* vocabulary — exactly the split VendorType already implements.
+  SETTINGS_FOOD_TAGS_READ    : "settings:food_tags:read",
+  SETTINGS_FOOD_TAGS_WRITE   : "settings:food_tags:write",
   SETTINGS_ACTION_REASONS_WRITE: "settings:action_reasons:write",
 
   // ── Settings — operational zones ─────────────────────────────────────────

@@ -39,20 +39,6 @@ export type ServiceAreaMode =
   | "WAITLIST"
   | "EXCLUDED"
 
-// What resolveServiceMode() returns. EXCLUDED is a terminal error state.
-// WAITLIST is the default when no polygon matches.
-export type ResolvedServiceMode =
-  | "FULL_SERVICE"
-  | "SELF_DELIVERY"
-  | "WAITLIST"
-  | "EXCLUDED"
-
-// Stored on Outlet. Derived from ResolvedServiceMode at creation.
-export type OutletServiceMode =
-  | "FULL_SERVICE"
-  | "SELF_DELIVERY"
-  | "WAITLIST"  // includes unzoned-within-boundary
-
 // ─── Operational zones ────────────────────────────────────────────────────────
 // The Zone model replaces ServiceArea/ServiceAreaMode as the capability
 // container. Mirrors of the Prisma ZoneLevel / ZoneOperationalStatus enums —
