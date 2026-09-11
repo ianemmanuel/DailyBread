@@ -8,6 +8,9 @@ import {
   handleGetVendorPayoutAccountForReview,
   handleFinanceVerifyPayoutAccount,
   handleFinanceRejectPayoutAccount,
+  handleGetPayoutAccountAudit,
+  handleDeactivatePayoutAccount,
+  handleFlagPayoutAccount,
   handleClaimPayoutReview,
   handleReleasePayoutReview,
   handleEscalatePayoutReview,
@@ -47,6 +50,25 @@ financeRouter.post(
   "/payout-accounts/:accountId/reject",
   requirePermission(AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_MANAGE),
   handleFinanceRejectPayoutAccount,
+)
+// Once a verification is final, reject is the wrong tool — it would record a
+// completed verification as having failed. These two replace it: take the
+// account out of service, or ask a senior in-country reviewer to look again
+// without touching the vendor's ability to be paid.
+financeRouter.get(
+  "/payout-accounts/:accountId/audit",
+  requirePermission(AdminPermissions.FINANCE_PAYOUTS_READ),
+  handleGetPayoutAccountAudit,
+)
+financeRouter.post(
+  "/payout-accounts/:accountId/deactivate",
+  requirePermission(AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_MANAGE),
+  handleDeactivatePayoutAccount,
+)
+financeRouter.post(
+  "/payout-accounts/:accountId/flag",
+  requirePermission(AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_MANAGE),
+  handleFlagPayoutAccount,
 )
 
 // Review workflow — claim before deciding, escalate to the open in-country

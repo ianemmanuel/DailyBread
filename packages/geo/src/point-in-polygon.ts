@@ -2,13 +2,12 @@
  * Polygon containment — ray-casting algorithm.
  *
  * Pure functions — no I/O, no side-effects.
- * Used by: outlet creation service, customer address resolution,
- *          vendor dashboard map pre-check.
  *
- * Key design decision: resolveServiceMode() returns WAITLIST (not UNZONED)
- * when a point is inside the city boundary but matches no service area polygon.
- * This means every point has exactly one of four explicit states:
- *   FULL_SERVICE | SELF_DELIVERY | WAITLIST | EXCLUDED
+ * `isPointInServiceArea` is the generic "is this point inside this polygon"
+ * primitive despite its name: Zone matching (capabilities.ts) and the
+ * draw-time overlap checks (polygon.ts) both call it. It predates Zone and
+ * keeps the old name only because renaming it touches every caller for no
+ * behavioural gain.
  */
 
 import type {
@@ -17,8 +16,6 @@ import type {
   GeoJsonMultiPolygon,
   CityBoundary,
   ServiceAreaBoundary,
-  ServiceAreaMode,
-  ResolvedServiceMode,
 } from "./types"
 
 // ─── Core ray-casting ─────────────────────────────────────────────────────────
@@ -74,49 +71,4 @@ export function isPointInServiceArea(point: GeoPoint, boundary: ServiceAreaBound
   return boundary.type === "Polygon"
     ? pointInPolygon(point, boundary)
     : pointInMultiPolygon(point, boundary)
-}
-
-/**
- * Returns true if the point falls inside ANY of the provided service areas.
- */
-export function isPointInAnyServiceArea(
-  point     : GeoPoint,
-  boundaries: ServiceAreaBoundary[],
-): boolean {
-  return boundaries.some(b => isPointInServiceArea(point, b))
-}
-
-/**
- * Resolves the service mode for a point against all service areas.
- *
- * Priority (first definitive match wins):
- *   EXCLUDED     → immediate hard block — do not onboard
- *   FULL_SERVICE → best outcome — return immediately
- *   SELF_DELIVERY beats WAITLIST when both match
- *
- * Default: WAITLIST — returned when the point is inside the city boundary
- * but matches no service area polygon. No UNZONED state exists; anything
- * not explicitly categorised is treated as WAITLIST by policy.
- *
- * The caller is responsible for the city boundary check before calling this.
- */
-export function resolveServiceMode(
-  point       : GeoPoint,
-  serviceAreas: Array<{ mode: string; boundaries: ServiceAreaBoundary }>,
-): ResolvedServiceMode {
-  let best: "SELF_DELIVERY" | "WAITLIST" | null = null
-
-  for (const area of serviceAreas) {
-    if (!isPointInServiceArea(point, area.boundaries)) continue
-
-    const mode = area.mode as ServiceAreaMode
-
-    if (mode === "EXCLUDED")      return "EXCLUDED"
-    if (mode === "FULL_SERVICE")  return "FULL_SERVICE"
-    if (mode === "SELF_DELIVERY") { best = "SELF_DELIVERY"; continue }
-    if (mode === "WAITLIST" && best === null) { best = "WAITLIST" }
-  }
-
-  // No polygon matched → default to WAITLIST (not UNZONED)
-  return best ?? "WAITLIST"
 }

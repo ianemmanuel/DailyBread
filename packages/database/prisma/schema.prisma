@@ -344,6 +344,8 @@ model Country {
   vendors            VendorAccount[]
   vendorApplications VendorApplication[]
   vendorTypes        VendorTypeCountry[]
+  cuisines           CuisineCountry[]
+  dietaryTags        DietaryTagCountry[]
   adminScopes        AdminUserScope[]
 
   //* Finance Phase 1B — a country's financial operating configuration
@@ -424,11 +426,18 @@ model City {
 // is excluded from point resolution entirely.
 //
 // Relationship to the legacy ServiceArea/ServiceAreaMode model below: Zone is
-// its intended replacement. ServiceArea's resolver (resolveServiceMode) is
-// unused dead code today; the migration off it happens in a later stage.
-// DeliveryZone stays as-is for now — it is a distinct courier-capacity layer,
-// not a capability container (a future rename to CourierZone is noted in the
-// review doc, not done here).
+// its replacement, and Outlet has now fully moved across — Outlet.zoneId is
+// the only geography an outlet carries. Outlet.serviceMode / isUnzoned and the
+// OutletServiceArea join were dropped (2026-09-09) because nothing ever wrote
+// them: every outlet sat at the INACTIVE default forever, so any code that had
+// read them would have been reading a lie.
+// ServiceArea itself is NOT dead and stays: DeliveryZone is validated against
+// FULL_SERVICE areas, clearing a city boundary is blocked while any exist, and
+// the country checklist counts them. Folding it into Zone is a real
+// architectural decision about the courier layer, not a cleanup.
+// DeliveryZone likewise stays — a distinct courier-capacity layer, not a
+// capability container (a future rename to CourierZone is noted in the review
+// doc, not done here).
 
 model Zone {
   id         String @id @default(uuid())
@@ -535,8 +544,7 @@ model ServiceArea {
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
-  city    City                @relation(fields: [cityId], references: [id], onDelete: Cascade)
-  outlets OutletServiceArea[]
+  city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
 
   @@unique([cityId, name])
   @@index([cityId])
@@ -596,17 +604,6 @@ model MealPlanBatchZone {
   @@index([deliveryZoneId])
   @@index([cityId])
   @@index([status])
-}
-
-model OutletServiceArea {
-  outletId      String
-  serviceAreaId String
-
-  outlet      Outlet      @relation(fields: [outletId], references: [id], onDelete: Cascade)
-  serviceArea ServiceArea @relation(fields: [serviceAreaId], references: [id], onDelete: Cascade)
-
-  @@id([outletId, serviceAreaId])
-  @@index([serviceAreaId])
 }
 
 //* =========FINANCE FOUNDATION (Phase 1A + 1B)==========
@@ -1270,6 +1267,8 @@ model VendorAccount {
   commissionRateHistory VendorCommissionRateHistory[]
   appeals               VendorAppeal[]
   marketSignals         MarketSignal[]
+  menuSections          MenuSection[]
+  menuItems             MenuItem[]
 
   @@unique([companyRegNumber, countryId])
   @@unique([taxRegistrationNumber, countryId])
@@ -1290,16 +1289,21 @@ model VendorProfile {
   tagline             String?
   description         String?
   story               String?
-  logoUrl             String?
-  coverImageUrl       String?
+  //* R2 storage KEYS, not public URLs — the bucket is private, so every read
+  //* goes out as a short-lived signed URL generated at response time
+  //* (presentVendorProfile). Named ...StorageKey rather than ...Url precisely
+  //* so nobody renders one directly into an <img src>.
+  logoStorageKey      String?
+  coverStorageKey     String?
   publicEmail         String?
   publicPhone         String?
   website             String?
   socialLinks         Json?
-  reservationLink     String?
+  //* No reservationLink and no photo gallery, deliberately — see the note on
+  //* galleryStorageKeys' removal in the 2026-09-10 migration. Both point at a
+  //* physical venue, which a delivery-only marketplace has no reason to
+  //* publish. Uber Eats / DoorDash / Bolt Food carry neither.
   primaryCuisineId    String?
-  specialties         String[]
-  dietaryOptions      String[]
   foundedYear         Int?
   totalReviews        Int       @default(0)
   averageRating       Float     @default(0)
@@ -1308,7 +1312,7 @@ model VendorProfile {
   isCommunityFavorite Boolean   @default(false)
   isPublished         Boolean   @default(false)
   isFeatured          Boolean   @default(false)
-  galleryImages       String[]
+  //* Unused today, kept as-is: no vendor-facing writer and no admin surface.
   videoUrls           String[]
   publishedAt         DateTime?
 
@@ -1343,6 +1347,10 @@ model VendorProfile {
 
   primaryCuisine Cuisine?      @relation(fields: [primaryCuisineId], references: [id])
   vendorAccount  VendorAccount @relation(fields: [vendorAccountId], references: [id], onDelete: Cascade)
+  //* Replaced the free-text specialties[] / dietaryOptions[] columns — see the
+  //* FOOD TAXONOMY block above for why.
+  cuisines       VendorProfileCuisine[]
+  dietaryTags    VendorProfileDietaryTag[]
 
   @@index([vendorAccountId])
   @@index([displayName])
@@ -1585,6 +1593,12 @@ model VendorPayoutAccount {
   countryPaymentMethodId String // points to CountryPaymentMethod (OUTBOUND direction)
   isDefault              Boolean @default(false)
   isActive               Boolean @default(true)
+  //* Admin deactivation trail. Distinct from a rejected verification: this is
+  //* an account that WAS verified and has since been taken out of service, so
+  //* it must not be recorded as a verification failure.
+  deactivatedAt          DateTime?
+  deactivationReason     String?
+  deactivatedById        String?
 
   // Account details — kept flat for query performance.
   // The sensitive banking identifiers (bankCode, accountNumber, swiftCode,
@@ -1715,8 +1729,6 @@ model Outlet {
   deliveryRadius     Float?
   deliveryZones      Json?
   deliveryFee        Float?
-  serviceMode        OutletServiceMode     @default(INACTIVE) // serviceMode is computed at outlet-creation and updated when service areas change.
-  isUnzoned          Boolean               @default(false) // isUnzoned = true means inside city boundary but matched no service area polygon.
   minimumOrder       Float?
   phone              String?
   email              String?
@@ -1762,7 +1774,6 @@ model Outlet {
   documents                OutletDocument[]
   inspections              OutletInspection[]
   operatingHours           OutletOperatingHours[]
-  serviceAreas             OutletServiceArea[]
   inheritedVendorDocuments OutletDocumentInheritance[]
 
   @@unique([vendorId, name])
@@ -1886,23 +1897,128 @@ model OutletDocumentInheritance {
 
 //* ==================MEALS & MENU =============================
 
+//* =========FOOD TAXONOMY=============
+//
+// Two admin-managed catalogs a vendor picks from: what kind of food they serve
+// (Cuisine) and which diets they cater for (DietaryTag). Both follow the
+// VendorType / VendorTypeCountry shape exactly:
+//
+//   global catalog  — created and edited only at GLOBAL scope
+//   <X>Country      — which entries a given country has switched on
+//
+// The point is analysis: a controlled vocabulary can be aggregated across
+// vendors and filtered on by customers; free text cannot. This replaced
+// VendorProfile.specialties / .dietaryOptions, which were exactly that free
+// text. Uber Eats, DoorDash and Bolt Food all use a controlled cuisine
+// taxonomy on a store for the same reason.
+
 model Cuisine {
-  id               String        @id @default(uuid())
-  code             String        @unique
+  id               String         @id @default(uuid())
+  code             String         @unique
+  //* URL identity for the admin detail page, same convention as
+  //* VendorType.slug — regenerated on rename via ensureUniqueSlug.
+  slug             String         @unique
   name             String
   description      String?
-  status           CuisineStatus @default(ACTIVE)
+  status           TaxonomyStatus @default(ACTIVE)
   createdByAdminId String?
   deletedAt        DateTime?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  meals          MealCuisine[]
+  menuItems      MenuItemCuisine[]
   outlets        OutletCuisine[]
+  //* Kept from the original model and still unused: a single "primary"
+  //* category is a real Uber Eats concept, but the vendor form only sets the
+  //* multi-select (vendorProfiles) today. Adopt or drop deliberately.
   primaryVendors VendorProfile[]
+  countries      CuisineCountry[]
+  vendorProfiles VendorProfileCuisine[]
 
   @@index([status])
   @@index([deletedAt])
+}
+
+//* Which cuisines a country has switched on. Mirrors VendorTypeCountry —
+//* including using GeoStatus and soft-disabling rather than deleting, so
+//* re-enabling later restores the same row instead of orphaning history.
+model CuisineCountry {
+  id               String    @id @default(uuid())
+  countryId        String
+  cuisineId        String
+  status           GeoStatus @default(ACTIVE)
+  createdByAdminId String?
+  createdAt        DateTime  @default(now())
+
+  country Country @relation(fields: [countryId], references: [id])
+  cuisine Cuisine @relation(fields: [cuisineId], references: [id])
+
+  @@unique([countryId, cuisineId])
+  @@index([countryId])
+  @@index([cuisineId])
+  @@index([status])
+}
+
+model DietaryTag {
+  id               String         @id @default(uuid())
+  code             String         @unique
+  slug             String         @unique
+  name             String
+  description      String?
+  status           TaxonomyStatus @default(ACTIVE)
+  createdByAdminId String?
+  deletedAt        DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  countries      DietaryTagCountry[]
+  vendorProfiles VendorProfileDietaryTag[]
+  menuItems      MenuItemDietaryTag[]
+
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model DietaryTagCountry {
+  id               String    @id @default(uuid())
+  countryId        String
+  dietaryTagId     String
+  status           GeoStatus @default(ACTIVE)
+  createdByAdminId String?
+  createdAt        DateTime  @default(now())
+
+  country    Country    @relation(fields: [countryId], references: [id])
+  dietaryTag DietaryTag @relation(fields: [dietaryTagId], references: [id])
+
+  @@unique([countryId, dietaryTagId])
+  @@index([countryId])
+  @@index([dietaryTagId])
+  @@index([status])
+}
+
+//* A vendor's selections. Restrict on delete rather than cascade: a catalog
+//* entry vendors are actively using must be suspended, never silently removed
+//* from their profiles.
+model VendorProfileCuisine {
+  vendorProfileId String
+  cuisineId       String
+
+  vendorProfile VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  cuisine       Cuisine       @relation(fields: [cuisineId], references: [id], onDelete: Restrict)
+
+  @@id([vendorProfileId, cuisineId])
+  @@index([cuisineId])
+}
+
+model VendorProfileDietaryTag {
+  vendorProfileId String
+  dietaryTagId    String
+
+  vendorProfile VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  dietaryTag    DietaryTag    @relation(fields: [dietaryTagId], references: [id], onDelete: Restrict)
+
+  @@id([vendorProfileId, dietaryTagId])
+  @@index([dietaryTagId])
 }
 
 model OutletCuisine {
@@ -1916,17 +2032,141 @@ model OutletCuisine {
   @@index([cuisineId])
 }
 
+//* ─── MENU ──────────────────────────────────────────────────────────────────
+//*
+//* A dish is authored ONCE by the vendor (MenuItem) and sold at one or more of
+//* their outlets (Meal). This is the shape every multi-location food platform
+//* converges on — Deliveroo assigns a menu to many sites with per-site price
+//* overrides, and Toast/Square/Olo hold a master item catalog with per-location
+//* overrides — because the three things that genuinely differ by location are
+//* price, availability and being temporarily out of stock, and nothing else is.
+//*
+//* Duplicating the whole dish per outlet was the alternative. It was rejected
+//* because it makes an intentional price difference indistinguishable from
+//* drift, multiplies every future variant and addon by the outlet count, and
+//* leaves "how is this dish doing across the business" unanswerable — there
+//* would be no single row that IS the dish.
+
+//* A vendor's own menu grouping (Starters, Mains, Drinks). Vendor-owned rather
+//* than outlet-owned so one business presents one menu structure everywhere;
+//* which ITEMS appear at an outlet is the Meal rows' job, not the section's.
+model MenuSection {
+  id        String         @id @default(uuid())
+  vendorId  String
+  name      String
+  //* Menus are ordered by intent (starters before desserts), never
+  //* alphabetically, so position is authored and not derived.
+  position  Int            @default(0)
+  status    TaxonomyStatus @default(ACTIVE)
+  deletedAt DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  vendor VendorAccount @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  items  MenuItem[]
+
+  @@unique([vendorId, name])
+  @@index([vendorId])
+  @@index([deletedAt])
+}
+
+//* The dish itself — the vendor's catalog entry, and the thing a variant, an
+//* addon or a discount will eventually hang off.
+model MenuItem {
+  id             String     @id @default(uuid())
+  vendorId       String
+  sectionId      String?
+  name           String
+  description    String?
+  //* MINOR UNITS, always. Float was the previous representation and is wrong
+  //* for money: it cannot hold 0.10 exactly, and every payment provider takes
+  //* an integer anyway. The scale comes from the vendor's country currency
+  //* (Currency.minorUnitDigits), which is never assumed to be 2.
+  basePriceMinor Int
+  //* R2 storage KEYS, not URLs — the bucket is private, so reads go out as
+  //* short-lived signed URLs. Named ...Key for the same reason the profile's
+  //* media columns were renamed: a key in a column called ...Url invites an
+  //* <img src> and a 403.
+  mainImageKey   String?
+  //* The gallery. Food photography, so none of the premises-disclosure
+  //* reasoning that removed the profile gallery applies here.
+  imageKeys      String[]
+  portionSize    String?
+  //* The vendor's own switch: a dish they have stopped selling everywhere
+  //* without deleting it (deleting is impossible once it is in a meal plan).
+  isArchived     Boolean    @default(false)
+
+  //* Content moderation, mirroring Outlet/VendorProfile exactly.
+  reviewStatus     ProfileReviewStatus @default(AUTO_APPROVED)
+  flagReasons      String[]
+  flaggedAt        DateTime?
+  reviewedAt       DateTime?
+  reviewedByAdminId String?
+  rejectionReason  String?
+
+  //* Platform-side lifecycle, independent of the vendor's own archive flag —
+  //* same capability/health/moderation axis separation as Outlet.
+  adminStatus      MealStatus @default(ACTIVE)
+  adminSuspendedAt DateTime?
+  adminBannedAt    DateTime?
+
+  deletedAt       DateTime?
+  vendorUpdatedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  vendor      VendorAccount        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  section     MenuSection?         @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  cuisines    MenuItemCuisine[]
+  dietaryTags MenuItemDietaryTag[]
+  outletMeals Meal[]
+
+  @@unique([vendorId, name])
+  @@index([vendorId])
+  @@index([sectionId])
+  @@index([reviewStatus])
+  @@index([adminStatus])
+  @@index([deletedAt])
+  @@index([createdAt])
+}
+
+model MenuItemCuisine {
+  menuItemId String
+  cuisineId  String
+
+  cuisine  Cuisine  @relation(fields: [cuisineId], references: [id], onDelete: Restrict)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@id([menuItemId, cuisineId])
+  @@index([cuisineId])
+}
+
+model MenuItemDietaryTag {
+  menuItemId   String
+  dietaryTagId String
+
+  dietaryTag DietaryTag @relation(fields: [dietaryTagId], references: [id], onDelete: Restrict)
+  menuItem   MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@id([menuItemId, dietaryTagId])
+  @@index([dietaryTagId])
+}
+
+//* One dish, sold at one outlet. Carries ONLY what genuinely varies by
+//* location; everything descriptive lives on the MenuItem, so editing a photo
+//* or a description is one write however many outlets sell it.
 model Meal {
-  id               String     @id @default(uuid())
-  outletId         String
-  name             String
-  description      String?
-  price            Float
-  mainImage        String?
-  images           String[]
-  portionSize      String?
-  dietaryOptions   String[]
-  specialties      String[]
+  id         String @id @default(uuid())
+  outletId   String
+  menuItemId String
+
+  //* Null means "use the catalog price". An explicit value is a deliberate
+  //* local price, which is exactly the distinction duplicated rows lose.
+  priceMinorOverride Int?
+  //* 86-ing: off today, back tomorrow. Distinct from MenuItem.isArchived
+  //* (withdrawn everywhere) and from adminStatus (a platform action).
+  isAvailable        Boolean @default(true)
+
   adminStatus      MealStatus @default(ACTIVE)
   adminSuspendedAt DateTime?
   adminBannedAt    DateTime?
@@ -1936,25 +2176,15 @@ model Meal {
   updatedAt        DateTime   @updatedAt
 
   outlet    Outlet         @relation(fields: [outletId], references: [id], onDelete: Cascade)
-  cuisines  MealCuisine[]
+  menuItem  MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
   mealPlans MealPlanMeal[]
 
-  @@unique([outletId, name])
+  @@unique([outletId, menuItemId])
   @@index([outletId])
+  @@index([menuItemId])
   @@index([adminStatus])
   @@index([deletedAt])
   @@index([createdAt])
-}
-
-model MealCuisine {
-  mealId    String
-  cuisineId String
-
-  cuisine Cuisine @relation(fields: [cuisineId], references: [id], onDelete: Cascade)
-  meal    Meal    @relation(fields: [mealId], references: [id], onDelete: Cascade)
-
-  @@id([mealId, cuisineId])
-  @@index([cuisineId])
 }
 
 model MealPlan {
@@ -1962,7 +2192,8 @@ model MealPlan {
   outletId              String
   name                  String
   description           String?
-  price                 Float?
+  //* Minor units, same reasoning as MenuItem.basePriceMinor.
+  priceMinor            Int?
   images                String[]
   isPublished           Boolean                @default(false)
   isFeatured            Boolean                @default(false)
@@ -2175,6 +2406,11 @@ enum VendorNotificationType {
   COMPLIANCE_EXPIRED_DOCUMENT
   COMPLIANCE_CASE_RESOLVED
   PROFILE_REJECTED
+  //* An admin cleared or sent back a flagged meal. MEAL_* rather than
+  //* MENU_ITEM_* because "meal" is the word the vendor sees throughout their
+  //* dashboard; the model name is an internal detail.
+  MEAL_REJECTED
+  MEAL_APPROVED
   // "Operational" compliance issue — not document-shaped, so it never
   // gets a VendorComplianceCase row (see getVendorOperationalIssues in
   // admin.vendor.compliance.service.ts). Notify is a one-off nudge, no
@@ -2292,7 +2528,11 @@ enum ZoneOperationalStatus {
   EMERGENCY
 }
 
-enum CuisineStatus {
+//* Lifecycle shared by every admin-managed food-taxonomy catalog (Cuisine,
+//* DietaryTag). One enum rather than one per catalog — they are created,
+//* suspended and retired by the same admin, in the same screen, for the same
+//* reasons. Mirrors VendorTypeStatus's role for the vendor-type catalog.
+enum TaxonomyStatus {
   ACTIVE
   SUSPENDED
   DEPRECATED
@@ -2457,11 +2697,6 @@ enum ServiceAreaMode {
   EXCLUDED // not serviceable — never surfaced to vendors or customers
 }
 
-enum OutletServiceMode {
-  FULL_SERVICE // inside a FULL_SERVICE polygon
-  SELF_DELIVERY // inside SELF_DELIVERY polygon OR unzoned within city boundary
-  INACTIVE // inside WAITLIST or EXCLUDED polygon
-}
 
 enum BatchZoneStatus {
   PENDING // computed, awaiting courier assignment

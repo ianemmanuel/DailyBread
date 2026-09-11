@@ -3,14 +3,16 @@ import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
 import { SYSTEM_USER_ID } from "@/constants/system"
-import { Filter } from "bad-words"
 import { OUTLET_PROXIMITY_DEGREES, MAX_TEMP_CLOSURE_DAYS } from "@/constants/vendor"
+import { getModerationProvider } from "@/lib/moderation"
 import { resolveCapabilitiesForPoint, resolveCapabilitiesForOutlet } from "./vendor.geography.service"
+import type { ResolvedZoneCapabilities } from "@repo/geo/types"
 import { getOutletDocumentRequirements } from "./vendor.document.service"
 import { getOutletCriticalDocuments } from "./vendor.outletDocument.service"
 import { selectEnforcedCriticalRequired } from "./vendor.outletClearance"
+import { validateOperatingHours } from "./vendor.operatingHours"
 import type {
-  CreateOutletRequest, UpdateOutletRequest, OperatingHoursEntry,
+  CreateOutletRequest, UpdateOutletRequest,
   OutletGoLiveStatus, OutletGoLiveBlocker,
   OutletMealPlanReadiness, OutletMealPlanBlocker,
 } from "@repo/types/backend"
@@ -35,7 +37,6 @@ async function resolveInitialClearance(
 }
 
 const serviceLog = logger.child({ module: "vendor-outlet-service" })
-const profanityFilter = new Filter()
 
 //* City-boundary enforcement + operational-zone resolution
 // The outlet's coordinates must fall inside the city's operational boundary
@@ -46,11 +47,11 @@ const profanityFilter = new Filter()
 // zone's geometry later changes is handled admin-side
 // (recomputeOutletZonesForCity).
 
-async function resolveOutletZone(
+async function resolveOutletPlacement(
   cityId   : string,
   latitude : number,
   longitude: number,
-): Promise<string | null> {
+): Promise<ResolvedZoneCapabilities | null> {
   const placement = await resolveCapabilitiesForPoint(cityId, { latitude, longitude })
   if (!placement) return null // city was validated by the caller; treat a race as unzoned
 
@@ -61,10 +62,61 @@ async function resolveOutletZone(
       "OUTSIDE_CITY_BOUNDARY",
     )
   }
-  return placement.zoneId
+  return placement
+}
+
+/*
+ * A vendor opening somewhere orders can't flow yet IS the demand signal for
+ * launching there — so record it, rather than making the vendor fill in a
+ * separate "register your interest" form they'd never find. The admin's city
+ * geography page already aggregates MarketSignal by zone, so this lights up a
+ * panel that exists but had no vendor-facing writer until now.
+ *
+ * Best-effort by design: a failure here must never cost the vendor an outlet
+ * they successfully created. Writing prisma directly rather than calling the
+ * admin module keeps the vendor module's no-admin-imports rule intact, same as
+ * notifyAdminsProfileFlagged.
+ */
+async function captureVendorInterest(
+  outlet   : { id: string; cityId: string; latitude: number; longitude: number },
+  vendorId : string,
+  placement: ResolvedZoneCapabilities | null,
+) {
+  // Somewhere we already take orders needs no signal — the outlet itself is
+  // the record. Only areas that can't serve customers yet are worth counting.
+  if (placement?.canListOnDemand) return
+
+  try {
+    await prisma.marketSignal.create({
+      data: {
+        type              : "VENDOR_INTEREST",
+        cityId            : outlet.cityId,
+        zoneId            : placement?.zoneId ?? null,
+        latitude          : outlet.latitude,
+        longitude         : outlet.longitude,
+        withinCityBoundary: placement?.withinCityBoundary ?? false,
+        vendorAccountId   : vendorId,
+        source            : "vendor_dashboard",
+        note              : "Outlet registered in an area that cannot take orders yet",
+      },
+    })
+  } catch (err) {
+    serviceLog.warn({ err, outletId: outlet.id, vendorId }, "Failed to capture vendor interest signal for a new outlet")
+  }
 }
 
 //* Flag checks
+
+/*
+ * Which outlet field a moderation hit came from, so the flag an admin sees
+ * names the field rather than just "inappropriate content somewhere".
+ * Outlet has no flagDetails column (unlike VendorProfile), so the reason
+ * string carries that granularity instead.
+ */
+const OUTLET_FLAG_BY_FIELD: Record<string, string> = {
+  name: "INAPPROPRIATE_NAME",
+  bio : "INAPPROPRIATE_DESCRIPTION",
+}
 
 async function runFlagChecks(
   vendorId       : string,
@@ -73,11 +125,21 @@ async function runFlagChecks(
   latitude       : number,
   longitude      : number,
   excludeOutletId?: string,
+  bio?           : string | null,
 ): Promise<string[]> {
   const flags: string[] = []
 
-  if (profanityFilter.isProfane(name)) {
-    flags.push("INAPPROPRIATE_NAME")
+  /*
+   * Every free-text field a vendor writes and an admin later reads goes
+   * through the shared ContentModerationProvider — the same seam the profile
+   * uses — rather than a filter instantiated here. Non-blocking in the sense
+   * that matters: it only ever raises a flag for review, it never refuses the
+   * save. The vendor's outlet is created either way.
+   */
+  const moderation = await getModerationProvider().screenText({ name, bio: bio ?? undefined })
+  for (const hit of moderation) {
+    const flag = OUTLET_FLAG_BY_FIELD[hit.field]
+    if (flag && !flags.includes(flag)) flags.push(flag)
   }
 
   const duplicateName = await prisma.outlet.findFirst({
@@ -151,10 +213,11 @@ export async function createOutlet(vendorId: string, input: CreateOutletRequest)
   if (city.countryId !== vendor.countryId) throw new ApiError(400, "City does not belong to your registered country", "CITY_COUNTRY_MISMATCH")
   if (city.status !== "ACTIVE") throw new ApiError(400, "This city is not currently active", "CITY_INACTIVE")
 
-  const zoneId = await resolveOutletZone(cityId, latitude, longitude)
+  const placement = await resolveOutletPlacement(cityId, latitude, longitude)
+  const zoneId = placement?.zoneId ?? null
   const clearanceStatus = await resolveInitialClearance(vendor, cityId)
 
-  const flagReasons   = await runFlagChecks(vendorId, cityId, name, latitude, longitude)
+  const flagReasons   = await runFlagChecks(vendorId, cityId, name, latitude, longitude, undefined, bio)
   const isFlagged     = flagReasons.length > 0
   const existingCount = await prisma.outlet.count({ where: { vendorId, deletedAt: null } })
 
@@ -193,6 +256,8 @@ export async function createOutlet(vendorId: string, input: CreateOutletRequest)
     serviceLog.info({ outletId: outlet.id, vendorId, clearanceStatus }, "Outlet created")
   }
 
+  await captureVendorInterest(outlet, vendorId, placement)
+
   return outlet
 }
 
@@ -218,21 +283,25 @@ export async function updateOutlet(vendorId: string, outletId: string, input: Up
   const newLat  = input.latitude  ?? existing.latitude
   const newLng  = input.longitude ?? existing.longitude
   const newName = input.name      ?? existing.name
+  const newBio  = input.bio       ?? existing.bio
 
   const coordinatesChanged = input.latitude != null || input.longitude != null
   const nameChanged        = input.name != null && input.name !== existing.name
+  // The description is vendor-written text an admin reads, so it is screened
+  // on every edit that changes it — not only on create.
+  const bioChanged         = input.bio != null && input.bio !== existing.bio
 
   let zoneId: string | null | undefined = undefined
   if (coordinatesChanged) {
-    zoneId = await resolveOutletZone(existing.cityId, newLat, newLng)
+    zoneId = (await resolveOutletPlacement(existing.cityId, newLat, newLng))?.zoneId ?? null
   }
 
   let flagReasons     = existing.flagReasons as string[]
   let reviewStatus    = existing.reviewStatus
   let rejectionReason = existing.rejectionReason
 
-  if (coordinatesChanged || nameChanged) {
-    flagReasons  = await runFlagChecks(vendorId, existing.cityId, newName, newLat, newLng, outletId)
+  if (coordinatesChanged || nameChanged || bioChanged) {
+    flagReasons  = await runFlagChecks(vendorId, existing.cityId, newName, newLat, newLng, outletId, newBio)
     reviewStatus = flagReasons.length > 0 ? OutletReviewStatus.FLAGGED : OutletReviewStatus.AUTO_APPROVED
     // A fresh edit supersedes a prior admin rejection — same convention
     // as vendor.profile.service.ts's upsertVendorProfile.
@@ -654,20 +723,43 @@ export async function setPrimaryOutlet(vendorId: string, outletId: string) {
 
 //* Set operating hours
 
-export async function setOperatingHours(vendorId: string, outletId: string, hours: OperatingHoursEntry[]) {
+export async function setOperatingHours(vendorId: string, outletId: string, hours: unknown) {
   await assertVendorOwnsOutlet(outletId, vendorId)
-  if (hours.length === 0) throw new ApiError(400, "At least one day entry is required", "EMPTY_HOURS")
 
-  await prisma.$transaction(
-    hours.map(entry =>
-      prisma.outletOperatingHours.upsert({
-        where : { outletId_dayOfWeek_validFrom: { outletId, dayOfWeek: entry.dayOfWeek, validFrom: null! } },
-        create: { outletId, ...entry, validFrom: null },
-        update: { openTime: entry.openTime, closeTime: entry.closeTime, isClosed: entry.isClosed },
-      })
-    )
-  )
+  const parsed = validateOperatingHours(hours)
+  if (!parsed.ok) {
+    throw new ApiError(400, parsed.message, "INVALID_OPERATING_HOURS")
+  }
 
-  serviceLog.info({ outletId, vendorId }, "Operating hours updated")
+  /*
+   * Replace the outlet's current (open-ended) week rather than upserting day by
+   * day. The previous version did:
+   *
+   *   upsert({ where: { outletId_dayOfWeek_validFrom: { …, validFrom: null! } } })
+   *
+   * which never worked — Prisma rejects `null` inside a compound-unique input
+   * (the `null!` was the assertion silencing that), so every save threw a
+   * PrismaClientValidationError that surfaced to the vendor as the mapper's
+   * generic "Invalid data provided."
+   *
+   * The constraint could not have saved us anyway: `@@unique([outletId,
+   * dayOfWeek, validFrom])` does not deduplicate rows where `validFrom` is
+   * NULL, because Postgres treats NULLs as distinct in a unique index. So a
+   * working per-day upsert would still have been able to accumulate duplicate
+   * Mondays. Deleting the open-ended rows and re-inserting them in one
+   * transaction is both correct and self-healing for any duplicates already
+   * stored.
+   *
+   * Scoped to `validFrom: null` on purpose: dated, time-bounded schedules are
+   * what that column is for, and this endpoint only manages the standing week.
+   */
+  await prisma.$transaction([
+    prisma.outletOperatingHours.deleteMany({ where: { outletId, validFrom: null } }),
+    prisma.outletOperatingHours.createMany({
+      data: parsed.hours.map((entry) => ({ outletId, ...entry, validFrom: null })),
+    }),
+  ])
+
+  serviceLog.info({ outletId, vendorId, days: parsed.hours.length }, "Operating hours updated")
   return { success: true }
 }

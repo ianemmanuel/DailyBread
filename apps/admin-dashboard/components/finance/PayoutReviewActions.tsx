@@ -83,7 +83,7 @@ export function PayoutReviewActions({ accountId, vendorName, detail, actorId, ca
     setTargets(json?.data?.targets ?? [])
   }
 
-  const btn = "inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+  const btn = "inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
 
   return (
     <div className="flex flex-wrap items-center gap-2">

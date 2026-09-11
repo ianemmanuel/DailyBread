@@ -27,6 +27,11 @@ export type {
   VendorProfile,
   ProfileReviewStatus,
   UpsertVendorProfileRequest,
+  VendorFoodTag,
+  VendorFoodTagOptions,
+  ProfileMediaKind,
+  ProfileMediaPresignRequest,
+  ProfileMediaPresignResponse,
   VendorGoLiveStatus,
   VendorGoLiveBlocker,
   OutletGoLiveStatus,
@@ -84,6 +89,16 @@ export type {
   PayoutRiskFlag,
   idParam,
 } from "../domain/vendor"
+
+//* Vendor-facing operational geography — the outlet location picker's shapes.
+export type {
+  OutletPlacement,
+  OutletPlacementStatus,
+  OutletPlacementCapabilities,
+  CityCoverage,
+  CityCoverageZone,
+} from "../domain/geography"
+
 
 //* STEP 1 output — set by verifyVendorToken, before VendorUser is loaded.
 export interface AuthenticatedVendorRequest extends Request {

@@ -18,11 +18,12 @@ import {
 export const handleListInspections: RequestHandler = async (req, res, next) => {
   try {
     const { adminScope } = req as unknown as AdminRequest
-    const { status, country, search, page, pageSize } = req.query as Record<string, string>
+    const { status, country, search, vendor, page, pageSize } = req.query as Record<string, string>
     const result = await listInspections(adminScope, {
       status     : status as never,
       countrySlug: country || undefined,
       search     : search || undefined,
+      vendorId   : vendor || undefined,
       page       : page ? Number(page) : undefined,
       pageSize   : pageSize ? Number(pageSize) : undefined,
     })

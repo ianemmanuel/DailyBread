@@ -203,6 +203,16 @@ export const PERMISSIONS = [
     description: "Approve or reject a flagged vendor public profile, including force-unpublishing a rejected one",
   },
   {
+    key        : "vendors:meals:read",
+    module     : "vendors",
+    description: "View vendor meals, including ones flagged for review",
+  },
+  {
+    key        : "vendors:meals:moderate",
+    module     : "vendors",
+    description: "Approve or send back a flagged meal, and suspend or ban one from the marketplace",
+  },
+  {
     key        : "vendors:outlets:read",
     module     : "vendors",
     description: "View vendor outlets, including ones flagged for review",
@@ -428,6 +438,16 @@ export const PERMISSIONS = [
     key        : "settings:vendor_types:write",
     module     : "settings",
     description: "Create vendor types and manage their availability per country",
+  },
+  {
+    key        : "settings:food_tags:read",
+    module     : "settings",
+    description: "View the cuisine and dietary-tag catalogs and their country availability",
+  },
+  {
+    key        : "settings:food_tags:write",
+    module     : "settings",
+    description: "Create cuisines and dietary tags (global scope) and enable them per country",
   },
   {
     key        : "settings:action_reasons:write",

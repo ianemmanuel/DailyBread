@@ -21,16 +21,6 @@
   --color-neutral-900:   oklch(0.155 0.005 264);
 
   /* ── Dark surface scale ─────────────────────────────────── */
-  --color-dark-sidebar:  oklch(0.130 0 0);
-  --color-dark-bg:       oklch(0.162 0 0);
-  --color-dark-card:     oklch(0.196 0 0);
-  --color-dark-card-2:   oklch(0.218 0 0);
-  --color-dark-input:    oklch(0.236 0 0);
-  --color-dark-border:   oklch(0.255 0 0);
-  --color-dark-border-2: oklch(0.300 0 0);
-  --color-dark-muted:    oklch(0.520 0 0);
-  --color-dark-text:     oklch(0.875 0 0);
-  --color-dark-text-2:   oklch(0.955 0 0);
 
   /* ── Brand — warm amber ─────────────────────────────────── */
   --color-brand-50:   oklch(0.975 0.018 62);
@@ -71,6 +61,4 @@
   --shadow-sm:             0 1px 3px oklch(0 0 0 / 6%), 0 1px 2px oklch(0 0 0 / 4%);
   --shadow-md:             0 4px 12px oklch(0 0 0 / 8%), 0 2px 4px oklch(0 0 0 / 5%);
   --shadow-lg:             0 8px 24px oklch(0 0 0 / 10%), 0 4px 8px oklch(0 0 0 / 6%);
-  --shadow-dark-dropdown:  0 4px 20px oklch(0 0 0 / 35%);
-  --shadow-dark-modal:     0 8px 40px oklch(0 0 0 / 45%);
 }

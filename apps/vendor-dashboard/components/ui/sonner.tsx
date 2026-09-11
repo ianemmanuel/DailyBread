@@ -7,15 +7,18 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from "lucide-react"
-import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
+/*
+ * Pinned to light. This used to read next-themes with a "system" default, so a
+ * user whose OS was in dark mode got dark toasts on a light app -- the same
+ * class of bug as the shadcn `dark:` utilities following prefers-color-scheme.
+ * Both dashboards are light-only.
+ */
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
-
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme="light"
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

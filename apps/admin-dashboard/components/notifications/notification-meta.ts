@@ -60,7 +60,7 @@ export function deepLinkFor(n: AdminNotification): string | null {
     case "PAYOUT_ACCOUNT_NEEDS_REVIEW":
       return payoutAccountId ? `/finance/payout-accounts/${payoutAccountId}` : "/finance/payout-accounts"
     case "OUTLET_AUTO_SUSPENDED":
-      return outletId ? `/vendors/outlets/${outletId}` : "/vendors/outlets"
+      return outletId ? `/outlets/${outletId}` : "/outlets"
     case "COMPLIANCE_CASE_STALE":
       return vendorId ? `/vendors/compliance/${vendorId}` : "/vendors/compliance"
     case "APPEAL_STALE_UNCLAIMED":

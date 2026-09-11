@@ -2,9 +2,11 @@
  * VENDOR REFERENCE DATA SEED
  * Idempotent — safe to run multiple times.
  *
- * Seeds global vendor type definitions only (Restaurant, Bakery, ...).
+ * Seeds the global catalogs only — vendor types (Restaurant, Bakery, ...) and
+ * the food taxonomy (cuisines + dietary tags).
  * Deliberately NOT seeded here:
- *   - VendorTypeCountry (which types are available in which country)
+ *   - VendorTypeCountry / CuisineCountry / DietaryTagCountry (which entries
+ *     are available in which country)
  *   - DocumentTypeConfig / DocumentTypeVendorType (per-country document
  *     requirements)
  * Both are live business/regulatory decisions that differ per market —
@@ -21,13 +23,18 @@ import 'dotenv/config'
 import { pathToFileURL } from 'node:url'
 import { prisma } from '../../index'
 import { seedVendorTypes } from './vendor-types.seed'
+import { seedFoodTags } from './food-tags.seed'
 
 export async function seedVendor() {
   console.log("🌱 Seeding DailyBread vendor reference data...\n")
 
-  console.log("  [1/1] Vendor types...")
+  console.log("  [1/2] Vendor types...")
   const vendorTypeCount = await seedVendorTypes()
   console.log(`        ✓ ${vendorTypeCount} vendor types`)
+
+  console.log("  [2/2] Food taxonomy (cuisines + dietary tags)...")
+  const foodTags = await seedFoodTags()
+  console.log(`        ✓ ${foodTags.cuisines} cuisines, ${foodTags.dietaryTags} dietary tags`)
 
   console.log("\n✅ Vendor seed complete.")
 }

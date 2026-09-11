@@ -197,7 +197,7 @@ export default async function FinanceOutletsPage({ searchParams }: PageProps) {
                   <TableRow key={o.id} className="hover:bg-muted/10">
                     <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="font-medium text-foreground">
-                      <Link href={`/vendors/outlets/${o.id}`} className="hover:text-primary hover:underline">{o.name}</Link>
+                      <Link href={`/outlets/${o.id}`} className="hover:text-primary hover:underline">{o.name}</Link>
                     </TableCell>
                     <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
                       <Link href={`/vendors/accounts/${o.vendorId}`} className="hover:text-primary hover:underline">{o.vendorName}</Link>

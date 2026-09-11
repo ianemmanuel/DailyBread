@@ -2,6 +2,20 @@
 @import "@repo/ui/styles/tokens.css";
 @import "@repo/ui/styles/base.css";
 
+/* ── Dark-mode variant: pinned to a class nothing ever sets ──────────────
+   Tailwind v4's default `dark:` variant is the `prefers-color-scheme: dark`
+   MEDIA QUERY, not a class. Both dashboards are light-only by product
+   decision, but the vendored shadcn components carry `dark:` utilities as
+   shipped — so without this line every one of them fired for any user whose
+   OS was in dark mode, painting dark badges, inputs and menus on top of a
+   light theme.
+
+   Redefining the variant as class-based makes those utilities inert (nothing
+   adds `.dark` anywhere) with one line, instead of stripping `dark:` out of
+   two dozen vendored component files that a future `shadcn add` would just
+   put back. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ── Vendor-dashboard personality — warm cream, light-only ──────────────
    base.css's light mode is already neutral+amber; these overrides push the
    vendor app further into "restaurant/hospitality" warmth than the neutral

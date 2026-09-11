@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select"
+import { SearchableSelect } from "@/components/shared/SearchableSelect"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -179,16 +180,18 @@ export function VendorCategoryCountryBreakdown({
 
           <div className="space-y-1.5">
             <Label className="text-xs">Country</Label>
-            <Select value={selectedId || undefined} onValueChange={setSelectedId}>
-              <SelectTrigger className="w-full rounded-xl text-sm" style={{ backgroundColor: "var(--input)", color: "var(--foreground)" }}>
-                <SelectValue placeholder="Select a country…" />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl" style={{ backgroundColor: "var(--popover)", color: "var(--popover-foreground)", border: "1px solid var(--border)" }}>
-                {available.map((c) => (
-                  <SelectItem key={c.id} value={c.id} className="rounded-lg">{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Searchable: `available` is every country this category is not
+                already assigned to, which is most of them. */}
+            <SearchableSelect
+              options={available.map((c) => ({ value: c.id, label: c.name }))}
+              value={selectedId}
+              onChange={setSelectedId}
+              placeholder="Select a country…"
+              searchPlaceholder="Search countries…"
+              emptyLabel="No country found."
+              className="rounded-xl text-sm"
+              aria-label="Country"
+            />
           </div>
 
           <AlertDialogFooter>

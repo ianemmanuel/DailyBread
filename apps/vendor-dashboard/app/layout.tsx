@@ -4,7 +4,6 @@ import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
 
 import { Inter, IBM_Plex_Mono, Playfair_Display } from 'next/font/google'
-import { ThemeProvider } from "@/components/themes/theme-provider"
 import { Providers } from "./providers"
 
 const inter = Inter({
@@ -65,26 +64,26 @@ export default function RootLayout({
       <html
         lang="en"
         className={`${inter.variable} ${ibmPlexMono.variable} ${playfair.variable}`}
+        // Kept after next-themes was removed: browser extensions routinely add
+        // attributes to <html> before React hydrates, and this suppresses that
+        // one element only -- it does not hide mismatches anywhere below.
         suppressHydrationWarning
       >
         <body className="font-sans antialiased">
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="light"
-            forcedTheme="light"
-            enableSystem={false}
-            disableTransitionOnChange
-          >
-            <Providers>
-              {children}
-              <Toaster
-                position="top-right"
-                richColors
-                closeButton
-                duration={4000}
-              />
-            </Providers>
-          </ThemeProvider>
+          {/* No ThemeProvider: this app is light-only, and next-themes was
+              doing nothing but forcing the theme it already had. Its three-
+              option toggle could never change anything, and it sat between the
+              server layout and every client component below it -- which is
+              where the Radix useId hydration mismatch was coming from. */}
+          <Providers>
+            {children}
+            <Toaster
+              position="top-right"
+              richColors
+              closeButton
+              duration={4000}
+            />
+          </Providers>
         </body>
       </html>
     </ClerkProvider>

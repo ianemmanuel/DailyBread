@@ -1,18 +1,12 @@
 "use client"
 
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useForm } from "@tanstack/react-form"
 import { Button } from "@repo/ui/components/button"
 import { Input } from "@repo/ui/components/input"
 import { Label } from "@repo/ui/components/label"
 import { Textarea } from "@repo/ui/components/textarea"
-import { 
-    Card, 
-    CardContent, 
-    CardHeader, 
-    CardTitle, 
-    CardDescription 
-} from "@repo/ui/components/card"
 import {
   Loader2, 
   MapPin, 
@@ -25,8 +19,28 @@ import {
   CheckCircle2,
 } from "lucide-react"
 import { z } from "zod"
+import dynamic from "next/dynamic"
+import type { AddressSuggestion } from "@/components/outlets/OutletLocationPicker"
+
+/*
+ * mapbox-gl is ~1.8 MB. Statically importing the picker put all of it in this
+ * page's first load, for a map that is below the fold and that most visits to
+ * an outlet page never touch — the vendor is usually here to change a phone
+ * number or read their hours. Loading it on demand is what keeps the rest of
+ * the page (and any sheet opened on it) responsive.
+ */
+const OutletLocationPicker = dynamic(
+  () => import("@/components/outlets/OutletLocationPicker").then((m) => m.OutletLocationPicker),
+  {
+    ssr    : false,
+    loading: () => (
+      <div className="h-[420px] w-full animate-pulse rounded-2xl bg-[var(--muted)]/30" />
+    ),
+  },
+)
 import { updateOutletSchema } from "@/lib/validations/update-outlet"
 import type { Outlet } from "@/types/outlet"
+import type { OutletPlacement } from "@repo/types/vendor-app"
 
 interface Props { outlet: Outlet }
 
@@ -34,6 +48,12 @@ const inputCls =
   "bg-[var(--background)] border-[var(--border)] text-[var(--foreground)] " +
   "placeholder:text-[var(--muted-foreground)] focus-visible:ring-[var(--primary)]"
 
+/*
+ * A labelled group of fields. Plain markup, not a Card: this form now renders
+ * inside the outlet page's own "Outlet details" panel, and a card inside a card
+ * reads as a mistake — two borders, two shadows, doubled padding eating the
+ * width the map needs.
+ */
 function Section({
   icon: Icon,
   title,
@@ -46,25 +66,135 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <Card className="dash-card border-0">
-      <CardHeader className="pb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10">
-            <Icon className="size-4 text-[var(--primary)]" />
-          </div>
-          <div>
-            <CardTitle className="text-base font-semibold">{title}</CardTitle>
-            <CardDescription className="text-xs">{description}</CardDescription>
+    <fieldset className="space-y-4 border-t border-[var(--border)]/60 pt-5 first-of-type:border-t-0 first-of-type:pt-0">
+      <legend className="sr-only">{title}</legend>
+      <div className="flex items-center gap-2.5">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+          <Icon className="size-3.5 text-[var(--primary)]" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[var(--foreground)]">{title}</p>
+          <p className="text-xs text-[var(--muted-foreground)]">{description}</p>
+        </div>
+      </div>
+      {children}
+    </fieldset>
+  )
+}
+
+/*
+ * What sits in the map's place until the vendor asks to move the pin.
+ *
+ * This started as a thin row with an outline button and read as "no map here"
+ * — a vendor could easily conclude the map was broken and go type coordinates
+ * by hand instead. So it now shows an actual map: a Mapbox Static Images
+ * thumbnail of the saved pin, which is a single ~50 KB image and loads none of
+ * mapbox-gl. Seeing their location on a map is the clearest possible signal
+ * that the pin saved correctly and that the map works; the button on top of it
+ * is then plainly an invitation to move it, not the only clue a map exists.
+ */
+function PinSummary({
+  latitude, longitude, onMove,
+}: {
+  latitude : number
+  longitude: number
+  onMove   : () => void
+}) {
+  const hasPin =
+    typeof latitude === "number" && !isNaN(latitude) &&
+    typeof longitude === "number" && !isNaN(longitude)
+
+  const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
+  // Mapbox's default attribution and logo are left on — required by their
+  // terms, and this is a static image with nowhere else to put them.
+  const thumbnail = hasPin && token
+    ? `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/` +
+      `pin-l+ef4444(${longitude},${latitude})/${longitude},${latitude},14,0/640x220@2x` +
+      `?access_token=${token}`
+    : null
+
+  if (!hasPin) {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[var(--border)] px-6 py-8 text-center">
+        <MapPin className="size-6 text-[var(--muted-foreground)]" />
+        <div>
+          <p className="text-sm font-medium text-[var(--foreground)]">No location pinned yet</p>
+          <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+            Drop a pin on the map so customers and couriers can find this outlet.
+          </p>
+        </div>
+        <Button type="button" onClick={onMove} className="gap-2">
+          <MapPin className="size-4" />Set location on map
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[var(--border)]">
+      {thumbnail && (
+        <div className="relative">
+          {/* Plain <img>: one external thumbnail doesn't justify configuring
+              next/image remote patterns for the Mapbox host. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={thumbnail}
+            alt={`Map showing this outlet's pinned location at ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`}
+            className="h-[180px] w-full object-cover sm:h-[220px]"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/55 via-transparent to-transparent p-4">
+            <Button type="button" onClick={onMove} className="gap-2 shadow-lg">
+              <Navigation className="size-4" />Move pin on map
+            </Button>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">{children}</CardContent>
-    </Card>
+      )}
+
+      <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+          <MapPin className="size-3.5 shrink-0 text-[var(--primary)]" />
+          <span className="tabular-nums">{latitude.toFixed(5)}, {longitude.toFixed(5)}</span>
+        </p>
+        {/* Without a thumbnail (no token) this is the only way in, so it stays
+            a full button rather than a quiet link. */}
+        <Button
+          type="button"
+          variant={thumbnail ? "ghost" : "default"}
+          size="sm"
+          onClick={onMove}
+          className="gap-2 sm:shrink-0"
+        >
+          <Navigation className="size-3.5" />
+          {thumbnail ? "Open map" : "Move pin on map"}
+        </Button>
+      </div>
+    </div>
   )
 }
 
 export function UpdateOutletForm({ outlet }: Props) {
   const router = useRouter()
+
+  /* Same contract as the create form: the backend's verdict for the current
+   * pin, used only to stop a save updateOutlet would refuse anyway. An outlet
+   * cannot change city, so the picker is always locked to its own. */
+  const [placement, setPlacement] = useState<OutletPlacement | null>(null)
+  const outsideCoverage = placement != null && !placement.canRegister
+
+  /* The map only mounts when the vendor says they want to move the pin. */
+  const [movingPin, setMovingPin] = useState(false)
+
+  /* A search result replaces the address; a dragged pin only fills blanks —
+     an existing outlet's address is more likely to be right than a reverse
+     geocode of a pin the vendor nudged by a few metres. */
+  function applyAddressSuggestion(parts: AddressSuggestion, replace: boolean) {
+    for (const key of ["addressLine1", "neighborhood", "postalCode"] as const) {
+      const suggested = parts[key]
+      if (!suggested) continue
+      if (replace || !form.getFieldValue(key)) form.setFieldValue(key, suggested)
+    }
+  }
 
   // ✅ No explicit type argument — TanStack Form infers types from defaultValues
   const form = useForm({
@@ -291,19 +421,43 @@ export function UpdateOutletForm({ outlet }: Props) {
           ))}
         </div>
 
-        {/* GPS */}
-        <div
-          className="space-y-3 rounded-xl border p-4"
-          style={{
-            borderColor: "var(--border)",
-            background : "color-mix(in oklch, var(--muted) 25%, transparent)",
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <Navigation className="size-4 text-[var(--primary)]" />
-            <p className="text-sm font-medium text-[var(--foreground)]">GPS Coordinates</p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+        {/* The same picker the create form uses, locked to this outlet's own
+            city — an outlet never moves between cities, so there is no city
+            control here. Moving the pin re-resolves the operational zone
+            server-side on save (updateOutlet), exactly as creating one does.
+            It only mounts once the vendor asks to move the pin, which is also
+            when its chunk is fetched. */}
+        <form.Subscribe selector={(s) => [s.values.latitude, s.values.longitude] as const}>
+          {([lat, lng]) =>
+            movingPin ? (
+              <OutletLocationPicker
+                cityId={outlet.cityId}
+                cityName={outlet.city?.name}
+                latitude={typeof lat === "number" && !isNaN(lat) ? lat : null}
+                longitude={typeof lng === "number" && !isNaN(lng) ? lng : null}
+                onPick={(latitude, longitude) => {
+                  form.setFieldValue("latitude", latitude)
+                  form.setFieldValue("longitude", longitude)
+                }}
+                onAddressSuggested={applyAddressSuggestion}
+                onPlacementChange={setPlacement}
+              />
+            ) : (
+              <PinSummary
+                latitude={lat as number}
+                longitude={lng as number}
+                onMove={() => setMovingPin(true)}
+              />
+            )
+          }
+        </form.Subscribe>
+
+        <details className="rounded-xl border border-[var(--border)] px-3.5 py-2.5">
+          <summary className="cursor-pointer list-none text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
+            <Navigation className="mr-1.5 inline size-3.5" />
+            Enter coordinates manually
+          </summary>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
             {(["latitude", "longitude"] as const).map((name) => (
               <form.Field
                 key={name}
@@ -340,7 +494,8 @@ export function UpdateOutletForm({ outlet }: Props) {
               </form.Field>
             ))}
           </div>
-        </div>
+        </details>
+
       </Section>
 
       {/* ── Delivery & Pricing ── */}
@@ -409,8 +564,8 @@ export function UpdateOutletForm({ outlet }: Props) {
             )}
             <Button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full gap-2 rounded-xl"
+              disabled={isSubmitting || outsideCoverage}
+              className="w-full gap-2 rounded-xl disabled:opacity-60"
               style={{
                 background: "var(--primary)",
                 color     : "var(--primary-foreground)",
@@ -423,6 +578,12 @@ export function UpdateOutletForm({ outlet }: Props) {
                 <><CheckCircle2 className="size-4" />Save Changes</>
               )}
             </Button>
+            {outsideCoverage && (
+              <p className="text-center text-xs text-[var(--destructive)]">
+                Move your pin inside the highlighted area to save — we can&apos;t keep an outlet outside the area
+                we cover in this city.
+              </p>
+            )}
           </div>
         )}
       </form.Subscribe>

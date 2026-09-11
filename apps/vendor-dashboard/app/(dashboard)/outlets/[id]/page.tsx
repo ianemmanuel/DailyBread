@@ -1,18 +1,20 @@
-import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ChevronLeft, Crown } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { PageHeader } from "@/components/dashboard/layout/PageHeader"
-import { PageGrid } from "@/components/dashboard/layout/DashboardShell"
-import { OutletStatusBadges } from "@/components/outlets/OutletStatusBadges"
+import { PageGrid, SectionGrid } from "@/components/dashboard/layout/DashboardShell"
+import { OutletDetailHeader } from "@/components/outlets/OutletDetailHeader"
 import { OutletGoLivePanel } from "@/components/outlets/OutletGoLivePanel"
-import { OutletInspectionCard } from "@/components/outlets/OutletInspectionCard"
-import { OutletDetailHero } from "@/components/outlets/OutletDetailHero"
-import { OutletEditSections } from "@/components/outlets/OutletEditSections"
 import { OutletFlagNotice } from "@/components/outlets/OutletFlagNotice"
+import { OutletDetailHero } from "@/components/outlets/OutletDetailHero"
+import { OutletHoursCard } from "@/components/outlets/OutletHoursCard"
+import { OutletInspectionCard } from "@/components/outlets/OutletInspectionCard"
+import { OutletEditSections } from "@/components/outlets/OutletEditSections"
 import { getOutlet } from "@/lib/vendor/outlets"
 import { requireSetupAccess } from "@/lib/vendor/guards"
 
+/*
+ * Ordered by what the vendor needs first: what's wrong (if anything), what
+ * this outlet is, then what they can change. The flag notice moved up from the
+ * very bottom — a warning nobody scrolls to is not a warning.
+ */
 export default async function OutletDetailsPage({
   params,
 }: {
@@ -26,33 +28,21 @@ export default async function OutletDetailsPage({
 
   return (
     <PageGrid>
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="rounded-xl" asChild>
-          <Link href="/outlets"><ChevronLeft className="size-4" /></Link>
-        </Button>
-        <PageHeader
-          title={outlet.name}
-          description={outlet.city?.name ?? ""}
-          actions={
-            <div className="flex items-center gap-2">
-              {outlet.isMainOutlet && (
-                <span className="flex items-center gap-1.5 badge-primary">
-                  <Crown className="size-3" />Primary
-                </span>
-              )}
-              <OutletStatusBadges outlet={outlet} />
-            </div>
-          }
-        />
-      </div>
-
-      {outlet.goLiveStatus && <OutletGoLivePanel status={outlet.goLiveStatus} />}
-      <OutletInspectionCard outletId={outlet.id} readiness={outlet.mealPlanReadiness} />
-
-      <OutletDetailHero outlet={outlet} />
-      <OutletEditSections outlet={outlet} />
+      <OutletDetailHeader outlet={outlet} />
 
       {outlet.reviewStatus === "FLAGGED" && <OutletFlagNotice reasons={outlet.flagReasons} />}
+      {outlet.goLiveStatus && <OutletGoLivePanel status={outlet.goLiveStatus} />}
+
+      <SectionGrid cols={3}>
+        <div className="lg:col-span-2">
+          <OutletDetailHero outlet={outlet} />
+        </div>
+        <OutletHoursCard outletId={outlet.id} existing={outlet.operatingHours} />
+      </SectionGrid>
+
+      <OutletInspectionCard outletId={outlet.id} readiness={outlet.mealPlanReadiness} />
+
+      <OutletEditSections outlet={outlet} />
     </PageGrid>
   )
 }

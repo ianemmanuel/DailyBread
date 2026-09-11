@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
-import { PieChart } from "lucide-react"
+import { PieChart, Utensils, Leaf } from "lucide-react"
 import { adminFetch } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { AdminPermissions } from "@repo/types/admin-app"
@@ -8,9 +8,11 @@ import { getFilterableCountries } from "@/lib/countries/filterable-countries"
 import { VendorCategoryCountrySelect } from "@/components/vendor-categories/VendorCategoryCountrySelect"
 import { AdoptionDonutChart } from "@/components/vendor-categories/AdoptionDonutChart"
 import { VendorCategoryAdoptionTable } from "@/components/vendor-categories/VendorCategoryAdoptionTable"
+import { FoodTagAdoptionPanel } from "@/components/food-tags/FoodTagAdoptionPanel"
 import type { VendorTypeAdoptionResult } from "@/types/vendor-type.types"
+import type { FoodTagAdoptionResult } from "@/types/food-tag.types"
 
-export const metadata: Metadata = { title: "Vendor Categories — Adoption" }
+export const metadata: Metadata = { title: "Catalog — Adoption" }
 export const revalidate = 60
 
 interface PageProps {
@@ -32,29 +34,57 @@ function toTopFive(data: VendorTypeAdoptionResult): VendorTypeAdoptionResult {
 }
 
 /**
- * Dedicated deep-dive on category adoption — the catalog home page keeps a
- * compact top-5 preview of this same data with a "View more" link here.
- * Global scope: a top-right country picker narrows the whole page (chart +
- * table) to one country, defaulting to the system-wide aggregate. Country
- * scope: no picker — already locked to the admin's own country/countries,
- * same as every other scope-aware page in this module.
+ * Adoption across the whole Catalog section — vendor categories, cuisines and
+ * dietary tags on one page, because they answer one question: of the vocabulary
+ * we curate, what did vendors actually choose.
+ *
+ * Scope works both ways, which is the point. Global scope gets a country picker
+ * that narrows every panel, defaulting to the platform-wide aggregate; a
+ * country-scoped admin gets no picker and is resolved to their own country
+ * server-side. Both readings are useful and neither is a special case: a global
+ * ops admin curating the catalog needs the aggregate, and a country team needs
+ * to know what their own market picked.
+ *
+ * Categories and food tags are gated separately — an admin holding only one of
+ * the two READ permissions sees only that half rather than an error.
  */
-export default async function VendorCategoryAdoptionPage({ searchParams }: PageProps) {
+export default async function CatalogAdoptionPage({ searchParams }: PageProps) {
   const session = await getAdminSession()
-  if (!session.permissions.includes(AdminPermissions.SETTINGS_VENDOR_TYPES_READ)) redirect("/vendors")
+
+  const canReadCategories = session.permissions.includes(AdminPermissions.SETTINGS_VENDOR_TYPES_READ)
+  const canReadFoodTags   = session.permissions.includes(AdminPermissions.SETTINGS_FOOD_TAGS_READ)
+  if (!canReadCategories && !canReadFoodTags) redirect("/vendors")
 
   const { country } = await searchParams
   const { countries, showFilter } = await getFilterableCountries(session.scope.isGlobal)
 
   const selectedCountry = showFilter ? countries.find((c) => c.slug === country) : undefined
   const scopeLabel = session.scope.isGlobal
-    ? (selectedCountry ? selectedCountry.name : "All Countries")
+    ? (selectedCountry ? selectedCountry.name : "All countries")
     : (countries[0]?.name ?? "your country")
 
-  const adoption = await adminFetch<VendorTypeAdoptionResult>(
-    `/admin/v1/vendor-types/adoption?limit=50${selectedCountry ? `&countryId=${selectedCountry.id}` : ""}`,
-    { next: { revalidate: 60, tags: ["vendor-type-adoption"] } },
-  ).catch(() => ({ total: 0, items: [], others: null }) as VendorTypeAdoptionResult)
+  const countryQuery = selectedCountry ? `countryId=${selectedCountry.id}` : ""
+
+  const [adoption, cuisines, dietaryTags] = await Promise.all([
+    canReadCategories
+      ? adminFetch<VendorTypeAdoptionResult>(
+          `/admin/v1/vendor-types/adoption?limit=50${countryQuery ? `&${countryQuery}` : ""}`,
+          { next: { revalidate: 60, tags: ["vendor-type-adoption"] } },
+        ).catch(() => ({ total: 0, items: [], others: null }) as VendorTypeAdoptionResult)
+      : Promise.resolve(null),
+    canReadFoodTags
+      ? adminFetch<FoodTagAdoptionResult>(
+          `/admin/v1/food-tags/cuisines/adoption?${countryQuery}`,
+          { next: { revalidate: 60, tags: ["food-tag-adoption"] } },
+        ).catch(() => null)
+      : Promise.resolve(null),
+    canReadFoodTags
+      ? adminFetch<FoodTagAdoptionResult>(
+          `/admin/v1/food-tags/dietary-tags/adoption?${countryQuery}`,
+          { next: { revalidate: 60, tags: ["food-tag-adoption"] } },
+        ).catch(() => null)
+      : Promise.resolve(null),
+  ])
 
   return (
     <div className="page-content animate-slide-up">
@@ -64,8 +94,10 @@ export default async function VendorCategoryAdoptionPage({ searchParams }: PageP
             <PieChart className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">Category Adoption</h1>
-            <p className="text-sm text-muted-foreground">How vendors are distributed across categories — {scopeLabel}.</p>
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">Catalog adoption</h1>
+            <p className="text-sm text-muted-foreground">
+              What vendors picked from the vocabulary we curate — {scopeLabel}.
+            </p>
           </div>
         </div>
         {showFilter && (
@@ -76,10 +108,34 @@ export default async function VendorCategoryAdoptionPage({ searchParams }: PageP
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] lg:items-start">
-        <AdoptionDonutChart data={toTopFive(adoption)} scopeLabel={scopeLabel} />
-        <VendorCategoryAdoptionTable data={adoption} />
-      </div>
+      {adoption && (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] lg:items-start">
+          <AdoptionDonutChart data={toTopFive(adoption)} scopeLabel={scopeLabel} />
+          <VendorCategoryAdoptionTable data={adoption} />
+        </div>
+      )}
+
+      {/* Cuisines first: a vendor picks up to five, so it is the richer signal
+          and the one a launch team actually acts on. Dietary tags are a shorter
+          list of claims, so they sit beside it rather than above. */}
+      {canReadFoodTags && (
+        <div className="grid gap-4 xl:grid-cols-2 xl:items-start">
+          <FoodTagAdoptionPanel
+            kind="cuisines"
+            icon={Utensils}
+            data={cuisines}
+            scopeLabel={scopeLabel}
+            {...(selectedCountry ? { countrySlug: selectedCountry.slug } : {})}
+          />
+          <FoodTagAdoptionPanel
+            kind="dietary-tags"
+            icon={Leaf}
+            data={dietaryTags}
+            scopeLabel={scopeLabel}
+            {...(selectedCountry ? { countrySlug: selectedCountry.slug } : {})}
+          />
+        </div>
+      )}
     </div>
   )
 }

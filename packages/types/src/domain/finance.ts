@@ -427,5 +427,8 @@ export interface AdminPayoutAccountDetail {
   proofDocuments     : AdminPayoutProofDocument[]
   canVerify          : boolean
   verifyBlockedReason: string | null
+  /** First page only — see auditTotal / auditPageSize and the audit endpoint. */
   audit              : AdminPayoutAccountAuditEntry[]
+  auditTotal         : number
+  auditPageSize      : number
 }

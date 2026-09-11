@@ -1,95 +1,108 @@
-import { MapPin, Phone, Mail, Star, Utensils } from "lucide-react"
-import { Card, CardContent } from "@repo/ui/components/card"
+import { MapPin, Phone, Mail, Star, Utensils, UtensilsCrossed } from "lucide-react"
 import type { Outlet } from "@/types/outlet"
 
 /*
- * The outlet overview card — address, contact, quick stats and cuisines.
- * Extracted from the detail page, which had ~120 lines of this markup inline
- * and was the only reason that page was long.
+ * The outlet at a glance — address, contact, cuisines and the two numbers a
+ * vendor actually checks. Everything editable lives further down the page; this
+ * is the header they read, not a form.
+ *
+ * Previously the two stats sat in a boxed three-column grid that took the full
+ * height of the card to show two digits and a status dot. They are chips now,
+ * and the dot is gone: the outlet's real status is already stated twice above
+ * this card, in the page header badges and the go-live panel.
  */
 
-function StatTile({ label, value }: { label: string; value: React.ReactNode }) {
+function ContactLine({
+  icon: Icon, children, href,
+}: {
+  icon    : React.ElementType
+  children: React.ReactNode
+  href?   : string
+}) {
+  const body = (
+    <>
+      <Icon className="mt-0.5 size-4 shrink-0 text-[var(--primary)]" />
+      {/* min-w-0 + break-words: a long address or email must wrap inside the
+          card on a phone rather than pushing the layout wider than the screen. */}
+      <span className="min-w-0 break-words">{children}</span>
+    </>
+  )
+
+  return href ? (
+    <a href={href} className="flex items-start gap-2 hover:text-[var(--foreground)]">{body}</a>
+  ) : (
+    <p className="flex items-start gap-2">{body}</p>
+  )
+}
+
+function StatChip({
+  icon: Icon, label, value,
+}: {
+  icon : React.ElementType
+  label: string
+  value: React.ReactNode
+}) {
   return (
-    <div className="flex flex-col gap-0.5 text-center">
-      <span className="text-lg font-bold text-[var(--foreground)]">{value}</span>
+    <span
+      className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5"
+      style={{ background: "color-mix(in oklch, var(--muted) 40%, transparent)" }}
+    >
+      <Icon className="size-3.5 text-[var(--primary)]" />
+      <span className="text-sm font-semibold text-[var(--foreground)]">{value}</span>
       <span className="text-xs text-[var(--muted-foreground)]">{label}</span>
-    </div>
+    </span>
   )
 }
 
 export function OutletDetailHero({ outlet }: { outlet: Outlet }) {
-  // "Operational" here is the display dot only — the authoritative answer is
-  // outlet.goLiveStatus, rendered separately by OutletGoLivePanel.
-  const isOperational =
-    !outlet.vendorDisabledAt && outlet.adminStatus === "ACTIVE" && !outlet.isTemporarilyClosed
+  const fullAddress = [outlet.addressLine1, outlet.neighborhood, outlet.city?.name]
+    .filter(Boolean)
+    .join(", ")
 
   return (
-    <Card className="dash-card border-0">
-      <CardContent className="p-6">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-2 text-sm text-[var(--muted-foreground)]">
-            <p className="flex items-center gap-2">
-              <MapPin className="size-4 shrink-0 text-[var(--primary)]" />
-              {outlet.addressLine1}{outlet.neighborhood ? `, ${outlet.neighborhood}` : ""}
-            </p>
-            {outlet.phone && (
-              <p className="flex items-center gap-2">
-                <Phone className="size-4 shrink-0 text-[var(--primary)]" />{outlet.phone}
-              </p>
-            )}
-            {outlet.email && (
-              <p className="flex items-center gap-2">
-                <Mail className="size-4 shrink-0 text-[var(--primary)]" />{outlet.email}
-              </p>
-            )}
-            {outlet.bio && (
-              <p className="mt-3 max-w-md italic text-[var(--muted-foreground)]/80">
-                &ldquo;{outlet.bio}&rdquo;
-              </p>
-            )}
-          </div>
-
-          <div
-            className="grid grid-cols-3 gap-4 rounded-xl px-6 py-4"
-            style={{ background: "color-mix(in oklch, var(--muted) 30%, transparent)" }}
-          >
-            <StatTile label="Meals" value={outlet._count?.meals ?? 0} />
-            <StatTile
-              label="Rating"
-              value={
-                <span className="flex items-center justify-center gap-1">
-                  <Star className="size-4" style={{ fill: "var(--primary)", color: "var(--primary)" }} />
-                  {outlet.ratings > 0 ? outlet.ratings.toFixed(1) : "—"}
-                </span>
-              }
-            />
-            <StatTile
-              label="Status"
-              value={
-                <span
-                  className="inline-block size-3 rounded-full"
-                  style={{
-                    background: isOperational ? "var(--success)" : "var(--muted-foreground)",
-                    boxShadow : isOperational
-                      ? "0 0 0 3px color-mix(in oklch, var(--success) 20%, transparent)"
-                      : "none",
-                  }}
-                />
-              }
-            />
-          </div>
-        </div>
-
-        {outlet.cuisines.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {outlet.cuisines.map(({ cuisine }) => (
-              <span key={cuisine.id} className="badge-base badge-primary">
-                <Utensils className="size-2.5" />{cuisine.name}
-              </span>
-            ))}
-          </div>
+    <div className="dash-card flex h-full flex-col gap-4 p-5">
+      <div className="space-y-2 text-sm text-[var(--muted-foreground)]">
+        <ContactLine icon={MapPin}>{fullAddress}</ContactLine>
+        {outlet.phone && (
+          <ContactLine icon={Phone} href={`tel:${outlet.phone}`}>{outlet.phone}</ContactLine>
         )}
-      </CardContent>
-    </Card>
+        {outlet.email && (
+          <ContactLine icon={Mail} href={`mailto:${outlet.email}`}>{outlet.email}</ContactLine>
+        )}
+      </div>
+
+      {outlet.bio && (
+        <p className="border-l-2 border-[var(--primary)]/30 pl-3 text-sm italic leading-relaxed text-[var(--muted-foreground)]">
+          {outlet.bio}
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <StatChip
+          icon={UtensilsCrossed}
+          label={outlet._count?.meals === 1 ? "meal" : "meals"}
+          value={outlet._count?.meals ?? 0}
+        />
+        <StatChip
+          icon={Star}
+          // A bare rating with no volume behind it is misleading, so the chip
+          // says how many reviews produced it — or that there are none yet.
+          label={outlet.totalReviews > 0
+            ? `from ${outlet.totalReviews} ${outlet.totalReviews === 1 ? "review" : "reviews"}`
+            : "no reviews yet"}
+          value={outlet.ratings > 0 ? outlet.ratings.toFixed(1) : "—"}
+        />
+      </div>
+
+      {outlet.cuisines.length > 0 && (
+        <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+          {outlet.cuisines.map(({ cuisine }) => (
+            <span key={cuisine.id} className="badge-primary">
+              <Utensils className="size-2.5" />{cuisine.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

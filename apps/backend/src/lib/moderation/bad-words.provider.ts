@@ -11,9 +11,24 @@ import type { ContentModerationProvider, ModerationFlag, ModerationInput } from 
  * short) and gives the moderator the actual offending word.
  */
 
+/*
+ * Built once at module load, never per call. `bad-words` compiles its wordlist
+ * on construction, so a per-call `new Filter()` would be the entire cost of
+ * screening — this is what keeps a check to microseconds on the fields we
+ * actually screen (a name, a tagline, a description, a story).
+ */
 const filter = new Filter()
 
-function offendingTokens(text: string): string[] {
+/*
+ * Screening is on the write path of every vendor edit, so it is bounded rather
+ * than trusted to stay short. Every screened field already has its own length
+ * cap well under this; the ceiling exists so a field that loses its cap later
+ * can never turn a save into a slow request.
+ */
+const MAX_SCREEN_LENGTH = 4000
+
+function offendingTokens(input: string): string[] {
+  const text = input.length > MAX_SCREEN_LENGTH ? input.slice(0, MAX_SCREEN_LENGTH) : input
   const tokens = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
   const hits = new Set<string>()
   for (const tok of tokens) {

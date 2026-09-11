@@ -89,7 +89,7 @@ export function OutletFilterBar({ cities }: Props) {
         <button
           type="button"
           onClick={() => { setSearch(""); router.push("/outlets") }}
-          className="inline-flex items-center gap-1 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+          className="inline-flex cursor-pointer items-center gap-1 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
         >
           <X className="size-3.5" />Clear
         </button>

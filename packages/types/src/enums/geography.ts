@@ -9,8 +9,6 @@ export type ServiceAreaMode =
 
 export type GeoStatus = "ACTIVE" | "INACTIVE"
 
-export type OutletServiceMode = "FULL_SERVICE" | "SELF_DELIVERY" | "WAITLIST"
-
 export type BoundarySource = "OSM" | "MANUAL"
 
 //* Mirror of the Prisma ZoneLevel enum. Ordered least → most capable; the

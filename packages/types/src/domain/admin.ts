@@ -97,6 +97,21 @@ export interface AdminScopeContext {
   isGlobal : boolean
   countryIds : string[]
   cityIds : string[]
+  /**
+   * Coarse tier, mirroring the frontend's getScopeTier.
+   *
+   * Needed because countryIds ALONE cannot tell a country admin from a city
+   * admin: buildScopeContext folds a CITY scope's own countryId into
+   * countryIds (so city-scoped reads stay correctly filtered), which means a
+   * Nairobi-only admin looks country-scoped to any check that only reads
+   * countryIds. Anything that is a country-WIDE policy decision has to gate on
+   * this instead — see assertCountryPolicyScope in admin.foodTag.service.ts.
+   *
+   * Optional so the handful of hand-built contexts (system jobs, unit tests)
+   * don't all have to declare it; absent is treated as "not city tier", which
+   * is correct for every one of them (they are global or country contexts).
+   */
+  tier? : "GLOBAL" | "COUNTRY" | "CITY"
   scopes? : AdminUserScope[]
 }
 

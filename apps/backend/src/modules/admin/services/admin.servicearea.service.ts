@@ -80,7 +80,6 @@ export async function listServiceAreas(
             status : true,
             createdAt : true,
             updatedAt : true,
-            _count : { select: { outlets: true } },
     },
   })
 }
@@ -226,10 +225,7 @@ export async function deactivateServiceArea(
 ){
     const area = await prisma.serviceArea.findUnique({
         where  : { id: serviceAreaId },
-        include: {
-            city  : { select: { countryId: true } },
-            _count: { select: { outlets: true } },
-        },
+        include: { city: { select: { countryId: true } } },
     })
     if (!area) throw new ApiError(404, "Service area not found", "NOT_FOUND")
     assertCountryInScope(area.city.countryId, scope)
@@ -239,17 +235,16 @@ export async function deactivateServiceArea(
 
     await prisma.serviceArea.update({ where: { id: serviceAreaId }, data: { status: GeoStatus.INACTIVE } })
 
-    serviceLog.warn({ serviceAreaId, actorId, linkedOutlets: area._count.outlets }, "Service area deactivated")
+    serviceLog.warn({ serviceAreaId, actorId }, "Service area deactivated")
     auditService.log({
         adminUserId: actorId,
         action     : "service_area.deactivated",
         entityType : "ServiceArea",
         entityId   : serviceAreaId,
         changes    : { before: { status: "ACTIVE" }, after: { status: "INACTIVE" } },
-        metadata   : { linkedOutlets: area._count.outlets },
     })
 
-    return { success: true, linkedOutlets: area._count.outlets }
+    return { success: true }
 }
 
 export async function deleteServiceArea(
@@ -259,21 +254,10 @@ export async function deleteServiceArea(
 ) {
     const area = await prisma.serviceArea.findUnique({
         where  : { id: serviceAreaId },
-        include: {
-            city  : { select: { countryId: true } },
-            _count: { select: { outlets: true } },
-        },
+        include: { city: { select: { countryId: true } } },
     })
     if (!area) throw new ApiError(404, "Service area not found", "NOT_FOUND")
     assertCountryInScope(area.city.countryId, scope)
-
-    if (area._count.outlets > 0) {
-        throw new ApiError(
-            409,
-            `Cannot delete: ${area._count.outlets} outlet(s) are linked to this service area. Deactivate it instead.`,
-            "HAS_LINKED_OUTLETS",
-        )
-    }
 
     await prisma.serviceArea.delete({ where: { id: serviceAreaId } })
 

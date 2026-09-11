@@ -15,7 +15,7 @@ import {
   setPrimaryOutlet,
   setOperatingHours,
 } from "../services/vendor.outlet.service"
-import type { CreateOutletRequest, UpdateOutletRequest, OperatingHoursEntry } from "@repo/types/backend"
+import type { CreateOutletRequest, UpdateOutletRequest } from "@repo/types/backend"
 
 type idParam = { id: string }
 
@@ -190,11 +190,10 @@ export const handleSetOperatingHours = async (req: Request, res: Response, next:
     const { id }    = req.params as idParam
     const { hours } = req.body
 
-    if (!Array.isArray(hours) || hours.length === 0) {
-      throw new ApiError(400, "hours must be a non-empty array", "MISSING_FIELDS")
-    }
-
-    const result = await setOperatingHours(auth.vendorAccount.id, id, hours as OperatingHoursEntry[])
+    // Shape is validated in the service (validateOperatingHours), which returns
+    // a message naming the offending day and field — casting the body to
+    // OperatingHoursEntry[] here only hid that it might not be one.
+    const result = await setOperatingHours(auth.vendorAccount.id, id, hours)
     return sendSuccess(res, result, "Operating hours updated successfully")
   } catch (err) { next(err) }
 }

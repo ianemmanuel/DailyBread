@@ -9,6 +9,8 @@ import {
   ShieldCheck,
   Settings,
   UtensilsCrossed,
+  Utensils,
+  Leaf,
   BarChart3,
   Star,
   type LucideIcon,
@@ -81,37 +83,61 @@ export const navSections: NavSection[] = [
       { label: "Home",         href: "/vendors",              icon: Store },
       { label: "Applications", href: "/vendors/applications", icon: FileCheck2 },
       { label: "Accounts",     href: "/vendors/accounts",     icon: Briefcase },
-      { label: "Outlets",      href: "/vendors/outlets",      icon: MapPin,          requiredPermission: AdminPermissions.VENDORS_OUTLETS_READ },
-      { label: "Inspections",  href: "/vendors/inspections",  icon: ClipboardCheck,  requiredPermission: AdminPermissions.VENDORS_OUTLETS_READ },
+      // Outlets + Inspections were promoted to their own top-level section —
+      // see "Outlets" below. /vendors/outlets and /vendors/inspections still
+      // redirect there, so old links keep working.
       { label: "Compliance",   href: "/vendors/compliance",   icon: ShieldAlert,     requiredPermission: AdminPermissions.VENDORS_COMPLIANCE_READ },
       { label: "Appeals",      href: "/vendors/appeals",      icon: Scale,       requiredPermission: AdminPermissions.VENDORS_APPEALS_READ },
+      { label: "Meals",        href: "/vendors/meals",    icon: UtensilsCrossed, requiredPermission: AdminPermissions.VENDORS_MEALS_READ },
       { label: "Profiles",     href: "/vendors/profiles",     icon: UserCheck,   requiredPermission: AdminPermissions.VENDORS_PROFILES_READ },
       // Revenue moved to its own "Finance" section below (CLAUDE.md) —
       // no entry here any more; /vendors/revenue still redirects there.
     ],
   },
   {
-    // Deliberately its own top-level section, not nested under Vendors or
-    // Countries. It's reference/catalog data used across the whole vendor-
-    // management surface (applications, accounts, onboarding), not an
-    // instance record like a vendor or application, and not pure geography
-    // config like Country/City — VendorType is a global entity, not owned
-    // by any one country (see admin.vendorType.service.ts). Read access
-    // (vendor_ops, country/city-scoped) must reach it without the
-    // requiresGlobalTier + SETTINGS_GEOGRAPHY_WRITE gate the whole
-    // Countries section carries, or a country-scoped reviewer would lose
-    // visibility into vendor categories entirely — nesting under Countries
-    // would silently do exactly that. Gated only on the read permission;
-    // write actions (create/suspend/edit) are further gated inside the
-    // page itself to global-scope admins holding the write permission.
-    title: "Vendor Categories",
+    /*
+     * Promoted out of Vendors (2026-09-10). An outlet is a full domain here,
+     * not a vendor sub-list: its own detail page, documents, moderation,
+     * clearance, inspections, go-live status and location. Ops teams work
+     * outlet-first, the same reason DoorDash and Uber Eats internal tooling is
+     * store-centric — and the Vendors section had grown to seven items.
+     *
+     * Inspections sits under it rather than beside it: an inspection is
+     * entirely about an outlet, so separating them would split one concern
+     * across two top-level sections.
+     */
+    title: "Outlets",
     items: [
-      { label: "Home",     href: "/vendor-categories",          icon: Tag,        requiredPermission: AdminPermissions.SETTINGS_VENDOR_TYPES_READ },
-      { label: "Adoption", href: "/vendor-categories/adoption", icon: PieChart,   requiredPermission: AdminPermissions.SETTINGS_VENDOR_TYPES_READ },
-      // Revenue moved under Finance (CLAUDE.md, 2026-08-27) — catalog
-      // health (Adoption) stays here, financial reporting moved to where
-      // the rest of financial reporting lives. /vendor-categories/revenue
-      // still redirects to /finance/vendor-categories.
+      { label: "All outlets",  href: "/outlets",             icon: MapPin,         requiredPermission: AdminPermissions.VENDORS_OUTLETS_READ },
+      { label: "Inspections",  href: "/outlets/inspections", icon: ClipboardCheck, requiredPermission: AdminPermissions.VENDORS_OUTLETS_READ },
+    ],
+  },
+  {
+    /*
+     * One section for every admin-curated global vocabulary (2026-09-10).
+     *
+     * Vendor Categories and Food Tags used to be two separate top-level
+     * sections doing the identical job: a global catalog an ops admin owns,
+     * with per-country enablement a country admin controls. Two siblings for
+     * one concern was clutter, so they merged here.
+     *
+     * Deliberately NOT nested under Countries: that section is gated on
+     * requiresGlobalTier + SETTINGS_GEOGRAPHY_WRITE, which the country-scoped
+     * vendor_ops admins who actually curate these lists do not hold — nesting
+     * would silently cut off the people who use it most. Gated on read only;
+     * creating and editing entries is further restricted to GLOBAL scope
+     * inside each page, since the backend enforces that anyway.
+     */
+    title: "Catalog",
+    items: [
+      { label: "Vendor categories", href: "/vendor-categories",          icon: Tag,      requiredPermission: AdminPermissions.SETTINGS_VENDOR_TYPES_READ },
+      { label: "Cuisines",          href: "/food-tags/cuisines",         icon: Utensils, requiredPermission: AdminPermissions.SETTINGS_FOOD_TAGS_READ },
+      { label: "Dietary tags",      href: "/food-tags/dietary-tags",     icon: Leaf,     requiredPermission: AdminPermissions.SETTINGS_FOOD_TAGS_READ },
+      { label: "Adoption",          href: "/vendor-categories/adoption", icon: PieChart, requiredPermission: AdminPermissions.SETTINGS_VENDOR_TYPES_READ },
+      // Revenue moved under Finance (CLAUDE.md, 2026-08-27) — catalog health
+      // (Adoption) stays here, financial reporting moved to where the rest of
+      // financial reporting lives. /vendor-categories/revenue still redirects
+      // to /finance/vendor-categories.
     ],
   },
   {

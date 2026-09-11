@@ -258,16 +258,26 @@ export interface VendorProfile {
   tagline : string | null
   description : string | null
   story : string | null
+  //* Short-lived signed R2 URLs, generated per response — never stored, never
+  //* stable. What is persisted is the storage key (VendorProfile.logoStorageKey
+  //* etc.); the bucket is private, so these are what a client can actually
+  //* render. Null when the vendor has not uploaded one.
   logoUrl : string | null
   coverImageUrl : string | null
+  //* The persisted keys, echoed back so an edit form can re-submit exactly what
+  //* is already saved without re-uploading. Never renderable on their own.
+  logoStorageKey : string | null
+  coverStorageKey : string | null
   publicEmail : string | null
   publicPhone : string | null
   website : string | null
   socialLinks : Record<string, string> | null
-  reservationLink : string | null
   primaryCuisineId : string | null
-  specialties : string[]
-  dietaryOptions : string[]
+  //* Admin-curated taxonomy the vendor selected from — replaced the old
+  //* free-text specialties[] / dietaryOptions[]. See the FOOD TAXONOMY block
+  //* in schema.prisma for why.
+  cuisines : VendorFoodTag[]
+  dietaryTags : VendorFoodTag[]
   foundedYear : number | null
   isVerifiedBadge : boolean
   isTopRated : boolean
@@ -276,7 +286,6 @@ export interface VendorProfile {
   isFeatured : boolean
   totalReviews : number
   averageRating : number
-  galleryImages : string[]
   videoUrls : string[]
   publishedAt : string | null
   //* Profanity/impersonation moderation — see admin.vendorProfile.service.ts
@@ -297,21 +306,57 @@ export interface VendorProfile {
 //* PATCH), same "whole profile at once" contract as most public-profile
 //* editors. Deliberately excludes every admin/system-owned field above
 //* (isVerifiedBadge, isPublished, reviewStatus, etc.).
+//* One entry in an admin-curated food-taxonomy catalog, as the vendor sees it.
+export interface VendorFoodTag {
+  id         : string
+  slug       : string
+  name       : string
+  description: string | null
+}
+
+//* What a vendor may choose from, plus the caps, so the form never has to
+//* hardcode a limit the backend owns.
+export interface VendorFoodTagOptions {
+  cuisines      : VendorFoodTag[]
+  dietaryTags   : VendorFoodTag[]
+  maxCuisines   : number
+  maxDietaryTags: number
+}
+
+//* No "gallery" — a vendor photo gallery was removed (2026-09-10): it
+//* advertises a physical venue, which a delivery-only marketplace has no
+//* reason to publish.
+export type ProfileMediaKind = "logo" | "cover"
+
+export interface ProfileMediaPresignRequest {
+  kind       : ProfileMediaKind
+  contentType: string
+  fileSize   : number
+}
+
+export interface ProfileMediaPresignResponse {
+  uploadUrl : string
+  storageKey: string
+}
+
 export interface UpsertVendorProfileRequest {
   displayName      : string
   tagline?         : string | null
   description?     : string | null
   story?           : string | null
-  logoUrl?         : string | null
-  coverImageUrl?   : string | null
+  //* Storage keys from the presign step, not URLs — the client uploads to R2
+  //* first and submits the key it was given. null clears the image.
+  logoStorageKey?     : string | null
+  coverStorageKey?    : string | null
   publicEmail?     : string | null
   publicPhone?     : string | null
   website?         : string | null
   socialLinks?     : Record<string, string> | null
-  reservationLink? : string | null
   primaryCuisineId?: string | null
-  specialties?     : string[]
-  dietaryOptions?  : string[]
+  //* Ids from VendorFoodTagOptions. Anything not enabled in the vendor's own
+  //* country is rejected, never silently dropped.
+  cuisineIds?      : string[]
+  dietaryTagIds?   : string[]
   foundedYear?     : number | null
 }
 

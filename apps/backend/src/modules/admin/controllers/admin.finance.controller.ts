@@ -3,7 +3,9 @@ import type { AdminRequest } from "@repo/types/backend"
 import { sendSuccess } from "@/helpers/api-response/response"
 import { ApiError } from "@/errors/ApiError"
 import { listOutletsForFinance, listCitiesForFinance } from "../services/admin.finance.service"
-import { listVendorPayoutAccounts, getVendorPayoutAccountForReview } from "../services/admin.financePayout.service"
+import {
+  listVendorPayoutAccounts, getVendorPayoutAccountForReview, getPayoutAccountAuditPage,
+} from "../services/admin.financePayout.service"
 import {
   claimPayoutAccountReview,
   releasePayoutAccountReview,
@@ -11,7 +13,9 @@ import {
   reassignPayoutAccountReview,
   listEligiblePayoutReviewTargets,
 } from "../services/admin.payoutReview.service"
-import { verifyPayoutAccount, rejectPayoutAccount } from "../services/admin.vendor.payout.service"
+import {
+  verifyPayoutAccount, rejectPayoutAccount, deactivatePayoutAccount, flagPayoutAccountForReview,
+} from "../services/admin.vendor.payout.service"
 import type { PayoutVerificationStatus } from "@repo/db"
 
 export const handleListOutletsForFinance: RequestHandler = async (req, res, next) => {
@@ -86,6 +90,44 @@ export const handleFinanceRejectPayoutAccount: RequestHandler = async (req, res,
     if (!reason?.trim()) throw new ApiError(400, "reason is required", "MISSING_FIELDS")
     const account = await rejectPayoutAccount(req.params.accountId as string, reason, adminUser.id, adminScope)
     return sendSuccess(res, account, "Payout account rejected")
+  } catch (err) { next(err) }
+}
+
+/*
+ * The two actions that replace "reject" once a verification is final. Reject
+ * writes FAILED, which would claim a completed verification never succeeded —
+ * see the service for why these are separate operations rather than a reuse.
+ */
+
+export const handleDeactivatePayoutAccount: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser, adminScope } = req as unknown as AdminRequest
+    const { reason } = req.body as { reason?: string }
+    if (!reason?.trim()) throw new ApiError(400, "reason is required", "MISSING_FIELDS")
+
+    const account = await deactivatePayoutAccount(req.params.accountId as string, reason, adminUser.id, adminScope)
+    return sendSuccess(res, account, "Payout account deactivated")
+  } catch (err) { next(err) }
+}
+
+//* GET /payout-accounts/:accountId/audit?page=
+export const handleGetPayoutAccountAudit: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminScope } = req as unknown as AdminRequest
+    const page = Number(req.query.page ?? 1)
+    const result = await getPayoutAccountAuditPage(req.params.accountId as string, adminScope, page)
+    return sendSuccess(res, result, "Audit history fetched")
+  } catch (err) { next(err) }
+}
+
+export const handleFlagPayoutAccount: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser, adminScope } = req as unknown as AdminRequest
+    const { reason } = req.body as { reason?: string }
+    if (!reason?.trim()) throw new ApiError(400, "reason is required", "MISSING_FIELDS")
+
+    const result = await flagPayoutAccountForReview(req.params.accountId as string, reason, adminUser.id, adminScope)
+    return sendSuccess(res, result, "Flagged for senior review")
   } catch (err) { next(err) }
 }
 

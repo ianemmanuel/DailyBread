@@ -1,6 +1,7 @@
 import { prisma, ProfileReviewStatus, VendorNotificationType } from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
 import { ApiError } from "@/middleware/error"
+import { signProfileMediaUrls } from "@/modules/vendor/services/vendor.profile.service"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
 import { getCountryIdFromSlug } from "../helpers/get-country-id.helper"
@@ -148,9 +149,52 @@ async function getProfileWithScope(vendorId: string, scope: AdminScopeContext) {
   return { vendor, profile }
 }
 
+/*
+ * The moderation detail page's one read.
+ *
+ * Deliberately richer than the list row: the whole point of the page is that a
+ * moderator sees every field a customer would, in one place, before deciding.
+ * That includes the LOGO AND COVER — /vendors/profiles could only ever moderate
+ * flagged text, so an inappropriate image had no surface to be acted on at all.
+ * The keys are private, so they leave as short-lived signed URLs, using the
+ * vendor module's own signer rather than a second copy that could drift.
+ *
+ * The reviewer id is resolved to a name here rather than on the page, so the
+ * frontend never needs a second round trip to answer "who decided this".
+ */
 export async function getVendorProfileForAdmin(vendorId: string, scope: AdminScopeContext) {
   const { vendor, profile } = await getProfileWithScope(vendorId, scope)
-  return { ...profile, vendor: { id: vendor.id, legalBusinessName: vendor.legalBusinessName, countryId: vendor.countryId } }
+
+  const [media, tags, reviewer] = await Promise.all([
+    signProfileMediaUrls(profile),
+    prisma.vendorProfile.findUnique({
+      where : { id: profile.id },
+      select: {
+        cuisines   : { select: { cuisine   : { select: { id: true, name: true, status: true } } } },
+        dietaryTags: { select: { dietaryTag: { select: { id: true, name: true, status: true } } } },
+      },
+    }),
+    profile.reviewedByAdminId
+      ? prisma.adminUser.findUnique({
+          where : { id: profile.reviewedByAdminId },
+          select: { firstName: true, lastName: true, email: true },
+        })
+      : Promise.resolve(null),
+  ])
+
+  return {
+    ...profile,
+    ...media,
+    cuisines   : (tags?.cuisines    ?? []).map((c) => c.cuisine),
+    dietaryTags: (tags?.dietaryTags ?? []).map((d) => d.dietaryTag),
+    reviewedBy : reviewer
+      ? {
+          name : [reviewer.firstName, reviewer.lastName].filter(Boolean).join(" ") || reviewer.email,
+          email: reviewer.email,
+        }
+      : null,
+    vendor: { id: vendor.id, legalBusinessName: vendor.legalBusinessName, countryId: vendor.countryId },
+  }
 }
 
 //* Approve — clears the flag (kept in flagReasons as history, not erased)

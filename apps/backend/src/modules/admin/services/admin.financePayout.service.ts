@@ -182,6 +182,77 @@ export interface PayoutAccountAuditEntry {
   metadata : unknown
 }
 
+/*
+ * The audit trail grows for the life of the account — every claim, release,
+ * escalation, reassignment and verdict — so the detail page reads it a page at
+ * a time rather than dumping the last 50 and silently hiding the rest.
+ */
+export const PAYOUT_AUDIT_PAGE_SIZE = 10
+
+export interface PayoutAuditPage {
+  entries   : PayoutAccountAuditEntry[]
+  total     : number
+  page      : number
+  pageSize  : number
+  totalPages: number
+}
+
+function toAuditEntry(a: {
+  id: string; action: string; createdAt: Date; changes: unknown; metadata: unknown
+  adminUser: { firstName: string; lastName: string; email: string } | null
+}): PayoutAccountAuditEntry {
+  return {
+    id       : a.id,
+    action   : a.action,
+    actor    : a.adminUser ? `${a.adminUser.firstName} ${a.adminUser.lastName}`.trim() || a.adminUser.email : null,
+    createdAt: a.createdAt.toISOString(),
+    changes  : a.changes,
+    metadata : a.metadata,
+  }
+}
+
+/**
+ * One page of an account's audit trail. Scope is re-checked here rather than
+ * trusted from the detail call — this is its own endpoint, and an accountId is
+ * the only thing a caller supplies.
+ */
+export async function getPayoutAccountAuditPage(
+  accountId: string,
+  scope    : AdminScopeContext,
+  page     : number,
+): Promise<PayoutAuditPage> {
+  const row = await prisma.vendorPayoutAccount.findUnique({
+    where : { id: accountId },
+    select: { id: true, vendor: { select: { countryId: true } } },
+  })
+  if (!row) throw new ApiError(404, "Payout account not found", "NOT_FOUND")
+  if (!scope.isGlobal && !scope.countryIds.includes(row.vendor.countryId)) {
+    throw new ApiError(404, "Payout account not found", "NOT_FOUND")
+  }
+
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1
+  const where = { entityType: "VendorPayoutAccount", entityId: accountId }
+
+  const [total, rows] = await Promise.all([
+    prisma.auditLog.count({ where }),
+    prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip   : (safePage - 1) * PAYOUT_AUDIT_PAGE_SIZE,
+      take   : PAYOUT_AUDIT_PAGE_SIZE,
+      include: { adminUser: { select: { firstName: true, lastName: true, email: true } } },
+    }),
+  ])
+
+  return {
+    entries   : rows.map(toAuditEntry),
+    total,
+    page      : safePage,
+    pageSize  : PAYOUT_AUDIT_PAGE_SIZE,
+    totalPages: Math.max(1, Math.ceil(total / PAYOUT_AUDIT_PAGE_SIZE)),
+  }
+}
+
 export async function getVendorPayoutAccountForReview(accountId: string, scope: AdminScopeContext) {
   const row = await prisma.vendorPayoutAccount.findUnique({ where: { id: accountId }, include: LIST_INCLUDE })
   // A soft-deleted account is still viewable for its history (§8) — only
@@ -191,12 +262,18 @@ export async function getVendorPayoutAccountForReview(accountId: string, scope: 
     throw new ApiError(404, "Payout account not found", "NOT_FOUND")
   }
 
-  const auditRows = await prisma.auditLog.findMany({
-    where  : { entityType: "VendorPayoutAccount", entityId: accountId },
-    orderBy: { createdAt: "desc" },
-    take   : 50,
-    include: { adminUser: { select: { firstName: true, lastName: true, email: true } } },
-  })
+  // The first page only — the rest is paged in on demand via
+  // getPayoutAccountAuditPage, so opening an account with a long history
+  // doesn't drag its whole trail through the initial render.
+  const [auditTotal, auditRows] = await Promise.all([
+    prisma.auditLog.count({ where: { entityType: "VendorPayoutAccount", entityId: accountId } }),
+    prisma.auditLog.findMany({
+      where  : { entityType: "VendorPayoutAccount", entityId: accountId },
+      orderBy: { createdAt: "desc" },
+      take   : PAYOUT_AUDIT_PAGE_SIZE,
+      include: { adminUser: { select: { firstName: true, lastName: true, email: true } } },
+    }),
+  ])
 
   const assignee = row.assignedReviewerId
     ? await prisma.adminUser.findUnique({
@@ -282,13 +359,8 @@ export async function getVendorPayoutAccountForReview(accountId: string, scope: 
     proofDocuments,
     canVerify: gate.ok,
     verifyBlockedReason: gate.ok ? null : gate.reason,
-    audit: auditRows.map((a) => ({
-      id      : a.id,
-      action  : a.action,
-      actor   : a.adminUser ? `${a.adminUser.firstName} ${a.adminUser.lastName}`.trim() || a.adminUser.email : null,
-      createdAt: a.createdAt.toISOString(),
-      changes : a.changes,
-      metadata: a.metadata,
-    })) satisfies PayoutAccountAuditEntry[],
+    audit: auditRows.map(toAuditEntry) satisfies PayoutAccountAuditEntry[],
+    auditTotal,
+    auditPageSize: PAYOUT_AUDIT_PAGE_SIZE,
   }
 }

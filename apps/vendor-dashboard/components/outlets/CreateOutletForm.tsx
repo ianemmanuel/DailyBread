@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useForm } from "@tanstack/react-form"
 import { toast } from "sonner"
@@ -24,8 +25,27 @@ import {
   BadgeDollarSign,
 } from "lucide-react"
 import { SearchableCombobox } from "@/components/onboarding/SearchableCombobox"
+import dynamic from "next/dynamic"
+import type { AddressSuggestion } from "@/components/outlets/OutletLocationPicker"
+
+/*
+ * The map is the point of this form, so it renders straight away — but
+ * mapbox-gl is ~1.8 MB, and loading it as a separate chunk lets the rest of
+ * the form paint and accept typing while it arrives, instead of everything
+ * waiting on it.
+ */
+const OutletLocationPicker = dynamic(
+  () => import("@/components/outlets/OutletLocationPicker").then((m) => m.OutletLocationPicker),
+  {
+    ssr    : false,
+    loading: () => (
+      <div className="h-[420px] w-full animate-pulse rounded-2xl bg-[var(--muted)]/30" />
+    ),
+  },
+)
 import { createOutletSchema } from "@/lib/validations/create-outlet"
 import type { City } from "@/types/outlet"
+import type { OutletPlacement } from "@repo/types/vendor-app"
 
 interface Props { cities: City[] }
 
@@ -78,6 +98,28 @@ export function CreateOutletForm({ cities }: Props) {
   const router = useRouter()
 
   /*
+   * The backend's verdict for the current pin, kept here so the submit button
+   * can refuse a location createOutlet would reject anyway. Presentation only
+   * — vendor.outlet.service re-resolves the point on save and stays the gate.
+   */
+  const [placement, setPlacement] = useState<OutletPlacement | null>(null)
+  const outsideCoverage = placement != null && !placement.canRegister
+
+  /*
+   * Address fields filled from the map. A search result is a deliberate choice
+   * by the vendor, so it replaces what is there; a dragged pin only fills gaps,
+   * because nudging the marker should not quietly rewrite an address they typed
+   * by hand.
+   */
+  function applyAddressSuggestion(parts: AddressSuggestion, replace: boolean) {
+    for (const key of ["addressLine1", "neighborhood", "postalCode"] as const) {
+      const suggested = parts[key]
+      if (!suggested) continue
+      if (replace || !form.getFieldValue(key)) form.setFieldValue(key, suggested)
+    }
+  }
+
+  /*
     No <FormValues> type argument.
     TanStack Form v1 infers all types from defaultValues.
     Passing an explicit type causes "Expected 12 type arguments" TS error.
@@ -102,6 +144,16 @@ export function CreateOutletForm({ cities }: Props) {
     onSubmit: async ({ value }) => {
       const parsed = createOutletSchema.safeParse(value)
       if (!parsed.success) return   // field-level errors already visible inline
+
+      // Belt and braces with the disabled button above — createOutlet refuses
+      // this too, but a 400 the vendor was already warned about is a worse
+      // experience than never sending the request.
+      if (outsideCoverage) {
+        toast.error("That location is outside the area we cover", {
+          description: "Move your pin inside the highlighted area and try again.",
+        })
+        return
+      }
 
       const payload = {
         ...parsed.data,
@@ -184,35 +236,6 @@ export function CreateOutletForm({ cities }: Props) {
             )}
           </form.Field>
 
-          <form.Field
-            name="cityId"
-            validators={{
-              onChange: ({ value }) => (value ? undefined : "Please select a city"),
-            }}
-          >
-            {(field) => (
-              <div className="space-y-1.5">
-                <Label htmlFor="cityId">
-                  City <span className="text-[var(--destructive)]">*</span>
-                </Label>
-                <SearchableCombobox
-                  aria-label="City"
-                  options={cities.map((c) => ({ value: c.id, label: c.name }))}
-                  value={field.state.value || undefined}
-                  onChange={field.handleChange}
-                  placeholder={cities.length ? "Select city…" : "No active cities available"}
-                  searchPlaceholder="Search cities…"
-                  emptyText="No matching city."
-                  disabled={cities.length === 0}
-                />
-                <p className="text-xs text-[var(--muted-foreground)]">
-                  Cities where DailyBread currently operates in your country.
-                </p>
-                <InlineError errors={field.state.meta.errors} touched={field.state.meta.isTouched} />
-              </div>
-            )}
-          </form.Field>
-
           <form.Field name="phone">
             {(field) => (
               <div className="space-y-1.5">
@@ -290,7 +313,67 @@ export function CreateOutletForm({ cities }: Props) {
       </Section>
 
       {/* ── 2. Address ─────────────────────────────── */}
-      <Section icon={MapPin} title="Location" description="Physical address for your outlet">
+      <Section
+        icon={MapPin}
+        title="Location"
+        description="Where this outlet operates — and what we can do there"
+      >
+        {/* City drives everything below it: the map, the coverage overlay and
+            the verdict. So it leads the section rather than sitting up with
+            the outlet's name. */}
+        <form.Field
+          name="cityId"
+          validators={{
+            onChange: ({ value }) => (value ? undefined : "Please select a city"),
+          }}
+        >
+          {(field) => (
+            <div className="space-y-1.5">
+              <Label htmlFor="cityId">
+                City <span className="text-[var(--destructive)]">*</span>
+              </Label>
+              <SearchableCombobox
+                aria-label="City"
+                options={cities.map((c) => ({ value: c.id, label: c.name }))}
+                value={field.state.value || undefined}
+                onChange={(v) => {
+                  field.handleChange(v)
+                  // A pin from the previous city is meaningless here — clear it
+                  // rather than silently carrying coordinates across cities.
+                  form.setFieldValue("latitude", "" as unknown as number)
+                  form.setFieldValue("longitude", "" as unknown as number)
+                  setPlacement(null)
+                }}
+                placeholder={cities.length ? "Select city…" : "No active cities available"}
+                searchPlaceholder="Search cities…"
+                emptyText="No matching city."
+                disabled={cities.length === 0}
+              />
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Cities where DailyBread currently operates in your country.
+              </p>
+              <InlineError errors={field.state.meta.errors} touched={field.state.meta.isTouched} />
+            </div>
+          )}
+        </form.Field>
+
+        <form.Subscribe selector={(s) => [s.values.cityId, s.values.latitude, s.values.longitude] as const}>
+          {([cityId, lat, lng]) => (
+            <OutletLocationPicker
+              cityId={cityId as string}
+              cityName={cities.find((c) => c.id === cityId)?.name}
+              latitude={typeof lat === "number" && !isNaN(lat) ? lat : null}
+              longitude={typeof lng === "number" && !isNaN(lng) ? lng : null}
+              onPick={(latitude, longitude) => {
+                form.setFieldValue("latitude", latitude)
+                form.setFieldValue("longitude", longitude)
+              }}
+              onAddressSuggested={applyAddressSuggestion}
+              onPlacementChange={setPlacement}
+            />
+          )}
+        </form.Subscribe>
+
         <form.Field
           name="addressLine1"
           validators={{
@@ -338,26 +421,15 @@ export function CreateOutletForm({ cities }: Props) {
           ))}
         </div>
 
-        {/* Coordinates — the map picker that ties a pin to the city's
-            operational area is a separate, later initiative; for now the
-            vendor supplies coordinates and the backend validates them
-            against the city (and its boundary, where one is configured). */}
-        <div className="space-y-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <p className="text-sm font-medium text-[var(--foreground)]">Coordinates</p>
-            <a
-              href="https://www.google.com/maps"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-[var(--primary)] underline-offset-2 hover:underline"
-            >
-              Look up on Google Maps ↗
-            </a>
-          </div>
-          <p className="text-xs text-[var(--muted-foreground)]">
-            Right-click your exact location in Google Maps and copy the latitude and longitude.
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2">
+        {/* Manual coordinates stay available as an escape hatch — the map is
+            unavailable without a Mapbox token, and a vendor who already knows
+            their exact coordinates should not be forced through it. The picker
+            renders these same values, so typing here moves the pin. */}
+        <details className="rounded-xl border border-[var(--border)] px-3.5 py-2.5">
+          <summary className="cursor-pointer list-none text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
+            Enter coordinates manually
+          </summary>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
             {(["latitude", "longitude"] as const).map((name) => (
               <form.Field
                 key={name}
@@ -407,7 +479,8 @@ export function CreateOutletForm({ cities }: Props) {
               </form.Field>
             ))}
           </div>
-        </div>
+        </details>
+
       </Section>
 
       {/* ── 3. Delivery & Pricing ──────────────────── */}
@@ -463,8 +536,8 @@ export function CreateOutletForm({ cities }: Props) {
         {(isSubmitting) => (
           <Button
             type="submit"
-            disabled={isSubmitting}
-            className="w-full gap-2 rounded-xl"
+            disabled={isSubmitting || outsideCoverage}
+            className="w-full gap-2 rounded-xl disabled:opacity-60"
             style={{
               background: "var(--primary)",
               color     : "var(--primary-foreground)",
@@ -479,6 +552,19 @@ export function CreateOutletForm({ cities }: Props) {
           </Button>
         )}
       </form.Subscribe>
+
+      {/* Answers "is that everything?" before they wonder. Hours and documents
+          both need an outlet id, so neither can be part of creating one. */}
+      <p className="-mt-3 text-center text-xs text-[var(--muted-foreground)]">
+        You&apos;ll set opening hours and upload any required documents on the outlet&apos;s own page next.
+      </p>
+
+      {outsideCoverage && (
+        <p className="-mt-3 text-center text-xs text-[var(--destructive)]">
+          Move your pin inside the highlighted area to continue — we can&apos;t register an outlet outside the
+          area we cover in this city.
+        </p>
+      )}
     </form>
   )
 }

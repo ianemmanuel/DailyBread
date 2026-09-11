@@ -5,7 +5,12 @@ import { auditService } from "@/services/audit"
 import { SYSTEM_USER_ID } from "@/constants/system"
 import { getModerationProvider, checkImpersonation, type ModerationFlag } from "@/lib/moderation"
 import { notifyAdminsProfileFlagged } from "@/lib/moderation/profile-flag-notify"
-import type { UpsertVendorProfileRequest, VendorGoLiveStatus, VendorGoLiveBlocker } from "@repo/types/backend"
+import { R2Service } from "@/lib/r2/r2.service"
+import { normalizeSingleKey } from "./vendor.profileMedia"
+import { resolveSelectedFoodTags } from "./vendor.foodTags"
+import type {
+  UpsertVendorProfileRequest, VendorGoLiveStatus, VendorGoLiveBlocker, VendorFoodTag,
+} from "@repo/types/backend"
 
 const serviceLog = logger.child({ module: "vendor-profile-service" })
 
@@ -57,9 +62,106 @@ function logFlagEvent(profileId: string, flagReasons: string[], flagDetails: Mod
 
 //* Get
 
+const PROFILE_INCLUDE = {
+  cuisines   : { select: { cuisine: { select: { id: true, slug: true, name: true, description: true } } } },
+  dietaryTags: { select: { dietaryTag: { select: { id: true, slug: true, name: true, description: true } } } },
+} as const
+
+type ProfileWithTags = Prisma.VendorProfileGetPayload<{ include: typeof PROFILE_INCLUDE }>
+
+/*
+ * The single exit point for a profile to any client.
+ *
+ * The bucket is private, so a stored key is useless to a browser — every read
+ * mints short-lived signed URLs here and pairs each gallery URL with the key
+ * it came from, so an edit form can render an image and still know what to
+ * re-submit. Keys are echoed back too; URLs are never persisted anywhere.
+ *
+ * Signing is best-effort per image: one unreadable object (a deleted or
+ * mis-keyed file) degrades to a null URL rather than failing the whole page.
+ */
+async function presentVendorProfile(profile: ProfileWithTags) {
+  const [logoUrl, coverImageUrl] = await Promise.all([
+    signOrNull(profile.logoStorageKey),
+    signOrNull(profile.coverStorageKey),
+  ])
+
+  const { cuisines, dietaryTags, ...rest } = profile
+
+  return {
+    ...rest,
+    logoUrl,
+    coverImageUrl,
+    cuisines   : cuisines.map((c) => c.cuisine) as VendorFoodTag[],
+    dietaryTags: dietaryTags.map((d) => d.dietaryTag) as VendorFoodTag[],
+  }
+}
+
+/*
+ * The bucket is private, so a stored key is only ever useful as a short-lived
+ * signed URL. Exported because the ADMIN moderation surface needs exactly the
+ * same treatment: /vendors/profiles/[id] has to show the logo and cover, or a
+ * moderator cannot act on an inappropriate image. Admin importing vendor is
+ * allowed (the ban is the other direction); duplicating the signing would give
+ * two places that could drift on how a failure degrades.
+ */
+export async function signProfileMediaUrls(
+  profile: { logoStorageKey: string | null; coverStorageKey: string | null },
+): Promise<{ logoUrl: string | null; coverImageUrl: string | null }> {
+  const [logoUrl, coverImageUrl] = await Promise.all([
+    signOrNull(profile.logoStorageKey),
+    signOrNull(profile.coverStorageKey),
+  ])
+  return { logoUrl, coverImageUrl }
+}
+
+async function signOrNull(storageKey: string | null): Promise<string | null> {
+  if (!storageKey) return null
+  try {
+    return await R2Service.generateViewUrl(storageKey)
+  } catch (err) {
+    serviceLog.warn({ err, storageKey }, "Failed to sign profile media URL")
+    return null
+  }
+}
+
+/*
+ * Deletes bucket objects a save has just orphaned — the previous logo or cover
+ * when a new one is uploaded. Without this, every replacement would leak a
+ * paid-for object nothing can ever reach again.
+ *
+ * Only keys that were referenced BEFORE and are not referenced AFTER are
+ * touched, so an unchanged image is never deleted.
+ */
+async function discardOrphanedMedia(
+  before: { logoStorageKey: string | null; coverStorageKey: string | null } | null,
+  after : { logoStorageKey: string | null; coverStorageKey: string | null },
+): Promise<void> {
+  if (!before) return
+
+  const kept = new Set(
+    [after.logoStorageKey, after.coverStorageKey].filter((k): k is string => !!k),
+  )
+  const orphaned = [before.logoStorageKey, before.coverStorageKey]
+    .filter((k): k is string => !!k)
+    .filter((k) => !kept.has(k))
+
+  for (const storageKey of orphaned) {
+    try {
+      await R2Service.deleteObject(storageKey)
+    } catch (err) {
+      serviceLog.warn({ err, storageKey }, "Failed to delete orphaned profile media")
+    }
+  }
+}
+
 export async function getVendorProfile(vendorId: string) {
   await loadActiveVendor(vendorId)
-  return prisma.vendorProfile.findUnique({ where: { vendorAccountId: vendorId } })
+  const profile = await prisma.vendorProfile.findUnique({
+    where  : { vendorAccountId: vendorId },
+    include: PROFILE_INCLUDE,
+  })
+  return profile ? presentVendorProfile(profile) : null
 }
 
 //* Create or update — a full-form save, not a partial PATCH (see
@@ -125,21 +227,31 @@ export async function upsertVendorProfile(vendorId: string, input: UpsertVendorP
     staleNotifiedAt = null
   }
 
+  /*
+   * Media arrives as R2 storage keys the client already uploaded to via the
+   * presign step — never as bytes and never as a URL. Every key is proved to
+   * belong to this vendor before it is written (assertOwnedProfileMediaKey),
+   * so a hand-crafted request can't point a profile at another vendor's file.
+   */
+  const logoStorageKey  = normalizeSingleKey(input.logoStorageKey, vendorId)
+  const coverStorageKey = normalizeSingleKey(input.coverStorageKey, vendorId)
+
+  // Rejects anything not currently enabled in the vendor's own country rather
+  // than silently dropping it — see resolveSelectedFoodTags.
+  const { cuisineIds, dietaryTagIds } = await resolveSelectedFoodTags(vendor.countryId, input)
+
   const data = {
     displayName,
     tagline,
     description,
     story,
-    logoUrl         : input.logoUrl?.trim()         || null,
-    coverImageUrl   : input.coverImageUrl?.trim()   || null,
+    logoStorageKey,
+    coverStorageKey,
     publicEmail     : input.publicEmail?.trim()     || null,
     publicPhone     : input.publicPhone?.trim()     || null,
     website         : input.website?.trim()         || null,
     socialLinks     : input.socialLinks ? (JSON.parse(JSON.stringify(input.socialLinks)) as Prisma.InputJsonValue) : Prisma.JsonNull,
-    reservationLink : input.reservationLink?.trim() || null,
     primaryCuisineId: input.primaryCuisineId || null,
-    specialties     : input.specialties ?? [],
-    dietaryOptions  : input.dietaryOptions ?? [],
     foundedYear     : input.foundedYear ?? null,
     reviewStatus,
     flagReasons,
@@ -151,9 +263,45 @@ export async function upsertVendorProfile(vendorId: string, input: UpsertVendorP
     staleNotifiedAt,
   }
 
-  const profile = existing
-    ? await prisma.vendorProfile.update({ where: { id: existing.id }, data })
-    : await prisma.vendorProfile.create({ data: { vendorAccountId: vendorId, ...data } })
+  /*
+   * One transaction: the profile row and its tag selections have to move
+   * together, or a failed second write would leave a saved profile claiming
+   * cuisines the vendor just removed.
+   *
+   * Selections are replaced wholesale (delete-then-create) rather than diffed
+   * — this is a full-form save, the join rows carry no state of their own, and
+   * a diff would be more code for an identical result.
+   */
+  const profile = await prisma.$transaction(async (tx) => {
+    const saved = existing
+      ? await tx.vendorProfile.update({ where: { id: existing.id }, data })
+      : await tx.vendorProfile.create({ data: { vendorAccountId: vendorId, ...data } })
+
+    if (existing) {
+      await tx.vendorProfileCuisine.deleteMany({ where: { vendorProfileId: saved.id } })
+      await tx.vendorProfileDietaryTag.deleteMany({ where: { vendorProfileId: saved.id } })
+    }
+    if (cuisineIds.length > 0) {
+      await tx.vendorProfileCuisine.createMany({
+        data: cuisineIds.map((cuisineId) => ({ vendorProfileId: saved.id, cuisineId })),
+      })
+    }
+    if (dietaryTagIds.length > 0) {
+      await tx.vendorProfileDietaryTag.createMany({
+        data: dietaryTagIds.map((dietaryTagId) => ({ vendorProfileId: saved.id, dietaryTagId })),
+      })
+    }
+
+    return saved
+  })
+
+  /*
+   * Media the vendor replaced is now unreferenced, so remove it from the
+   * bucket. Best-effort and after the transaction on purpose: a storage hiccup
+   * must never roll back a save the vendor was told succeeded — the same
+   * trade-off upsertVendorDocument already makes on replace.
+   */
+  void discardOrphanedMedia(existing, { logoStorageKey, coverStorageKey })
 
   if (contentChanged && reviewStatus === ProfileReviewStatus.FLAGGED) {
     serviceLog.warn({ vendorId, profileId: profile.id, flagReasons }, "Vendor profile flagged — pending admin review")
@@ -172,7 +320,14 @@ export async function upsertVendorProfile(vendorId: string, input: UpsertVendorP
     serviceLog.info({ vendorId, profileId: profile.id }, existing ? "Vendor profile updated" : "Vendor profile created")
   }
 
-  return profile
+  // Re-read with the tag joins so the caller gets the same shape as
+  // getVendorProfile — signed media URLs and resolved tags — rather than a
+  // bare row the form would then have to refetch to render.
+  const saved = await prisma.vendorProfile.findUniqueOrThrow({
+    where  : { id: profile.id },
+    include: PROFILE_INCLUDE,
+  })
+  return presentVendorProfile(saved)
 }
 
 //* Go-live status — payout + profile + outlet, following how Uber Eats /

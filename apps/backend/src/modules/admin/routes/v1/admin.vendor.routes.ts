@@ -62,6 +62,14 @@ import {
   handleRejectVendorProfile,
 } from "../../controllers/admin.vendorProfile.controller"
 import {
+  handleListMenuItems,
+  handleExportMenuItemsCsv,
+  handleGetMenuItem,
+  handleApproveMenuItem,
+  handleSendBackMenuItem,
+  handleSetMenuItemStatus,
+} from "../../controllers/admin.menuItem.controller"
+import {
   handleListOutlets,
   handleExportOutletsCsv,
   handleGetOutletForAdmin,
@@ -254,6 +262,20 @@ vendorRouter.patch("/appeals/:id/resolve", requirePermission(AdminPermissions.VE
 // see admin.vendor.appeal.service.ts). Profile flags are a single fast
 // binary verdict on an auto-detected issue, not a multi-step
 // investigation — see admin.vendorProfile.service.ts's file comment.
+//* Meals — vendor-authored menu content. Mounted here rather than as its own
+//* top-level router for the same reason outlets and profiles are: this file is
+//* where vendor-authored content moderation lives.
+const MEALS_READ     = requirePermission(AdminPermissions.VENDORS_MEALS_READ)
+const MEALS_MODERATE = requirePermission(AdminPermissions.VENDORS_MEALS_MODERATE)
+
+vendorRouter.get("/meals", MEALS_READ, handleListMenuItems)
+// Before "/meals/:itemId", or the literal segment parses as an id and 404s.
+vendorRouter.get("/meals/export", MEALS_READ, handleExportMenuItemsCsv)
+vendorRouter.get("/meals/:itemId", MEALS_READ, handleGetMenuItem)
+vendorRouter.post("/meals/:itemId/approve",   MEALS_MODERATE, handleApproveMenuItem)
+vendorRouter.post("/meals/:itemId/send-back", MEALS_MODERATE, handleSendBackMenuItem)
+vendorRouter.post("/meals/:itemId/status",    MEALS_MODERATE, handleSetMenuItemStatus)
+
 vendorRouter.get("/profiles", requirePermission(AdminPermissions.VENDORS_PROFILES_READ), handleListVendorProfiles)
 // Must be registered before "/profiles/:vendorId".
 vendorRouter.get("/profiles/export", requirePermission(AdminPermissions.VENDORS_PROFILES_READ), handleExportVendorProfilesCsv)

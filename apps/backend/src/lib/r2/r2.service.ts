@@ -69,6 +69,60 @@ export const R2Service = {
     return `payout-docs/${methodSlug}/${vendorId}/${uuid}${ext}`
   },
 
+  /*
+   * Vendor public-profile media, grouped by what the image is for:
+   *
+   *   profile-media/logo/<vendorId>/<uuid>.png
+   *   profile-media/cover/<vendorId>/<uuid>.jpg
+   *   profile-media/gallery/<vendorId>/<uuid>.webp
+   *
+   * The vendorId segment is load-bearing, not decoration: it is what lets the
+   * discard endpoint prove a key belongs to the caller before deleting it
+   * (see assertOwnedProfileMediaKey). Without it, "delete this key" would be
+   * a delete-anything primitive.
+   *
+   * Keyed on the vendor ACCOUNT id for the same reason as the payout proofs —
+   * the profile belongs to the business, not to one vendor user.
+   */
+  generateProfileMediaKey(
+    kind     : string,
+    vendorId : string,
+    extension: string,
+  ) {
+    const uuid = crypto.randomUUID()
+    const ext = extension ? `.${extension}` : ""
+
+    return `profile-media/${kind}/${vendorId}/${uuid}${ext}`
+  },
+
+  /*
+   * Menu photography:
+   *
+   *   meal-images/<vendorId>/<uuid>.jpg
+   *
+   * Keyed on the vendor account id, per explicit product direction, and NOT on
+   * the outlet. A dish is authored once by the vendor and sold at any number of
+   * its outlets (see MenuItem / Meal), so an outlet segment would either force
+   * the same photo to be re-uploaded per branch or leave the key pointing at
+   * whichever outlet happened to be first — both wrong.
+   *
+   * No kind segment either, unlike profile media: the main image and the
+   * gallery are the same kind of thing here, and which one a key is currently
+   * serving as is a property of the row, not of the object. That also means
+   * promoting a gallery shot to the main image is a column change and never a
+   * copy.
+   *
+   * The vendorId segment is load-bearing for the same reason it is on profile
+   * media: it is what lets the discard endpoint prove a key belongs to the
+   * caller before deleting it.
+   */
+  generateMealImageKey(vendorId: string, extension: string) {
+    const uuid = crypto.randomUUID()
+    const ext = extension ? `.${extension}` : ""
+
+    return `meal-images/${vendorId}/${uuid}${ext}`
+  },
+
   async generateUploadUrl(storageKey: string, contentType: string) {
     const command = new PutObjectCommand({
       Bucket: BUCKET,

@@ -7,6 +7,8 @@ import { getAdminSession } from "@/lib/auth/session"
 import { PayoutAccountReviewActions } from "@/components/finance/PayoutAccountReviewActions"
 import { PayoutProofSheet } from "@/components/finance/PayoutProofSheet"
 import { PayoutReviewActions } from "@/components/finance/PayoutReviewActions"
+import { PayoutDecidedActions } from "@/components/finance/PayoutDecidedActions"
+import { PayoutAuditHistory } from "@/components/finance/PayoutAuditHistory"
 import {
   PAYOUT_STATUS_BADGE, PAYOUT_STATUS_LABEL, PAYOUT_FAILURE_LABEL,
 } from "@/components/finance/payout-account-status"
@@ -57,6 +59,10 @@ export default async function PayoutAccountDetailPage({ params }: PageProps) {
 
   const a = detail.account
   const lifecycleStatus = a.isActive ? a.verificationStatus : "DEACTIVATED"
+  // VERIFIED / FAILED are the terminal verification outcomes — the same set
+  // payoutReviewState treats as RESOLVED on the backend.
+  const isDecided = a.verificationStatus === "VERIFIED" || a.verificationStatus === "FAILED"
+  const identifier = `${a.bankName ?? a.methodName} ${a.maskedAccount}`
 
   return (
     <div className="page-content animate-slide-up">
@@ -85,15 +91,32 @@ export default async function PayoutAccountDetailPage({ params }: PageProps) {
             </p>
           </div>
         </div>
-        {canManage && a.isActive && (
+        {/*
+          Two mutually exclusive action sets. While the review is live: verify
+          and reject, and only for the admin who actually holds the claim,
+          since the backend requires it. Once the verification is final,
+          reject would overwrite a completed decision as a failure — so
+          deactivate and flag-for-senior-review take its place.
+        */}
+        {canManage && a.isActive && !isDecided && (
           <PayoutAccountReviewActions
             accountId={a.id}
-            identifier={`${a.bankName ?? a.methodName} ${a.maskedAccount}`}
+            identifier={identifier}
             verificationStatus={a.verificationStatus}
             canVerify={detail.canVerify}
             verifyBlockedReason={detail.verifyBlockedReason}
             canManage={canManage}
+            isClaimedByMe={detail.assignedReviewerId === session.id}
             variant="full"
+          />
+        )}
+        {canManage && isDecided && (
+          <PayoutDecidedActions
+            accountId={a.id}
+            identifier={identifier}
+            vendorName={a.vendorName}
+            isActive={a.isActive}
+            canManage={canManage}
           />
         )}
       </div>
@@ -219,7 +242,7 @@ export default async function PayoutAccountDetailPage({ params }: PageProps) {
                 <PayoutProofSheet doc={d}>
                   <button
                     type="button"
-                    className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                    className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted"
                   >
                     View
                   </button>
@@ -230,24 +253,12 @@ export default async function PayoutAccountDetailPage({ params }: PageProps) {
         </div>
       )}
 
-      <div className="admin-card">
-        <h2 className="mb-3 text-sm font-semibold text-foreground">Review &amp; audit history</h2>
-        {detail.audit.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No recorded actions yet.</p>
-        ) : (
-          <ul className="space-y-2.5">
-            {detail.audit.map((e) => (
-              <li key={e.id} className="flex flex-col gap-0.5 border-b border-border/50 pb-2.5 last:border-0 sm:flex-row sm:items-baseline sm:justify-between">
-                <span className="text-sm text-foreground">
-                  <span className="font-mono text-xs text-muted-foreground">{e.action}</span>
-                  {e.actor ? ` · ${e.actor}` : ""}
-                </span>
-                <span className="text-xs text-muted-foreground">{new Date(e.createdAt).toLocaleString()}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <PayoutAuditHistory
+        accountId={a.id}
+        initial={detail.audit}
+        total={detail.auditTotal}
+        pageSize={detail.auditPageSize}
+      />
     </div>
   )
 }

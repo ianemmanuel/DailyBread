@@ -25,6 +25,7 @@ export function buildScopeContext(req: Request, _res: Response, next: NextFuncti
       isGlobal   : true,
       countryIds : [],
       cityIds    : [],
+      tier       : "GLOBAL",
     } satisfies AdminScopeContext
     return next()
   }
@@ -42,10 +43,20 @@ export function buildScopeContext(req: Request, _res: Response, next: NextFuncti
     }
   }
 
+  /*
+   * A CITY scope's own country is folded into countryIds above so city-scoped
+   * READS stay correctly filtered to their country's data. That makes a
+   * city admin indistinguishable from a country admin by countryIds alone, so
+   * the tier is recorded separately — country-WIDE policy decisions gate on
+   * it. Same definition as the frontend's getScopeTier.
+   */
+  const hasCountryScope = scopes.some((s) => s.scopeType === AdminScopeType.COUNTRY)
+
   ;(req as Partial<AdminRequest>).adminScope = {
     isGlobal   : false,
     countryIds : Array.from(countryIds),
     cityIds    : Array.from(cityIds),
+    tier       : hasCountryScope ? "COUNTRY" : "CITY",
   } satisfies AdminScopeContext
 
   next()
