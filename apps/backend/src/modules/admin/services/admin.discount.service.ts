@@ -4,7 +4,8 @@ import type { AdminScopeContext } from "@repo/types/backend"
 import { ApiError } from "@/errors/ApiError"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
-import { deriveDiscountState, isWithinWindow } from "@/lib/pricing/discount"
+import { deriveDiscountState, isWithinWindow, type DiscountState } from "@/lib/pricing/discount"
+import { isFilterableState } from "@/lib/pricing/discount-state-filter"
 
 /*
  * Admin oversight of vendor offers.
@@ -67,13 +68,6 @@ function present(row: Row, now: Date) {
   }
 }
 
-/** The one scope predicate. A vendor belongs to exactly one country, so this is
- *  the same shape every other vendor service in this module uses. */
-function scopeWhere(scope: AdminScopeContext): Prisma.DiscountWhereInput {
-  if (scope.isGlobal) return {}
-  return { vendor: { countryId: { in: scope.countryIds } } }
-}
-
 export interface ListDiscountsParams {
   search?    : string
   state?     : string
@@ -83,16 +77,67 @@ export interface ListDiscountsParams {
   pageSize?  : number
 }
 
-/**
- * Every offer the caller is entitled to see.
+/*
+ * The derived state, as query conditions.
  *
- * `state` is derived rather than stored, so it cannot be filtered in SQL. The
- * filter is applied after presenting, over a bounded scan — the same approach
- * the compliance and application-priority scans take, and honest about being an
- * admin-tool-scale ceiling rather than a claim of unlimited scale.
+ * `state` is computed rather than stored, which normally forces a scan-and-
+ * filter. Every input it uses is on the row or on the clock, though, and
+ * Prisma supports field references, so the whole thing expresses in SQL and the
+ * list paginates properly.
+ *
+ * This is a TRANSCRIPTION of deriveDiscountState and the pair can drift, which
+ * is the real cost of doing it this way. The guard is
+ * lib/pricing/discount-state-filter.ts: `matchesState` states the same
+ * conditions against an in-memory row and the test asserts it agrees with the
+ * pure function for every state. Change the precedence in one and the suite
+ * fails.
+ *
+ * Precedence is identical to the pure function — suspended, paused, expired,
+ * exhausted, scheduled, awaiting-go-live, running — so each clause excludes the
+ * ones above it.
  */
-export const MAX_DISCOUNT_SCAN = 2_000
+function stateWhere(state: DiscountState, now: Date): Prisma.DiscountWhereInput {
+  const notSuspended = { suspendedAt: null }
+  const notPaused = { isPaused: false }
+  const notExpired: Prisma.DiscountWhereInput = {
+    OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+  }
+  /* Exhausted needs column-to-column comparison, which is exactly what Prisma
+   * field references are for. Either cap being met is enough. */
+  const exhausted: Prisma.DiscountWhereInput = {
+    OR: [
+      { AND: [{ budgetMinor: { not: null } }, { spentMinor: { gte: prisma.discount.fields.budgetMinor } }] },
+      { AND: [{ maxRedemptions: { not: null } }, { redemptionCount: { gte: prisma.discount.fields.maxRedemptions } }] },
+    ],
+  }
+  const notExhausted: Prisma.DiscountWhereInput = { NOT: exhausted }
+  const started = { startsAt: { lte: now } }
+  const live: Prisma.DiscountWhereInput = { vendor: { vendorProfile: { isPublished: true } } }
+  const notLive: Prisma.DiscountWhereInput = {
+    NOT: { vendor: { vendorProfile: { isPublished: true } } },
+  }
 
+  switch (state) {
+    case "SUSPENDED":
+      return { suspendedAt: { not: null } }
+    case "PAUSED":
+      return { AND: [notSuspended, { isPaused: true }] }
+    case "EXPIRED":
+      return { AND: [notSuspended, notPaused, { endsAt: { lte: now } }] }
+    case "EXHAUSTED":
+      return { AND: [notSuspended, notPaused, notExpired, exhausted] }
+    case "SCHEDULED":
+      return { AND: [notSuspended, notPaused, notExpired, notExhausted, { startsAt: { gt: now } }] }
+    case "AWAITING_GO_LIVE":
+      return { AND: [notSuspended, notPaused, notExpired, notExhausted, started, notLive] }
+    case "RUNNING":
+      return { AND: [notSuspended, notPaused, notExpired, notExhausted, started, live] }
+  }
+}
+
+/**
+ * Every offer the caller is entitled to see, paginated in the database.
+ */
 export async function listDiscountsForAdmin(scope: AdminScopeContext, params: ListDiscountsParams = {}) {
   const page = Math.max(params.page ?? 1, 1)
   const pageSize = Math.min(Math.max(params.pageSize ?? 20, 1), 100)
@@ -102,10 +147,20 @@ export async function listDiscountsForAdmin(scope: AdminScopeContext, params: Li
     throw new ApiError(403, "This country is outside your scope", "SCOPE_FORBIDDEN")
   }
 
+  /*
+   * Country and vendor both narrow through the `vendor` relation, so they are
+   * collected into one clause rather than written twice — two `vendor` keys in
+   * the same object would silently overwrite each other, which is how a scope
+   * filter goes missing.
+   */
+  const vendorWhere: Prisma.VendorAccountWhereInput = {
+    ...(params.countryId ? { countryId: params.countryId } : {}),
+    ...(scope.isGlobal ? {} : { countryId: { in: scope.countryIds } }),
+  }
+
   const where: Prisma.DiscountWhereInput = {
     deletedAt: null,
-    ...scopeWhere(scope),
-    ...(params.countryId ? { vendor: { countryId: params.countryId } } : {}),
+    ...(Object.keys(vendorWhere).length > 0 ? { vendor: vendorWhere } : {}),
     ...(params.vendorId ? { vendorId: params.vendorId } : {}),
     ...(params.search
       ? {
@@ -115,32 +170,26 @@ export async function listDiscountsForAdmin(scope: AdminScopeContext, params: Li
           ],
         }
       : {}),
+    ...(isFilterableState(params.state) ? stateWhere(params.state, now) : {}),
   }
 
-  const rows = await prisma.discount.findMany({
-    where,
-    orderBy: [{ createdAt: "desc" }],
-    take   : MAX_DISCOUNT_SCAN,
-    select : LIST_SELECT,
-  })
-
-  const presented = rows.map((r) => present(r, now))
-  const filtered = params.state && params.state !== "all"
-    ? presented.filter((d) => d.state === params.state)
-    : presented
-
-  const total = filtered.length
-  const start = (page - 1) * pageSize
+  const [rows, total] = await Promise.all([
+    prisma.discount.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }],
+      skip   : (page - 1) * pageSize,
+      take   : pageSize,
+      select : LIST_SELECT,
+    }),
+    prisma.discount.count({ where }),
+  ])
 
   return {
-    discounts : filtered.slice(start, start + pageSize),
+    discounts : rows.map((r) => present(r, now)),
     total,
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
-    /** True when the scan cap was reached, so the page can say the counts are
-     *  a floor rather than quietly under-reporting. */
-    scanCapped: rows.length === MAX_DISCOUNT_SCAN,
   }
 }
 
@@ -165,6 +214,51 @@ async function loadInScope(discountId: string, scope: AdminScopeContext) {
 export async function getDiscountForAdmin(discountId: string, scope: AdminScopeContext) {
   const discount = await loadInScope(discountId, scope)
   return present(discount, new Date())
+}
+
+/**
+ * Everything the detail page shows, which the list deliberately does not.
+ *
+ * The list is a queue: name, vendor, value, state, one way in. Targets, caps
+ * and the description belong where the decision is actually made — the same
+ * split /finance/payout-accounts and /vendors/meals already use.
+ */
+export async function getDiscountDetailForAdmin(discountId: string, scope: AdminScopeContext) {
+  const base = await loadInScope(discountId, scope)
+
+  const [detail, suspendedBy] = await Promise.all([
+    prisma.discount.findUniqueOrThrow({
+      where : { id: discountId },
+      select: {
+        description: true,
+        outlets: { select: { outlet  : { select: { id: true, name: true, addressLine1: true } } } },
+        items  : { select: { menuItem: { select: { id: true, name: true, basePriceMinor: true } } } },
+      },
+    }),
+    base.suspendedByAdminId
+      ? prisma.adminUser.findUnique({
+          where : { id: base.suspendedByAdminId },
+          select: { firstName: true, lastName: true, email: true },
+        })
+      : Promise.resolve(null),
+  ])
+
+  const presented = present(base, new Date())
+
+  return {
+    ...presented,
+    description: detail.description,
+    outlets    : detail.outlets.map((o) => o.outlet),
+    items      : detail.items.map((i) => i.menuItem),
+    /** Resolved to a name so "who stopped this" is answerable without reading
+     *  the audit log — the same reason the payout row records its reviewer. */
+    suspendedBy: suspendedBy
+      ? {
+          name : [suspendedBy.firstName, suspendedBy.lastName].filter(Boolean).join(" ") || suspendedBy.email,
+          email: suspendedBy.email,
+        }
+      : null,
+  }
 }
 
 /**

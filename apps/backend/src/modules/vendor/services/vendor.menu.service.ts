@@ -16,6 +16,7 @@ import { resolveGroupSelection, assertGroupCannotZeroOutDish } from "./vendor.mo
 import {
   recomputeModifierFlagsForItems, MODIFIER_CONTENT_FLAG,
 } from "./vendor.modifierGroup.service"
+import { getDiscountsForMenuItems, type MenuItemDiscount } from "./vendor.discount.service"
 import {
   normalizePrepTime, resolveOrdering, nextPosition, assertSectionName,
 } from "./vendor.menuStructure"
@@ -353,7 +354,13 @@ type ItemRow = Awaited<ReturnType<typeof prisma.menuItem.findFirstOrThrow<{ sele
 
 /** Keys become short-lived signed URLs at the response boundary, never before
  *  — the same single-exit-point rule presentVendorProfile follows. */
-async function presentMenuItem(item: ItemRow, taxProfile: CountryTaxProfile) {
+async function presentMenuItem(
+  item      : ItemRow,
+  taxProfile: CountryTaxProfile,
+  /** Offers covering this dish. Resolved once for the whole page by the
+   *  caller, never once per row. */
+  discounts : MenuItemDiscount[] = [],
+) {
   const imageUrls = await Promise.all(
     item.imageKeys.map(async (key) => {
       try {
@@ -388,6 +395,14 @@ async function presentMenuItem(item: ItemRow, taxProfile: CountryTaxProfile) {
   return {
     ...rest,
     tax,
+    /*
+     * What a customer would see on this dish right now. An offer that is
+     * scheduled or paused is still listed — the vendor wants to know it is
+     * coming, or why it is not running — but only one with appliesNow true is
+     * actually changing the price, and the UI leans on that distinction rather
+     * than showing a struck-through price for an offer nobody can use yet.
+     */
+    discounts,
     images     : imageUrls,
     mainImageUrl: imageUrls[0]?.url ?? null,
     cuisines   : cuisines.map((c) => c.cuisine),
@@ -466,8 +481,13 @@ export async function listMenuItems(
     prisma.menuItem.count({ where }),
   ])
 
+  // One discount read for the whole page, same rule as the tax profile.
+  const discountsByItem = await getDiscountsForMenuItems(vendorId, items.map((i) => i.id))
+
   return {
-    items     : await Promise.all(items.map((i) => presentMenuItem(i, taxProfile))),
+    items     : await Promise.all(
+      items.map((i) => presentMenuItem(i, taxProfile, discountsByItem.get(i.id) ?? [])),
+    ),
     total,
     page,
     pageSize,
@@ -485,7 +505,8 @@ export async function getMenuItem(vendorId: string, itemId: string) {
     getCountryTaxProfile(vendor.countryId),
   ])
   if (!item) throw new ApiError(404, "Meal not found", "NOT_FOUND")
-  return presentMenuItem(item, taxProfile)
+  const discountsByItem = await getDiscountsForMenuItems(vendorId, [item.id])
+  return presentMenuItem(item, taxProfile, discountsByItem.get(item.id) ?? [])
 }
 
 // ─── Images ───────────────────────────────────────────────────────────────────

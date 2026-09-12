@@ -19,6 +19,22 @@ interface Props {
 }
 
 export function MealCard({ item, currency }: Props) {
+  /*
+   * The price a customer would actually see right now.
+   *
+   * Only an offer that is APPLYING this minute changes it — a scheduled or
+   * paused one is real but is not what the storefront is doing, and showing a
+   * struck-through price for it would be a claim about the shop that is not
+   * true. Offers never stack, so the best one wins, which is the same rule the
+   * resolver enforces.
+   */
+  const best = item.discounts
+    .filter((d) => d.appliesNow)
+    .reduce<typeof item.discounts[number] | null>(
+      (a, b) => (a === null || b.savingMinor > a.savingMinor ? b : a),
+      null,
+    )
+
   const needsAttention = item.reviewStatus === "FLAGGED" || item.reviewStatus === "MANUALLY_REJECTED"
   const overridden     = item.outlets.filter((o) => o.priceMinorOverride != null).length
   const unavailable    = item.outlets.filter((o) => !o.isAvailable).length
@@ -63,7 +79,19 @@ export function MealCard({ item, currency }: Props) {
             {item.name}
           </h3>
           <span className="shrink-0 text-sm font-semibold tabular-nums text-[var(--foreground)]">
-            {formatPrice(item.basePriceMinor, currency)}
+            {best
+              ? formatPrice(best.discountedPriceMinor, currency)
+              : formatPrice(item.basePriceMinor, currency)}
+            {best && (
+              <>
+                <span className="ml-1.5 text-xs font-normal tabular-nums text-[var(--muted-foreground)] line-through">
+                  {formatPrice(item.basePriceMinor, currency)}
+                </span>
+                <span className="ml-1.5 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                  {Number((best.percentBps / 100).toFixed(2))}% off
+                </span>
+              </>
+            )}
           </span>
         </div>
 

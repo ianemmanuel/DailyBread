@@ -124,7 +124,12 @@ function DiscountCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-[var(--foreground)]">{discount.name}</h3>
+            <Link
+              href={`/offers/${discount.id}`}
+              className="cursor-pointer text-sm font-semibold text-[var(--foreground)] hover:text-[var(--primary)] hover:underline"
+            >
+              {discount.name}
+            </Link>
             <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide", TONE_CLASS[meta.tone])}>
               {meta.label}
             </span>
@@ -167,7 +172,7 @@ function DiscountCard({
           )}
           {canEdit && (
             <Button asChild variant="ghost" size="sm">
-              <Link href={`/offers/${discount.id}`}>
+              <Link href={`/offers/${discount.id}/edit`}>
                 <Pencil className="size-4" />
                 <span className="sr-only">Edit {discount.name}</span>
               </Link>

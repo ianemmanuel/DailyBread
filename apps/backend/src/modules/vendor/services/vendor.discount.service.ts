@@ -4,7 +4,7 @@ import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { getCountryTaxProfile, resolveRateBps } from "@/modules/tax"
 import {
-  deriveDiscountState, isWithinWindow, MAX_DISCOUNT_BPS,
+  deriveDiscountState, isWithinWindow, percentageOffLine, MAX_DISCOUNT_BPS,
   type DiscountState,
 } from "@/lib/pricing/discount"
 import { normalizeOptionalText } from "./vendor.menu"
@@ -453,3 +453,99 @@ export async function findApplicableDiscounts(
 /** Re-exported so a caller resolving a cart does not have to reach into the
  *  tax module separately for the one function it needs. */
 export { resolveRateBps }
+
+// ─── Offers on a dish ────────────────────────────────────────────────────────
+
+export interface MenuItemDiscount {
+  id        : string
+  name      : string
+  percentBps: number
+  state     : DiscountState
+  /** Whether the daily window is open this minute. */
+  appliesNow: boolean
+  /** What the dish costs while this offer is actually applying. */
+  discountedPriceMinor: number
+  savingMinor         : number
+}
+
+/**
+ * Which offers cover each of these dishes, and what the price becomes.
+ *
+ * Shown on the vendor's own menu because Uber Eats and DoorDash both surface a
+ * discounted dish the same way to a CUSTOMER — the original struck through
+ * beside the new price, with the offer named — so a merchant needs to see
+ * exactly what their storefront is about to show.
+ *
+ * ONLY percentage offers appear here. An amount-off-the-order is a basket rule
+ * and has no per-dish price to display; claiming one would be a number the
+ * customer never sees.
+ *
+ * One query for the whole page, never one per dish.
+ */
+export async function getDiscountsForMenuItems(
+  vendorId: string,
+  itemIds : readonly string[],
+  now     : Date = new Date(),
+): Promise<Map<string, MenuItemDiscount[]>> {
+  const result = new Map<string, MenuItemDiscount[]>()
+  if (itemIds.length === 0) return result
+
+  const [vendor, discounts, items] = await Promise.all([
+    prisma.vendorAccount.findUnique({
+      where : { id: vendorId },
+      select: { vendorProfile: { select: { isPublished: true } } },
+    }),
+    prisma.discount.findMany({
+      where : {
+        vendorId,
+        deletedAt: null,
+        type     : "PERCENTAGE_OFF_ITEMS",
+        // Finished offers are not worth showing; a scheduled or paused one is,
+        // because the vendor wants to know it is coming or why it is not.
+        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+      },
+      select: {
+        id: true, name: true, percentBps: true,
+        isPaused: true, suspendedAt: true, startsAt: true, endsAt: true,
+        budgetMinor: true, spentMinor: true, maxRedemptions: true, redemptionCount: true,
+        daysOfWeek: true, startTime: true, endTime: true,
+        appliesToAllItems: true,
+        items: { select: { menuItemId: true } },
+      },
+    }),
+    prisma.menuItem.findMany({
+      where : { id: { in: [...itemIds] }, vendorId },
+      select: { id: true, basePriceMinor: true },
+    }),
+  ])
+
+  const live = vendor?.vendorProfile?.isPublished === true
+  const priceById = new Map(items.map((i) => [i.id, i.basePriceMinor]))
+
+  for (const itemId of itemIds) {
+    const base = priceById.get(itemId)
+    if (base == null) continue
+
+    const covering = discounts.filter(
+      (d) => d.appliesToAllItems || d.items.some((i) => i.menuItemId === itemId),
+    )
+    if (covering.length === 0) continue
+
+    result.set(itemId, covering.map((d) => {
+      const bps = d.percentBps ?? 0
+      const saving = percentageOffLine(base, bps)
+      const state = deriveDiscountState(d, now, live)
+      return {
+        id        : d.id,
+        name      : d.name,
+        percentBps: bps,
+        state,
+        appliesNow: state === "RUNNING" && isWithinWindow(d, now),
+        discountedPriceMinor: base - saving,
+        savingMinor         : saving,
+      }
+    }))
+  }
+
+  return result
+}

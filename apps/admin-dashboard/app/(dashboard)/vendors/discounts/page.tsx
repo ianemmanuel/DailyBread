@@ -1,95 +1,70 @@
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import Link from "next/link"
-import { BadgePercent, AlertTriangle } from "lucide-react"
+import { BadgePercent } from "lucide-react"
 import { adminFetch } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { AdminPermissions } from "@repo/types/admin-app"
 import { PageHeader } from "@/components/dashboard/layout/PageHeader"
+import { TableFilterBar, type FilterStatusOption } from "@/components/shared/TableFilterBar"
 import { TablePagination } from "@/components/shared/TablePagination"
 import { EmptyState } from "@/components/shared/EmptyState"
-import { DiscountSuspendActions } from "@/components/vendors/DiscountSuspendActions"
+import { getFilterableCountries } from "@/lib/countries/filterable-countries"
+import {
+  DISCOUNT_STATE_LABEL, formatDiscountValue,
+  type AdminDiscountListResult, type AdminDiscountState,
+} from "@/types/discount.types"
 
 export const metadata: Metadata = { title: "Offers" }
 
 /*
- * Vendor offers, platform-wide.
+ * Vendor offers, as a QUEUE.
  *
- * OVERSIGHT, NOT AUTHORING. Merchants self-serve their own promotions with no
- * approval queue, which is how every platform worth copying works; what an
- * admin gets is visibility and a stop button. Creating platform-funded
- * campaigns is a separate, deferred concern — which is why this page uses
- * finance:discounts:read / :deactivate and never :create.
+ * Name, vendor, value, state, and one obvious way in. Targets, caps, the
+ * description and the stop button all live on the detail page, because a
+ * decision about someone's promotion should not be made from a table row that
+ * cannot show what the offer actually covers — the same split
+ * /finance/payout-accounts and /vendors/meals already use.
  *
- * COUNTRY-SCOPED by the vendor's own country, enforced in the service. A global
- * admin sees every market; a country-scoped one sees only theirs.
+ * OVERSIGHT, NOT AUTHORING: merchants self-serve, so there is no create here.
+ * Country-scoped on the vendor's own country, enforced in the service.
  */
 
 const PAGE_SIZE = 20
 
-const STATE_TABS = [
-  { value: "all",              label: "All" },
-  { value: "RUNNING",          label: "Running" },
-  { value: "SCHEDULED",        label: "Scheduled" },
-  { value: "AWAITING_GO_LIVE", label: "Waiting on go-live" },
-  { value: "PAUSED",           label: "Paused" },
-  { value: "SUSPENDED",        label: "Stopped" },
-  { value: "EXPIRED",          label: "Finished" },
-] as const
+const STATE_OPTIONS: FilterStatusOption[] = [
+  { value: "RUNNING",          label: "Running",            dot: "bg-success" },
+  { value: "SCHEDULED",        label: "Scheduled",          dot: "bg-info" },
+  { value: "AWAITING_GO_LIVE", label: "Waiting on go-live", dot: "bg-warning" },
+  { value: "PAUSED",           label: "Paused by vendor",   dot: "bg-muted-foreground" },
+  { value: "SUSPENDED",        label: "Stopped by us",      dot: "bg-destructive" },
+  { value: "EXPIRED",          label: "Finished",           dot: "bg-muted-foreground" },
+  { value: "EXHAUSTED",        label: "Budget used up",     dot: "bg-muted-foreground" },
+]
 
-interface AdminDiscount {
-  id: string
-  name: string
-  type: "PERCENTAGE_OFF_ITEMS" | "AMOUNT_OFF_ORDER"
-  percentBps: number | null
-  amountMinor: number | null
-  minSubtotalMinor: number | null
-  startsAt: string
-  endsAt: string | null
-  state: string
-  appliesNow: boolean
-  suspendedAt: string | null
-  suspensionReason: string | null
-  appliesToAllOutlets: boolean
-  appliesToAllItems: boolean
-  outletCount: number
-  itemCount: number
-  vendor: {
-    id: string
-    businessName: string
-    countryName: string | null
-    currencyCode: string | null
-    isLive: boolean
-  }
-}
-
-interface Result {
-  discounts: AdminDiscount[]
-  total: number
-  page: number
-  pageSize: number
-  totalPages: number
-  scanCapped: boolean
+interface Search {
+  state?: string; search?: string; country?: string; vendor?: string; page?: string
 }
 
 export default async function AdminDiscountsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ state?: string; search?: string; vendor?: string; page?: string }>
+  searchParams: Promise<Search>
 }) {
   const session = await getAdminSession()
   if (!session.permissions.includes(AdminPermissions.FINANCE_DISCOUNTS_READ)) redirect("/vendors")
 
-  const canStop = session.permissions.includes(AdminPermissions.FINANCE_DISCOUNTS_DEACTIVATE)
   const params = await searchParams
-  const stateTab = params.state ?? "all"
+  const { countries, showFilter } = await getFilterableCountries(session.scope.isGlobal)
+  const selectedCountry = countries.find((c) => c.slug === params.country) ?? null
 
   const qs = new URLSearchParams({ page: params.page ?? "1", pageSize: String(PAGE_SIZE) })
-  if (stateTab !== "all") qs.set("state", stateTab)
+  if (params.state && params.state !== "all") qs.set("state", params.state)
   if (params.search) qs.set("search", params.search)
   if (params.vendor) qs.set("vendor", params.vendor)
+  if (selectedCountry) qs.set("countryId", selectedCountry.id)
 
-  const result = await adminFetch<Result>(`/admin/v1/vendors/discounts?${qs}`, {
+  const result = await adminFetch<AdminDiscountListResult>(`/admin/v1/vendors/discounts?${qs}`, {
     // An offer's state is time-derived, so a cached page would show a scheduled
     // offer as still scheduled minutes after it started.
     cache: "no-store",
@@ -109,21 +84,6 @@ export default async function AdminDiscountsPage({
     )
   }
 
-  const tabHref = (value: string) => {
-    const next = new URLSearchParams()
-    // Always explicit, never absent: an omitted param is indistinguishable from
-    // a first visit, which is how an "All" tab becomes unreachable.
-    next.set("state", value)
-    if (params.search) next.set("search", params.search)
-    if (params.vendor) next.set("vendor", params.vendor)
-    return `/vendors/discounts?${next}`
-  }
-
-  const money = (minor: number, code: string | null) =>
-    new Intl.NumberFormat(undefined, {
-      style: "currency", currency: code ?? "USD", maximumFractionDigits: 2,
-    }).format(minor / 100)
-
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -135,43 +95,28 @@ export default async function AdminDiscountsPage({
       {params.vendor && (
         <div className="admin-card flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
           <span className="text-muted-foreground">Showing one vendor only.</span>
-          <Link href="/vendors/discounts?state=all" className="text-primary hover:underline">
-            Clear filter
-          </Link>
+          <Link href="/vendors/discounts" className="text-primary hover:underline">Clear filter</Link>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {STATE_TABS.map((tab) => (
-          <Link
-            key={tab.value}
-            href={tabHref(tab.value)}
-            className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
-              stateTab === tab.value
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            {tab.label}
-          </Link>
-        ))}
-      </div>
-
-      {result.scanCapped && (
-        <p className="flex items-start gap-2 text-xs text-muted-foreground">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-          There are more offers than this page scans, so the counts are a floor rather than a total.
-        </p>
-      )}
+      <TableFilterBar
+        searchPlaceholder="Offer or vendor name…"
+        defaultSearch={params.search}
+        statusLabel="State"
+        statusOptions={STATE_OPTIONS}
+        defaultStatus={params.state}
+        countryOptions={showFilter ? countries.map((c) => ({ value: c.slug, label: c.name })) : undefined}
+        defaultCountry={params.country}
+      />
 
       {result.discounts.length === 0 ? (
         <EmptyState
           icon={BadgePercent}
           title="Nothing here"
           description={
-            stateTab === "all"
-              ? "No vendor has created an offer in your markets yet."
-              : "No offers in this state right now. Try the All tab."
+            params.search || params.state || params.country
+              ? "No offers match these filters. Try clearing them."
+              : "No vendor has created an offer in your markets yet."
           }
         />
       ) : (
@@ -184,56 +129,37 @@ export default async function AdminDiscountsPage({
                     <th className="px-4 py-3 font-medium">Offer</th>
                     <th className="px-4 py-3 font-medium">Vendor</th>
                     <th className="px-4 py-3 font-medium">Value</th>
-                    <th className="px-4 py-3 font-medium">Applies to</th>
                     <th className="px-4 py-3 font-medium">State</th>
-                    {canStop && <th className="px-4 py-3" />}
+                    <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody>
                   {result.discounts.map((d) => (
                     <tr key={d.id} className="border-b align-top last:border-0">
+                      <td className="px-4 py-3 font-medium text-foreground">{d.name}</td>
                       <td className="px-4 py-3">
-                        <p className="font-medium text-foreground">{d.name}</p>
-                        {d.suspensionReason && (
-                          <p className="mt-0.5 max-w-xs text-xs text-destructive">{d.suspensionReason}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Link
-                          href={`/vendors/accounts/${d.vendor.id}`}
-                          className="text-foreground hover:text-primary hover:underline"
-                        >
-                          {d.vendor.businessName}
-                        </Link>
+                        <p className="text-foreground">{d.vendor.businessName}</p>
                         <p className="text-xs text-muted-foreground">{d.vendor.countryName ?? "—"}</p>
                       </td>
                       <td className="px-4 py-3 tabular-nums">
-                        {d.type === "PERCENTAGE_OFF_ITEMS"
-                          ? `${Number(((d.percentBps ?? 0) / 100).toFixed(2))}% off`
-                          : `${money(d.amountMinor ?? 0, d.vendor.currencyCode)} off`}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {d.appliesToAllOutlets ? "All locations" : `${d.outletCount} location(s)`}
-                        {d.type === "PERCENTAGE_OFF_ITEMS" &&
-                          (d.appliesToAllItems ? " · every dish" : ` · ${d.itemCount} dish(es)`)}
+                        {formatDiscountValue(d, d.vendor.currencyCode)}
                       </td>
                       <td className="px-4 py-3">
                         <span className={d.state === "RUNNING" ? "badge-success" : "badge-muted"}>
-                          {d.state.replace(/_/g, " ").toLowerCase()}
+                          {DISCOUNT_STATE_LABEL[d.state as AdminDiscountState]}
                         </span>
                         {d.state === "RUNNING" && !d.appliesNow && (
                           <p className="mt-0.5 text-xs text-muted-foreground">outside its hours</p>
                         )}
                       </td>
-                      {canStop && (
-                        <td className="px-4 py-3 text-right">
-                          <DiscountSuspendActions
-                            discountId={d.id}
-                            name={d.name}
-                            isSuspended={!!d.suspendedAt}
-                          />
-                        </td>
-                      )}
+                      <td className="px-4 py-3 text-right">
+                        <Link
+                          href={`/vendors/discounts/${d.id}`}
+                          className="inline-flex cursor-pointer items-center rounded-full border px-3 py-1 text-xs font-medium text-foreground transition-all hover:scale-105 hover:border-primary hover:bg-muted"
+                        >
+                          View
+                        </Link>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -247,8 +173,9 @@ export default async function AdminDiscountsPage({
             totalPages={result.totalPages}
             basePath="/vendors/discounts"
             params={{
-              state: stateTab,
+              ...(params.state ? { state: params.state } : {}),
               ...(params.search ? { search: params.search } : {}),
+              ...(params.country ? { country: params.country } : {}),
               ...(params.vendor ? { vendor: params.vendor } : {}),
             }}
             itemLabel="offers"

@@ -1292,3 +1292,60 @@ Nine-step smoke test, cleaning up after itself: context resolved; a scheduled of
 
 ### Still deferred
 Redemption and enforcement of caps (no order model), buy-one-get-one, platform-funded and co-funded campaigns, free delivery, promo codes, customer targeting, and stacking. `spentMinor` / `redemptionCount` are reported to the vendor as **not yet enforced** rather than shown as counters that never move.
+
+## Discounts — admin detail page, filters, and offers on a dish (2026-09-12)
+
+A user-directed pass after reviewing the screens. No migration.
+
+### Admin: the list is a queue, the detail page is where decisions happen
+`/vendors/discounts` lost the **Stop** and **Applies to** columns and gained a **View** button. A decision about someone's promotion should not be made from a row that cannot show what the offer covers — the same split `/finance/payout-accounts` and `/vendors/meals` already use.
+
+**New `/vendors/discounts/[discountId]`**, SSR and short: the only client component is the action pair. Carries what the queue leaves out — the description, every targeted outlet and dish (each linked), the full schedule, the caps, and who stopped it. `getDiscountDetailForAdmin` resolves `suspendedByAdminId` to a **name**, so "who stopped this" is answerable without reading the audit log — same reason the payout row records its reviewer. Customer engagement goes on this page when there are orders to measure.
+
+**Filters** use the shared `TableFilterBar`: search over offer *and* vendor name, a state filter, and a country picker that only renders for an admin with more than one country (`getFilterableCountries`). Country is resolved slug → id server-side and re-checked against scope, so a country filter cannot widen access.
+
+### Vendor: a dish shows the offers on it, and the price they produce
+Copied from how **Uber Eats and DoorDash show a discounted dish to the customer** — the original struck through beside the new price, with the offer named — because a merchant needs to see what their storefront is about to show.
+
+- **`MealCard`** shows the discounted price with the original struck through and a percent badge, but **only for an offer that is applying this minute**. A scheduled or paused offer changes nothing on the card.
+- **`MealDiscountNotice`** on the meal page lists every offer covering the dish. One that is not currently applying is framed as what the dish *would* cost, with the reason in words ("starts later", "waiting for you to go live", "outside its hours") — never struck through. Showing a live discounted price for an offer nobody can use would tell the vendor their shop is doing something it is not.
+- **Offers never stack.** When several apply, the best one wins and the notice says so — the same rule the resolver enforces.
+- **`AMOUNT_OFF_ORDER` is excluded from per-dish display**, asserted in the smoke test: it is a basket rule with no per-dish price, and claiming one would be a number the customer never sees.
+
+`getDiscountsForMenuItems` is **one query for a whole page**, never one per row, and is used by both `getMenuItem` and `listMenuItems`.
+
+### Verified against the dev database
+A dish carried three offers at once — one running, one scheduled, one running-but-outside-its-window — each with the right `appliesNow` and its own resulting price; the basket offer was correctly absent; both meal reads carried them; the admin detail resolved its targets; and all four list filters (state, search, vendor, country) returned the expected counts. 513 backend tests pass; both dashboards build. The smoke cleaned up its own rows and left an offer created through the UI untouched.
+
+## Discounts — SQL pagination, offer detail page, interaction polish (2026-09-13)
+
+A user-directed pass. No migration.
+
+### The admin list paginates in the database now
+
+It previously scanned up to 2000 rows, filtered the derived `state` in memory and sliced — which is not pagination, it is a scan with a page-shaped hole.
+
+**Every input `deriveDiscountState` uses is on the row or on the clock**, and Prisma supports **field references**, so `spentMinor >= budgetMinor` expresses in SQL and the whole derivation does too. `stateWhere()` transcribes it clause by clause, in the same precedence order (suspended → paused → expired → exhausted → scheduled → awaiting-go-live → running), each clause excluding the ones above it. `skip`/`take` plus a `count` on the same `where`, and `MAX_DISCOUNT_SCAN` / `scanCapped` are gone.
+
+**The real cost of this is drift**, so it is guarded rather than hoped for: `lib/pricing/discount-state-filter.ts` states the same conditions against an in-memory row, and its test asserts `matchesState` agrees with `deriveDiscountState` for **every state across sixteen sample rows** — including rows that satisfy several conditions at once, which is where a precedence mistake shows up. It also asserts every row lands in **exactly one** state (two would make a filtered count wrong in a way nobody notices) and that the samples reach every state. Change the precedence in one and the suite fails.
+
+**Fixed in passing**: country and vendor filters both narrow through the `vendor` relation, and were being written as two `vendor` keys in one object — the second silently overwrites the first, which is how a scope filter goes missing. They are collected into one clause now.
+
+Verified against the dev database: one offer seeded per state, each confirmed to be returned by its own SQL filter and to match the pure function; pages 1 and 2 with no overlap; filters composing; and another country's admin still seeing zero.
+
+### Vendor `/offers/[id]` — a detail page, not the form
+
+The form moved to **`/offers/[id]/edit`** and the id route is now a read-only overview: value, schedule, limits, locations and dishes. The list links the offer name here and the pencil to the edit route.
+
+It carries an explicit, empty **Performance** panel saying engagement and revenue appear once orders are live. Stated rather than left off, so it reads as pending rather than forgotten — and deliberately not filled with mock figures, since showing a vendor invented numbers about their own business is not acceptable (the same line `/outlets/revenue` already holds).
+
+### The meal page's discount panel
+
+Redesigned around the distinction that actually matters. A **live** offer gets a real price panel — emerald header, the discounted price large, the original struck through beside it, the saving named, and the offer linked — which is what Uber Eats and DoorDash show a customer, and therefore what a merchant needs to see. Anything **not currently applying** is a quiet list row with the reason in words and the price framed as what it *would* be, never struck through.
+
+New `DiscountStateBadge` is shared by the list, the offer detail page and the notice, so one offer cannot be described three different ways.
+
+### Interaction polish
+`cursor-pointer` on every link and button in the offer surfaces, and the admin **Stop** button is now destructive-red with white text and lifts on hover. Stopping someone else's promotion is irreversible without a second admin action, so it should not look like the ghost buttons beside it; the lift is the hover affordance that says the thing under the cursor is the button.
+
+**532 backend tests pass** (19 new); both dashboards build.

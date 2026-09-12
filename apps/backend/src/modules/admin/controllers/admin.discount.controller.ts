@@ -4,6 +4,7 @@ import { sendSuccess } from "@/helpers/api-response/response"
 import {
   listDiscountsForAdmin,
   getDiscountForAdmin,
+  getDiscountDetailForAdmin,
   suspendDiscount,
   liftDiscountSuspension,
 } from "../services/admin.discount.service"
@@ -34,6 +35,16 @@ export const handleGetDiscount: RequestHandler = async (req, res, next) => {
   try {
     const { scope } = ctx(req)
     const data = await getDiscountForAdmin(req.params.discountId!, scope)
+    return sendSuccess(res, data, "Offer fetched")
+  } catch (err) { next(err) }
+}
+
+//* GET /admin/v1/vendors/discounts/:discountId/detail — targets, caps and the
+//* description, which the list deliberately leaves out.
+export const handleGetDiscountDetail: RequestHandler = async (req, res, next) => {
+  try {
+    const { scope } = ctx(req)
+    const data = await getDiscountDetailForAdmin(req.params.discountId!, scope)
     return sendSuccess(res, data, "Offer fetched")
   } catch (err) { next(err) }
 }

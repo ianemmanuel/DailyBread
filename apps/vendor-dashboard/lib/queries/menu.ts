@@ -96,6 +96,19 @@ export interface MenuItemOutlet {
   adminStatus       : string
 }
 
+/** An offer covering this dish, and what it costs while the offer runs. */
+export interface MenuItemDiscount {
+  id        : string
+  name      : string
+  percentBps: number
+  state     : "SUSPENDED" | "PAUSED" | "EXPIRED" | "EXHAUSTED" | "SCHEDULED" | "AWAITING_GO_LIVE" | "RUNNING"
+  /** Whether it is actually changing the price this minute. Separate from
+   *  state, because a happy-hour offer is RUNNING all week. */
+  appliesNow: boolean
+  discountedPriceMinor: number
+  savingMinor         : number
+}
+
 export interface MenuItem {
   id             : string
   name           : string
@@ -123,6 +136,9 @@ export interface MenuItem {
   dietaryTags    : { id: string; name: string }[]
   outlets        : MenuItemOutlet[]
   modifierGroups : AttachedModifierGroup[]
+  /** Percentage offers covering this dish. An amount-off-the-order never
+   *  appears here — it is a basket rule with no per-dish price to show. */
+  discounts      : MenuItemDiscount[]
   createdAt      : string
   updatedAt      : string
 }

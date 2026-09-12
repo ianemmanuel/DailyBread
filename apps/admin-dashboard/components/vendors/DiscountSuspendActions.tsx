@@ -61,9 +61,15 @@ export function DiscountSuspendActions({ discountId, name, isSuspended }: Props)
 
   if (isSuspended) {
     return (
-      <Button variant="ghost" size="sm" onClick={() => act("DELETE")} disabled={pending}>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => act("DELETE")}
+        disabled={pending}
+        className="cursor-pointer gap-1.5 transition-transform hover:scale-105"
+      >
         {pending ? <Loader2 className="size-4 animate-spin" /> : <Undo2 className="size-4" />}
-        Release
+        Release this offer
       </Button>
     )
   }
@@ -71,9 +77,21 @@ export function DiscountSuspendActions({ discountId, name, isSuspended }: Props)
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="ghost" size="sm" disabled={pending}>
+        {/*
+          * Red with white text, and it lifts slightly on hover.
+          *
+          * Stopping someone else's promotion is destructive and irreversible
+          * without a second admin action, so it should not look like the ghost
+          * buttons around it. The lift is a hover affordance, not decoration —
+          * it is what tells you the thing under the cursor is the button.
+          */}
+        <Button
+          size="sm"
+          disabled={pending}
+          className="cursor-pointer gap-1.5 bg-destructive text-white transition-transform hover:scale-105 hover:bg-destructive/90"
+        >
           <Ban className="size-4" />
-          Stop
+          Stop this offer
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -96,8 +114,12 @@ export function DiscountSuspendActions({ discountId, name, isSuspended }: Props)
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => act("POST")} disabled={pending}>
+          <AlertDialogCancel disabled={pending} className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => act("POST")}
+            disabled={pending}
+            className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
+          >
             {pending && <Loader2 className="size-4 animate-spin" />}
             Stop this offer
           </AlertDialogAction>

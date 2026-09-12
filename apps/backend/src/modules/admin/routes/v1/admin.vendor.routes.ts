@@ -4,6 +4,7 @@ import { requirePermission } from "@/modules/admin/middleware"
 import {
   handleListDiscounts,
   handleGetDiscount,
+  handleGetDiscountDetail,
   handleSuspendDiscount,
   handleLiftSuspension,
 } from "../../controllers/admin.discount.controller"
@@ -293,6 +294,7 @@ const DISCOUNTS_STOP = requirePermission(AdminPermissions.FINANCE_DISCOUNTS_DEAC
 
 vendorRouter.get("/discounts", DISCOUNTS_READ, handleListDiscounts)
 vendorRouter.get("/discounts/:discountId", DISCOUNTS_READ, handleGetDiscount)
+vendorRouter.get("/discounts/:discountId/detail", DISCOUNTS_READ, handleGetDiscountDetail)
 vendorRouter.post("/discounts/:discountId/suspend", DISCOUNTS_STOP, handleSuspendDiscount)
 vendorRouter.delete("/discounts/:discountId/suspend", DISCOUNTS_STOP, handleLiftSuspension)
 
