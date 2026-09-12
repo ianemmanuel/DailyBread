@@ -51,12 +51,47 @@ export interface AdminMealOutlet {
   adminStatus       : MealAdminStatus
 }
 
+/** One choice inside a group, as an admin sees it. */
+export interface AdminModifierOption {
+  id             : string
+  name           : string
+  priceDeltaMinor: number
+  isAvailable    : boolean
+}
+
+/**
+ * A group of choices attached to this dish.
+ *
+ * Shown on the detail page because a group's wording is screened too, and a
+ * hit flags every dish using it. A moderator looking at a dish flagged for
+ * INAPPROPRIATE_MODIFIER would otherwise see a perfectly clean name and
+ * description and have nothing to act on.
+ */
+export interface AdminModifierGroup {
+  id         : string
+  name       : string
+  description: string | null
+  minSelect  : number
+  maxSelect  : number
+  required   : boolean
+  flagged    : boolean
+  flagReasons: string[]
+  /** Other dishes carrying the same wording — the blast radius of the
+   *  decision being made. */
+  usedByCount: number
+  options    : AdminModifierOption[]
+}
+
 export interface AdminMealDetail extends Omit<AdminMealRow, "outletCount"> {
   portionSize : string | null
   images      : { storageKey: string; url: string | null }[]
   cuisines    : { id: string; name: string }[]
   dietaryTags : { id: string; name: string }[]
   outlets     : AdminMealOutlet[]
+  modifierGroups: AdminModifierGroup[]
+  /** Minutes from accepted to ready. Null means the vendor hasn't said, which
+   *  is deliberately different from zero. */
+  prepTimeMinutes: number | null
 }
 
 /** Minor units to a display string, using the row's own currency. */

@@ -10,7 +10,10 @@
  *   4. Payment-provider CATALOG (Flutterwave, Stripe) — declarations of
  *      which provider implementations exist + their expected capabilities.
  *      NOT integrations.
- *   5. Launch country (Kenya): a DRAFT CountryFinancialConfig + a DRAFT
+ *   5. Tax-category CATALOG (standard / zero-rated / exempt / …) — the
+ *      platform's tax vocabulary. NO rates: what a country charges is a
+ *      legal fact and a deliberate admin decision.
+ *   6. Launch country (Kenya): a DRAFT CountryFinancialConfig + a DRAFT
  *      TEST Flutterwave CountryProviderAccount, pre-linked but NOT
  *      activated — activation stays an explicit admin operation.
  *
@@ -31,31 +34,36 @@ import { seedPaymentMethods } from './payment-methods.seed'
 import { seedPaymentProviders } from './payment-providers.seed'
 import { seedCountryFinancialConfig } from './country-financial-config.seed'
 import { seedPayoutVerificationMode } from './payout-verification.seed'
+import { seedTaxCategories } from './tax-categories.seed'
 
 export async function seedFinance() {
   console.log("🌱 Seeding DailyBread finance reference data...\n")
 
-  console.log("  [1/6] Currencies...")
+  console.log("  [1/7] Currencies...")
   const currencyCount = await seedCurrencies()
   console.log(`        ✓ ${currencyCount} currencies`)
 
-  console.log("  [2/6] Country → currency backfill...")
+  console.log("  [2/7] Country → currency backfill...")
   const linked = await backfillCountryCurrency()
   console.log(`        ✓ ${linked} country(ies) linked to a Currency row`)
 
-  console.log("  [3/6] Payment methods...")
+  console.log("  [3/7] Payment methods...")
   const paymentMethodCount = await seedPaymentMethods()
   console.log(`        ✓ ${paymentMethodCount} payment methods`)
 
-  console.log("  [4/6] Payment providers (catalog)...")
+  console.log("  [4/7] Payment providers (catalog)...")
   const providerCount = await seedPaymentProviders()
   console.log(`        ✓ ${providerCount} payment providers`)
 
-  console.log("  [5/6] Launch-country financial config (DRAFT, not activated)...")
+  console.log("  [5/7] Tax categories (catalog only, no rates)...")
+  const taxCategoryCount = await seedTaxCategories()
+  console.log(`        ✓ ${taxCategoryCount} tax categories`)
+
+  console.log("  [6/7] Launch-country financial config (DRAFT, not activated)...")
   const cfg = await seedCountryFinancialConfig()
   console.log(`        ${cfg.created ? "✓" : "•"} ${cfg.note}`)
 
-  console.log("  [6/6] Bank-verification mode + payout proof document type...")
+  console.log("  [7/7] Bank-verification mode + payout proof document type...")
   const bv = await seedPayoutVerificationMode()
   console.log(`        • ${bv.note}`)
 

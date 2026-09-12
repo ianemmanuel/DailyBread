@@ -172,6 +172,18 @@ export const AdminPermissions = {
   // (CountryFinancialConfig, CountryProviderAccount) reuse this same pair.
   FINANCE_CONFIGURATION_READ  : "finance:configuration:read",
   FINANCE_CONFIGURATION_MANAGE: "finance:configuration:manage",
+  // Consumption tax — the tax module (apps/backend/src/modules/tax), which is
+  // deliberately NOT part of finance: finance owns payment rails, tax is its
+  // own bounded context. Kept in the `finance:` namespace because tax IS
+  // financial configuration and the catalog groups by domain, but its own
+  // pair, so provider access and tax access are granted independently.
+  // READ is scope-filtered. MANAGE covers both levels and the SCOPE rule is
+  // what separates them: the category CATALOG (what distinctions the platform
+  // can express) requires GLOBAL scope, while a country's own RATES and tax
+  // position need only own-country scope — a statutory rate is that country's
+  // finance admin's record. City tier is refused for both.
+  FINANCE_TAX_READ  : "finance:tax:read",
+  FINANCE_TAX_MANAGE: "finance:tax:manage",
 
   // ── Customers ─────────────────────────────────────────────────────────────
   CUSTOMERS_PROFILES_READ     : "customers:profiles:read",

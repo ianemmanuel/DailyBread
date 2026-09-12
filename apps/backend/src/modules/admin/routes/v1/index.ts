@@ -20,6 +20,7 @@ import notificationsRouter from "./admin.notification.routes"
 import paymentMethodsRouter from "./admin.paymentMethod.routes"
 import financeRouter from "./admin.finance.routes"
 import { financeAdminRouter } from "@/modules/finance"
+import { taxAdminRouter } from "@/modules/tax"
 
 const v1Router: Router = Router()
 
@@ -49,6 +50,8 @@ v1Router.use("/payment-methods", paymentMethodsRouter)
 // converge into the Finance module in a later phase.
 v1Router.use("/finance", financeRouter)
 v1Router.use("/finance", financeAdminRouter)
+//* Consumption tax — its own module, not nested under finance.
+v1Router.use("/tax", taxAdminRouter)
 v1Router.use("/kpis", kpiRouter)
 
 export default v1Router

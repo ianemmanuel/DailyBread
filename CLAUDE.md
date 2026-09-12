@@ -969,3 +969,326 @@ Backend `admin.menuItem.service.ts` (list with scope-aware filters + whole-scope
 ### Deliberately not done
 - **Variants, addons, discounts.** Named as next by the user. They hang off `MenuItem`, which is the reason the catalog split happened now rather than later.
 - **Meal plans** still reference `Meal` and are otherwise untouched; `MealPlan.priceMinor` moved to minor units alongside everything else, and nothing reads it yet.
+
+## Meals, phase 1 — consumption tax and pricing semantics (2026-09-11)
+
+First phase of the meal build-out. Migrations `20260911120000_add_consumption_tax` and `20260911130000_move_tax_config_to_own_table`.
+
+**The bug this closes is that `MenuItem.basePriceMinor` had no defined tax meaning.** Every price a vendor had typed was ambiguous — nobody could say whether it already contained VAT. That is cheap to settle now and very expensive after orders exist, which is why it went first rather than variants.
+
+**Tax is jurisdictional, and within a jurisdiction it depends on what the food is.** A single rate per country is wrong in most markets: the UK zero-rates cold takeaway food while standard-rating the same shop's hot food, and several US states and Canadian provinces draw comparable lines. This is why Uber Eats carries a tax category on the menu item rather than a store-wide rate, and it is the model copied here.
+
+Shape is the **global-catalog-plus-per-country-config pattern already used four times** (VendorType/VendorTypeCountry, Cuisine/CuisineCountry, DietaryTag/DietaryTagCountry, PaymentMethod/CountryPaymentMethod), so nothing structural is novel:
+- **`TaxCategory`** — the platform's vocabulary. Seeded with eight entries (`packages/database/src/seed/finance/tax-categories.seed.ts`, step `[5/7]` in `seedFinance`), keyed on `code` because name and slug are both admin-editable. **No rates are seeded** — a rate is a legal fact about one country and a deliberate admin decision, the same convention per-country payment-method activation follows.
+- **`CountryTaxRate`** — what one country charges for one category. `rateBps` is an **integer in basis points** (1600 = 16%), for the same reason money is minor units: a rate multiplies money, and it lets a statutory 7.5% be exact. `isStandard` marks the fallback, and **a partial unique index enforces one per country** (`CountryTaxRate_one_standard_per_country`, `WHERE isStandard AND status = 'ACTIVE'`) rather than trusting the service alone — the fallback decides the price of every uncategorised dish, so which row wins must never be ambiguous.
+- **`CountryTaxConfig`** (1:1 with Country) — `pricesIncludeTax`, `taxRemittedBy` (`TaxRemitter`), `taxName`. **`taxRemittedBy` is a column and not a platform policy**: marketplace facilitator rules in some jurisdictions force the platform to collect regardless of preference. Default `VENDOR`, the lighter model, per explicit product decision.
+- **`MenuItem.taxCategoryId`**, nullable and `onDelete: Restrict`. Null is the common case and a real answer, not a missing one: it means "whatever this country taxes prepared food at". **A flat-rate market configures one category and its vendors never meet the concept** — the form hides the control when the country has one rate or none.
+
+**`apps/backend/src/lib/pricing/tax.ts` — pure, no Prisma, 19 unit tests.** In `lib/` rather than a module because three callers need the identical answer (vendor form preview, admin display, eventually the customer cart) and a second implementation is a second set of rounding bugs. Two invariants the tests pin:
+- **`net + tax === gross`, exactly, always.** Tax is the value that gets rounded and the other side is derived by subtraction. Rounding both independently is how a total ends up a minor unit adrift from its parts, which surfaces much later as a payout that will not reconcile.
+- **Inclusive tax is `gross * rate / (10000 + rate)`, not `gross * rate / 10000`.** At 16% the tax inside 1160 is 160, not 185.6. The test suite asserts the wrong answer is not produced, because this is the single most common tax bug and it over-states tax on every order.
+`roundHalfUp` is used rather than `Math.round`, which rounds -0.5 toward zero — amounts are non-negative today, but a refund or a negative modifier delta would reach this.
+
+### Tax is its own module, not part of finance
+
+**`apps/backend/src/modules/tax`** — its own module with the standard shape (`controllers` / `services` / `routes` / `schemas` / `lib` plus an `index.ts` barrel), mounted at `/admin/v1/tax`.
+
+The first cut put tax inside finance and its columns on `CountryFinancialConfig`; that was corrected in the same pass, before anything shipped, because **a module meant to survive extraction has to own its own tables**. Finance owns payment rails — providers, routing, credentials, readiness, adapters — and its own barrel says it is "the ONLY module that will ever talk to a payment provider." Tax is a separate bounded context whose growth is unrelated to any of that: per-line tax on orders, exempt customers, place-of-supply rules, filing and reporting exports, and eventually a `TaxProvider` adapter interface (Avalara / TaxJar / Stripe Tax) mirroring `PaymentProviderAdapter`. The tax module owns `TaxCategory`, `CountryTaxRate` and `CountryTaxConfig` outright and **imports nothing from finance**.
+
+It carries **its own `lib/scope.ts`** rather than importing finance's near-identical guards — the admin and finance modules already each keep their own for the same reason, and a module that depends on a sibling's internal lib is not extractable. The one piece legitimately shared is `resolveCountryIdInScope`, which belongs to the admin plane every admin route already runs inside.
+
+**Its own permission pair**, `finance:tax:read` / `finance:tax:manage`. The `finance:` namespace is kept because tax IS financial configuration and the permission catalog groups by domain, but the keys are separate so provider access and tax access can be granted independently. Pools: **`finance`** (a statutory rate is the finance function's record to keep) and **`operations_admin`** (GLOBAL-only, and already owns the vendor-type and food-tag catalogs), plus `super_admin` via `ALL_PERMISSION_KEYS`. Running `seedAdmin` granted exactly 2 to the existing super admin, confirming the surface was unreachable before.
+
+**Scope does the separating, not the permission.** `assertGlobalTaxScope` on the catalog; `assertCountryTaxScope` on a country's rates and position, which also refuses **city tier** — `buildScopeContext` folds a CITY scope's own `countryId` into `countryIds`, so a check reading only `countryIds` cannot tell a city admin from a country admin. Same hole, same fix, as the food-tag availability guard. **There is no delete at either level** — a category a country has rated, or a rate a dish was priced under, is withdrawn by status so history stays readable.
+
+**Module boundary.** Vendor reaches tax through the tax module's **public barrel** (`@/modules/tax`), which exports **resolution only** — `getCountryTaxProfile` and `resolveRateBps`. Catalog and rate administration stays private and is reached through the module's own admin router.
+
+**Resolution rule worth not re-deriving**: a dish naming a category its country has **not** rated falls back to the standard rate, never to zero — an unrated category is a configuration gap, and quietly charging nothing is the expensive reading. Separately, `resolveTaxCategoryId` (vendor side) **refuses** an unavailable category rather than silently dropping it, so a vendor never looks at a dish they believe is zero-rated while it is charged at standard.
+
+`getMenuContext` now returns a `tax` block (inclusive flag, market label, standard rate, rated categories with formatted labels) and every meal response carries its own breakdown. The tax profile is read **once per page**, never once per row.
+
+**Verified against the dev database**, both the finance layer and the vendor menu path end to end, each smoke test cleaning up after itself: city-tier refused; promoting a standard demotes the old one; the partial index rejects a second standard even on a direct `updateMany`; an unrated category falls back to standard; retiring a standard clears its flag and the profile honestly reports null; a KES dish at 130000 inclusive split to 112069 + 17931 at 16% and 108333 + 21667 at 20%, both summing exactly; an unrated and a fabricated category id were both refused. 372 backend tests pass.
+
+### Admin UI — `/tax`, a first-class section
+
+Its own top-level sidebar section, mirroring the backend rather than nesting under Finance. Two children, both gated on `FINANCE_TAX_READ`:
+
+- **`/tax/countries`** — the screen an admin actually works in, so `/tax` redirects here. **Country-scoped by construction**: a country-scoped admin gets no picker and their own market resolves server-side, exactly like every other country-scoped screen; only a global admin chooses. The picker deliberately has **no "all countries" row**, unlike the revenue selectors — two markets quote prices differently, name the tax differently and charge different rates, so an aggregate would be a number that means nothing. Three panels: the tax position (inclusive/exclusive, remitter, local label, as two-segment controls rather than switches — the operating-hours reasoning), a live **worked example** of what those settings do to a typed price, and the rates table with per-category add / edit / retire. A country with **no standard rate** gets a warning at the top, because without one no price in that market can be broken down at all.
+- **`/tax/categories`** — the global vocabulary. No country selector, by design: a country picks rates *from* this list, it never adds to it. Controls are hidden for anyone not global (`assertGlobalTaxScope` would refuse them anyway) rather than render-then-403, and the suspend dialog names how many country rates and meals keep using the entry, since "suspend" reads like "remove" unless it is spelled out.
+
+Both screens **say a failed fetch out loud** rather than rendering an empty table, the same fix the inspections and payout-account pages got.
+
+### Vendor form control
+
+`getMenuContext` returns a `tax` block and every meal response carries its own breakdown, read **once per page, never once per row**. On the meal form:
+
+- The price preview now shows **what the vendor actually earns**: customer price, tax at the resolved rate, and the net before commission. A vendor cannot price a dish sensibly without knowing whether the number they typed contains tax. Same principle that will govern the discount builder.
+- **The tax-category control only renders where the market rates more than one kind of food differently.** In a flat-rate country there is no choice to make, so the vendor never meets the concept — the dish takes the default and the breakdown already says what that is. The default option names the standard category and its rate rather than a bare "Default".
+
+The preview mirrors `lib/pricing/tax.ts` including the subtract-to-derive rule, but it is a preview: every saved price is broken down server-side, and that is what the list and any future checkout read.
+
+### Deliberately not done in this phase
+- **No effective-dating and no rate-history table.** An order line will snapshot the rate it was charged at, and `AuditLog` already records every rate change, so a third record of the same fact could only disagree with the other two. Same reasoning that kept commission a scalar plus audit rather than a schedule.
+- **No calculation engine beyond the pure library** — there is no cart or order to calculate against yet.
+- **Commission basis** (gross vs net of tax) is deliberately unrecorded. Storing tax separately per line keeps both formulas available.
+- **Sub-national rates.** US sales tax varies by state, county and city, so Uber Eats resolves tax by store location there. `CountryTaxRate` is country-granular. The extension point is a nullable `cityId` plus a partial unique index for the null case (Postgres treats NULLs as distinct — the same trap the operating-hours `validFrom` column hit), and `resolveRateBps` is the single function that would change. Not built: no target market needs it.
+- **Vendor tax-registration status.** Whether a small vendor below a registration threshold charges tax at all is real, but it belongs to vendor onboarding, which already captures `taxId` on the application and `taxRegistrationNumber`/`taxIdType` on the account. Resolution will read from that when it is wired.
+
+## Meals, phase 2 — modifier groups and options (2026-09-11)
+
+Migration `20260911140000_add_menu_modifiers`. What a customer chooses ON a dish: size, flavour, a drink, sauces, extras.
+
+### One primitive, not two
+
+**"Variants" and "addons" are the same thing.** A size group is "pick exactly one", a sauce group is "pick up to three", and the selection rule is the entire difference. Every serious platform models it this way — Uber Eats calls them customizations, DoorDash option lists, Toast and Square modifier groups. Two tables would have meant two pricing paths, two forms, two order-line shapes, and every future rule (a discount, a tax category) written twice.
+
+`ModifierGroup` (vendor-scoped, reusable) + `ModifierOption` + `MenuItemModifierGroup` (the join, carrying **per-dish order only**).
+
+- **`required` is NOT a column.** It is exactly `minSelect >= 1`, derived everywhere. A second source of truth could disagree with the rule it claims to describe.
+- **Options carry a `priceDeltaMinor`, never an absolute price.** Small is +0, Large is +200; may be negative, and is routinely zero. That is the opposite of `MenuItem.basePriceMinor`, which insists on a positive number — a dish has a price, an option has an adjustment.
+- **Groups are reusable across dishes**, which is the only reason a real menu stays maintainable: one "Sauces" edited once fixes twelve dishes. Deliveroo, Toast, Square and Olo all do this.
+- **The selection rule belongs to the group, not the join.** A vendor wanting different rules makes a second group, so "what does this group do" keeps one answer everywhere it appears.
+
+### Pricing composition — `lib/pricing/line.ts`
+
+Pure, beside `tax.ts`, for the same reason: the vendor form, admin moderation and eventually the customer cart must reach the identical number.
+
+```
+base + sum(selected option deltas) = line subtotal
+  - discount (a later phase)       = taxable amount
+  ± tax                            = what the customer pays
+```
+
+**Tax applies to the line AFTER options, not to the menu price** — a large pizza with extra cheese is taxed on what the customer actually pays for it. The test suite asserts this directly. A percentage discount will apply at the same point, for the same reason.
+
+`computeLineSubtotal` **floors at zero**, and quantity multiplies an already-resolved unit price rather than summing n roundings. `validateSelection` returns **every** problem rather than the first (a cart revealing one missing choice at a time is how a customer abandons it) and treats an unavailable option as not chosen, so an out-of-stock size correctly makes a required group fail.
+
+### Rules that stop a vendor shipping an unorderable dish — `vendor.modifiers.ts`
+
+Pure, 30 unit tests, same convention as `vendor.menu.ts` / `vendor.placement.ts`. Every rule here exists because the failure is otherwise invisible until a customer hits it:
+
+- `maxSelect` above the option count ("pick 5 of 3") is refused.
+- A **required group whose options are all unavailable** is refused — every dish using it would silently become unorderable.
+- `setModifierOptionAvailability` refuses 86-ing the **last** available option in a required group. Same invariant, reached through a different door.
+- **`assertGroupCannotZeroOutDish`** — checks only the worst case (every group taking its cheapest allowed selection), because that is the only combination that can break the floor and enumerating the rest is exponential for no extra safety. An optional *upcharge* is excluded: a customer is never obliged to take one.
+- Caps: `MAX_GROUPS_PER_ITEM` 10, `MAX_OPTIONS_PER_GROUP` 30. Both reference platforms cap; the number is not sacred, having one is.
+
+Options are **reconciled by id**, never wiped and recreated, because an option id is what a future order line will have snapshotted its choice against.
+
+### Moderation — a flag with nowhere to go is worse than no flag
+
+Group and option names are customer-visible vendor free text exactly as a dish name is, so they go through the shared `ContentModerationProvider`. **A flagged group flags every dish using it** (`INAPPROPRIATE_MODIFIER` via `recomputeModifierFlagsForItems`), so it lands in the **existing `/vendors/meals` queue** rather than needing a queue of its own — the same "don't promise a review nobody can perform" rule the meal-moderation pass established.
+
+Two traps worth not re-deriving: re-screening a dish's own text **replaces the whole reason array**, so the modifier flag is carried across deliberately in `updateMenuItem`; and `recomputeModifierFlagsForItems` reads **every** attached group before clearing, since a dish can be flagged by more than one. A manual verdict an admin already gave is never overwritten. Non-blocking throughout: the save always succeeds.
+
+The admin meal detail page now renders the dish's groups with their option names, deltas and availability, and marks the flagged one — a moderator looking at a dish flagged for modifier content would otherwise see a perfectly clean name and description with nothing to act on. The suggested send-back message names **which group** to fix.
+
+### Vendor UI
+
+- **`ModifierGroupSheet`** asks two questions in the vendor's words — *must they choose* and *how many* — and derives `minSelect`/`maxSelect` from them. Asking for a raw minimum and maximum is how you get a group nobody can satisfy. The derived rule is then stated back in a sentence, so nothing is hidden, just not typed.
+- **`MealModifierSection`** on the meal form is DoorDash's flow rather than Square's: build inline on the dish, and it becomes reusable. A group the vendor just created is attached automatically. Order is the vendor's, since a customer meets the groups top to bottom.
+- **`/meals/choices`** is the library — where prices are fixed across the whole menu and a choice is 86'd mid-shift without opening a dish. A child of `/meals`, because a group of choices is not something a vendor sells.
+- The availability control is a **two-segment On/Off**, not a `Switch` (none exists in this app anyway) — the operating-hours reasoning: a bare switch is a pale pill whose state you must read the label to understand.
+
+### A phase-1 bug this pass found
+
+`vendor.menu.controller.ts`'s `menuItemInputFrom` destructures the body field by field, and **`taxCategoryId` was never added to it** — so it was silently dropped on every real request while phase 1's smoke test, which called the service directly, passed. Exactly the class of bug CLAUDE.md already records for the payout `proofDocument` field. Fixed, and the phase-2 smoke test now maps a body through a copy of the controller's own mapper so a missing field fails loudly.
+
+### Verified against the dev database
+
+Ten-step smoke test, cleaning up after itself: both group shapes created; five unsatisfiable rules refused by code (`INVALID_RULE`, `REQUIRED_GROUP_UNSATISFIABLE`, `NO_OPTIONS`, `DUPLICATE_OPTION`); attach order preserved; a KES line composed base + Large + Garlic and taxed on the **line**, parts summing exactly; a shared-group edit repriced the dish with **option ids preserved**; 86-ing refused on the last required option; a zeroing-out dish refused; profanity in an **option** flagged the group and the dish, and fixing the group cleared both with no edit to the dish; deleting a group detached it everywhere. A separate test proved the controller mapping carries `taxCategoryId` and `modifierGroupIds`, and that the admin view sees the modifier text. **422 backend tests pass** (69 new); both dashboards build.
+
+### Deliberately not done
+- **Nested modifiers** (an option opening its own group — DoorDash's half-and-half pizza). Roughly doubles cart-resolution complexity.
+- **Per-outlet option pricing or availability.** Only price and availability vary by location on a `Meal`; letting the option *set* differ per outlet would mean the dish is no longer one dish.
+- **Per-item override of a group's rule.** A vendor wanting different rules makes a second group.
+- **Drag-and-drop reordering.** Up/down controls for now; a drag library is its own decision.
+
+## Meals, phase 3 — menu structure (2026-09-11)
+
+Migration `20260911150000_add_menu_ordering_and_prep_time`. Section rename / reorder / delete, dish ordering within a section, and prep time.
+
+### What the menu is ordered by
+
+`MenuItem.position` joins `MenuSection.position`, so the list now orders by **section position, then dish position, then name**. Name survives as the tie-break, which is what makes the migration a non-event: every existing row defaults to position 0, ties, and falls back to exactly the ordering the list already had.
+
+New rows go to the **end** of their bucket (`nextPosition`), never the top — a vendor adding their fortieth dish did not ask for it to lead the menu, and promoting it would quietly demote something they had placed deliberately. Unsectioned dishes sort **after** every section: a section is a deliberate grouping and the leftovers belong under it.
+
+### Reordering demands the WHOLE list
+
+`resolveOrdering` (`vendor.menuStructure.ts`, pure, 17 tests) refuses a partial list rather than guessing. **A partial reorder has no correct answer** — if a client sends three of eight ids, where do the other five go? Two clients disagreeing about that is how a menu silently rearranges itself. Sending the full list means the submitted order IS the order, which is also what the UI naturally has to hand. Duplicates and foreign ids are refused separately, with the foreign id reported first since it is the more useful message.
+
+`reorderMenuItems` is scoped to **one** section (or the unsectioned bucket, `sectionId: null`) because position is only meaningful within one. Moving a dish *between* sections is a change of section, which the meal form already does.
+
+### Deleting a section never deletes its dishes
+
+They fall back to unsectioned and stay on the menu — which is what nullable `MenuItem.sectionId` is for. A vendor tidying headings must not be able to delete forty dishes by accident, and the confirmation says so explicitly ("only the heading goes"). **The soft delete is why `deleteMenuSection` nulls `sectionId` explicitly**: the relation's `SetNull` only fires on a real row delete, which this deliberately is not.
+
+### Prep time
+
+`MenuItem.prepTimeMinutes`, nullable, 1–240. Uber Eats and DoorDash both carry this per item, because a courier arrival estimate is only as good as the slowest dish on the ticket.
+
+**Null is a real answer and the default.** A vendor who has not said is different from one who said zero, and nothing consumes this yet (there is no order model), so an invented default would be a lie with a number attached. **Zero is refused** and the message points back at the empty field — no dish is instant, so a zero is someone clearing the box rather than meaning it.
+
+### UI
+
+- **`/meals/arrange`** — its own page, not controls bolted onto `/meals`: that list is paginated and searchable, and you cannot decide what comes third while looking at page two. Fetches the whole menu in one read (`MAX_ITEMS` 500; past that a vendor wants search, not arrangement). Sections with their dishes nested, inline rename, add-a-section at the top, and an explicit "Not in a section" bucket at the bottom.
+- **Up/down, not drag.** There is no drag library in this app, adding one is its own decision, and buttons work on a phone where a long-press drag fights the browser's own scroll.
+- **Prep time sits beside Price** on the meal form — both are about how the dish trades. Surfaced on the admin meal detail line too.
+
+### The phase-1 bug class, caught by the type system this time
+
+Adding `prepTimeMinutes` to `UpsertMenuItemRequest` made `MealForm` fail to compile until the field was actually sent — the opposite of what happened to `taxCategoryId` in phase 1, which the controller's untyped field-by-field body mapper silently dropped. **The lesson worth keeping: the vendor-dashboard request type is what catches this, and the backend controller's mapper has no such guard**, so any new meal field needs adding to `menuItemInputFrom` deliberately. A smoke test now routes a body through a copy of that mapper for exactly this reason.
+
+### Verified against the dev database
+
+Eight-step smoke test, cleaning up after itself: sections created at the end with ascending positions; rename preserving position and refusing a duplicate name; reorder applied, with partial / duplicate / foreign-id / not-a-list all refused by code; dishes created at the end of their section; prep time stored, cleared to **null rather than 0**, and zero / negative / fractional / over-long all refused; dishes reordered within a section and the list reflecting it; **deleting a section freed 3 dishes and lost none**; the unsectioned bucket reordered, with a partial bucket still refused. A separate test proved `prepTimeMinutes` survives the controller mapping and reaches the admin detail view. **439 backend tests pass** (17 new); both dashboards build.
+
+### Deliberately not done
+- **Drag-and-drop.** Its own decision, and a dependency.
+- **Moving a dish between sections from the arrange view.** That is a change of section, and the meal form already owns it. Doing it in two places invites them to disagree.
+- **Menu trading hours** (a breakfast menu that disappears at eleven). Still needs a `Menu` layer above `MenuSection`, and it belongs with the customer app.
+- **Anything consuming prep time.** There is no order, so nothing quotes a delivery time yet.
+
+## Meals — vendor feedback pass (2026-09-11)
+
+Four changes after the user reviewed the screens. No migration.
+
+**The vendor no longer picks how a dish is taxed, and no longer sends the field at all.** Checked against the platforms first: Uber Eats and DoorDash both classify tax centrally and never put the choice on a merchant's item form — where a per-item rate exists it is a POS-integration field, not merchant UI. This platform sells **ready-cooked food only, no grocery**, so every dish takes the market's standard rate and there is nothing for a vendor to decide. The vendor still sees the full breakdown under the price, which was the actual ask.
+
+**The rule this created, and the trap it avoids**: `updateMenuItem` now treats an **absent** `taxCategoryId` as "leave it alone" and only an **explicit null** as "clear it". The vendor form omits the field entirely, so without that distinction every vendor edit would silently wipe a classification set elsewhere. Verified against the dev database: a classification applied out-of-band survived a vendor edit, and an explicit null still cleared it.
+
+`MenuItem.taxCategoryId` stays in the schema and **nothing writes it today** — recorded here so it is not mistaken for the `Outlet.serviceMode` kind of dead column. It exists for the case that genuinely bites later: alcohol, and hot-vs-cold food in markets like the UK. Assigning it is a platform/compliance decision, so when it is needed it belongs on the admin meal page, not the vendor form. Not built, because no launch market needs it.
+
+**"Choices" renamed to "Options"** throughout, and `/meals/choices` → `/meals/options`. The user leaned toward "variants" but asked for a word a real meal-delivery app uses. **No major platform uses "variants" for this** — DoorDash, Bolt Food and Just Eat all say Options; Uber Eats says Customizations; Deliveroo says Modifiers. "Options" is the most widely used and the plainest, so it wins on the user's own stated constraint. A group is an "option group"; an entry in it is an "option".
+
+**Form actions moved out of the pinned bar.** `MealForm` had a `fixed inset-x-0 bottom-0` bar spanning past the sidebar, and `ModifierGroupSheet` had one pinned to the sheet bottom. The user's read was right: a viewport-pinned bar looks like app chrome, so you have to ask whether it belongs to the form or the page. Both now end the form and scroll with it, and `MealForm`'s `pb-28` (which existed only to clear the fixed bar) is gone. Scrolling to the end to submit is how a form has always worked, and on a phone it gives back the height a permanent bar was taking.
+
+**Minimum order is a basket rule, not a dish rule — no validation added.** A single samosa priced below an outlet's minimum order is correct; the customer adds more to reach it. Uber Eats and DoorDash both have order minimums and items priced below them. Gating a dish price on `Outlet.minimumOrder` would also be wrong per-dish, since a vendor's dish is sold at several outlets with different minimums.
+
+**Found while checking that**: `Outlet.minimumOrder` and `Outlet.deliveryFee` are `Float?` — money as a float, the exact representation bug that `Meal.price Float` was fixed for in the menu-catalog pass. Both are written by `vendor.outlet.service.ts` and read by nothing yet. They should become integer minor units before anything consumes them. Not changed in this pass; flagged as the next small cleanup.
+
+## Outlet money becomes integer minor units (2026-09-12)
+
+Migration `20260912100000_outlet_money_minor_units`. `Outlet.deliveryFee`/`minimumOrder` were `Float?` — the same representation bug `Meal.price Float` was fixed for, sitting in a table nothing had read yet.
+
+**Renamed, not retyped in place**: `deliveryFeeMinor` / `minimumOrderMinor`. The unit is stated by the name so no caller can keep writing major units into them, the same reasoning behind `basePriceMinor` and the `...Key` storage-key rename. `deliveryRadius` stays a `Float` — it is kilometres, a genuine measurement.
+
+The migration converts existing rows using **each outlet's own country currency scale** (`City → Country → Currency.minorUnitDigits`), never an assumed 2, falling back to 2 only when a currency will not resolve. NULL stays NULL: "not set" is not the same statement as a fee of zero, and the difference matters the moment a checkout decides whether to charge anything. Verified against the dev database: the one existing outlet went from 150.0/500.0 to 15000/50000 and the float columns are gone.
+
+Frontend: new `majorToMinor`/`minorToMajor` in `lib/menu/money.ts` (the numeric twins of the existing string-based helpers, for forms whose money field is already a number). Both outlet forms type in major units and convert on submit, the same round trip the meal price makes. New `useVendorCurrency()` reads the currency out of the menu-context query — its own named hook rather than call sites reaching into "menu context" for something that is a fact about the vendor's **country**; if a third surface needs more than currency it belongs on the vendor session. The outlet card's hardcoded `KSh` label is gone.
+
+**Still a float, and now on the critical path**: `VendorAccount.commissionRate`, `VendorCommissionConfig.rate` and `VendorCommissionRateHistory.previousRate`/`newRate`. Rates multiply money, so the same argument applies — they should be integer **basis points** (1500 = 15%), exactly as `CountryTaxRate.rateBps` already is. This matters for discounts specifically: "show the vendor what they keep" cannot be exact while the commission rate is a float. Not changed here; it is the next small cleanup and should land before the discount builder.
+
+## Commission rates become basis points, and the commission basis is settled (2026-09-12)
+
+Migration `20260912110000_commission_basis_points`. Done before the discount builder rather than after, because "show the vendor what they keep" cannot be exact while the rate is a float.
+
+**It closed a real ambiguity, not just a type.** `VendorAccount.commissionRate` held a **percentage** (15 meant 15%) while `VendorCommissionConfig.rate` held a **fraction** (0.15 meant the same thing) — one concept, two scales, and nothing in the type system to catch a mix-up. Hence the migration's two different multipliers (×100 and ×10000) and one scale afterwards: `commissionRateBps`, `rateBps`, `previousRateBps`/`newRateBps`, all integer basis points, matching `CountryTaxRate.rateBps`.
+
+Safe by inspection first: all three vendor rates were null, and `VendorCommissionConfig` / `VendorCommissionRateHistory` were empty with **no writer anywhere** for the config table. The conversion SQL is still correct for an environment that does have rows.
+
+**The boundary now speaks basis points.** `updateVendorCommissionRate` takes `newRateBps` and refuses a non-integer or anything outside 0–10000, so a percentage passed by mistake is rejected rather than silently stored as a hundredth of itself. The admin form types a percentage and converts once on submit (`toBps`/`toPct`), the same split the tax-rate form makes. The request body field was renamed too — checked the controller deliberately, since a renamed body field silently dropped is the exact bug that hit `taxCategoryId` in meals phase 1. The vendor CSV export formats as `15%` rather than emitting a raw `1500`.
+
+Verified against the dev database: 15% stored as 1500, **12.5% stored exactly as 1250** (which a float could not represent), history rows recorded both transitions, and a percentage / over-100% / negative were each refused. 439 tests pass; both dashboards build. Cleaned up after itself.
+
+### Decision recorded: commission is charged on the DISCOUNTED amount
+
+Per explicit product direction, following Uber Eats: a merchant-funded promotion reduces the subtotal, and commission is computed on **what the customer actually paid**, not on the pre-discount menu price. The platform does not take a cut of a discount the vendor funded.
+
+This is the open question CLAUDE.md carried from meals phase 1 ("commission basis — gross vs net of tax, deliberately unrecorded"). It is now answered for discounts. The tax half still stands: tax is stored separately per line, so commission-on-net-of-tax remains available and is the standard VAT treatment.
+
+## Standing principle: the backend is the source of truth (2026-09-12)
+
+Stated explicitly by the user and recorded as a rule for **every** feature, not just the one that prompted it.
+
+**The backend decides; the client displays what the backend returned.** A client never re-derives an answer the server already computed, and never computes one the server will later depend on. The reasons are trust and drift in equal measure: a number a client calculated is a number a crafted request can change, and two implementations of one rule will disagree eventually — the only question is whether it is noticed before or after money moves.
+
+This is already the convention in several places, and those are the shape to copy rather than exceptions to it:
+- **Go-live status** (`getVendorGoLiveStatus`, `getOutletGoLiveStatus`, `getOutletMealPlanReadiness`) is computed live, server-side, and both dashboards render `blockers[]` verbatim rather than re-deriving readiness.
+- **Tax** is broken down server-side and every meal response carries its own breakdown; the vendor form's preview mirrors the arithmetic but is explicitly a preview, and the saved figure is always the server's.
+- **Placement** (`describePlacement`) is resolved by the backend on every pin move, and `createOutlet` re-resolves on save — the preview never gates anything.
+- **Financial readiness**, **payout review state** and **outlet clearance** are all the same shape.
+
+Practical consequences to hold to:
+- A pure rule shared by both sides lives in **one** place and is imported, never re-typed. `lib/pricing/*` exists for exactly this.
+- Where a client *does* mirror a calculation for responsiveness (a live preview as someone types), the comment says it is a preview and names the authoritative path.
+- Validation on the client is for telling someone early, never for deciding. The server re-validates everything and is the only thing that refuses.
+- Anything that decides money — price, tax, discount, commission, payout destination — is resolved server-side, with the client receiving a result rather than the inputs to compute one.
+
+## Discounts — schema and pure rules (2026-09-12)
+
+Migration `20260912120000_add_discounts`. Steps 1–3 of the agreed workflow: recon, migration, pure rules with tests before any Prisma. **No service, routes or UI yet** — that is the next slice.
+
+### Recon corrections
+`finance:discounts:read/create/deactivate` already existed, seeded, held by `finance` (all three) and `vendor_ops` (read only). Their descriptions were written for **platform** campaigns, so `_CREATE` fits the platform-funded flow we are deferring: **read and deactivate get wired, create stays unwired** rather than being repurposed. No discount code existed anywhere.
+
+### Model
+`Discount` + `DiscountOutlet` + `DiscountMenuItem`, vendor-owned.
+
+- **Two types.** `PERCENTAGE_OFF_ITEMS` (basis points) and `AMOUNT_OFF_ORDER` (minor units, above a minimum subtotal).
+- **Status is DERIVED, not stored** — `deriveDiscountState()` returns SUSPENDED / PAUSED / EXPIRED / EXHAUSTED / SCHEDULED / AWAITING_GO_LIVE / RUNNING from the window, the caps and the clock. Only genuine state gets a column: the vendor's `isPaused` and the admin's `suspendedAt`. Same choice as `payoutReviewState`; no cron flipping rows, no second answer.
+- **The "schedule before going live" rule needed no column.** A vendor creates a discount at the authoring tier (ACTIVE account, same as the menu) and it simply reports `AWAITING_GO_LIVE` until the storefront publishes.
+- **Lifecycle and window are kept apart.** A 5–7pm offer is RUNNING all week and outside its window most of it; conflating them is how a happy-hour offer gets reported as expired at 3pm. `isWithinWindow` handles an **overnight window matched against the day it opened**, so a Friday 22:00–02:00 offer still applies at 01:00 Saturday.
+- **Targeting is explicit**, not inferred from an empty list — `appliesToAllOutlets` / `appliesToAllItems` flags, so deselecting everything is an error rather than a whole-menu discount. Same lesson as refusing a partial reorder. An empty **day** list does mean "every day", and the comment says why that one is not ambiguous.
+- **Caps are recorded but NOT enforced** — nothing increments `spentMinor` / `redemptionCount` because there is no order to redeem against. Same "designed, not enforced" honesty as `payoutHoldStatus`. `maxPerCustomer` additionally needs a per-customer redemption record.
+- **`fundingSource` exists from day one**, only `VENDOR` writable. Retrofitting attribution after money has moved is the expensive version.
+
+### The cart contract — `lib/pricing/cart.ts`
+
+Written now, while cheap, rather than invented alongside checkout. **Copied from Uber Eats and DoorDash rather than designed fresh**, because there is nothing to gain from a novel shape:
+1. **One cart, one outlet.** Both platforms refuse to mix merchants and prompt you to empty the basket. Matches the operation and removes a class of questions from discounts, delivery and tax.
+2. **The LINE is the unit, not the dish.** The same burger with and without cheese is two lines, not quantity two — the only way a modifier-priced menu totals correctly.
+3. **The client sends ids and quantities, never prices.** Per the standing authoritative-backend rule.
+4. **Options arrive FLAT and the server groups them.** Accepting the client's grouping would let it claim an option belongs to a group it does not, which is how a "pick one" rule gets bypassed.
+5. **Totals snapshot at order time**, so editing a dish tomorrow cannot rewrite what was charged today.
+
+`priceCart()` composes the whole thing: base + options → minus discount → tax → **commission on the discounted amount**. Discounts arrive already matched and apportioned, deliberately: the arithmetic is then testable without a database and the matching testable without arithmetic.
+
+**`apportionOrderDiscount` is the piece worth not re-deriving.** A basket-level discount must be spread back across lines *before* tax, because rates differ per dish — a basket mixing a standard-rated meal and a zero-rated one would otherwise be taxed wrongly. Apportioned by each line's share, with the remainder given to the largest line so the parts always sum to the whole, the same derive-by-subtraction rule `tax.ts` follows.
+
+### Guardrails
+`MAX_DISCOUNT_BPS` (5000) and a line floor, enforced in `normalizeDiscountValue`, **not** in the UI — a ceiling a client can skip is not a ceiling. This is the trade every marketplace makes: merchants launch offers without an approval queue, inside a maximum they cannot exceed. A discount ceiling is commercial policy rather than a legal fact, so unlike tax it is a platform constant; it moves to per-country config the first time a market needs its own number.
+
+Also refused: a fixed amount at or above its own minimum spend (every qualifying order free), half an hour window, a window that never opens, an offer running over a year, item targeting on an order-level offer (silently ignoring it would leave a vendor thinking the save broke).
+
+**113 new tests** across four files (`discount.ts`, `cart.ts`, `vendor.discounts.ts` and the existing pricing pair); **513 backend tests pass**.
+
+### Next
+Service, controller and routes; vendor creation UI with the live net preview; admin list/view/suspend. Redemption stays out until the order model exists.
+
+## Discounts — service, routes and UI (2026-09-12)
+
+Steps 4–6 of the workflow. No migration. Redemption is still out, because there is no order.
+
+### Vendor side
+`vendor.discount.service.ts` + controller + routes at `/vendor/v1/discounts`, **authoring tier** (`requireVendorState("ACTIVE")`, not go-live) so a launch promotion can be built during onboarding.
+
+- **`getDiscountContext`** is one read for the whole form: outlets, dishes, currency, the tax profile, the commission rate and the ceiling. Served rather than guessed, because the net preview is the point of the feature.
+- **`isPublished` on the profile is the live check**, not the full `getVendorGoLiveStatus` resolver — publishing the profile *is* going live, and one cheap flag is what this needs.
+- **A vendor cannot edit or resume a suspended offer.** Support lifts it, not a resave. Same rule that stops a banned outlet being edited.
+- **The vendor's pause and the admin's suspension are separate columns on purpose**, so neither silently undoes the other.
+- **`findApplicableDiscounts` has no caller yet.** It exists so the matching rule is written and proven while it is cheap, and so the customer app plugs into a resolved answer rather than inventing matching of its own.
+
+### Admin side
+`admin.discount.service.ts`, mounted on `vendorRouter` at `/admin/v1/vendors/discounts`. **Oversight, not authoring** — merchants self-serve, and what an admin gets is visibility and a stop button.
+
+- **`finance:discounts:read` / `:deactivate` only. `:create` stays unwired** — it describes platform-funded campaigns, which are deferred, and borrowing it for someone else's offer would misrepresent what it grants.
+- **Country-scoped on the vendor's own country**, which is what the user asked for and already the house convention: a global admin sees every market, a country-scoped one sees theirs. An out-of-scope id **404s rather than 403s**, since an opaque id would otherwise be probeable.
+- **A suspension reason is required** because the vendor is shown it verbatim; "your promotion was stopped" with no explanation is a support ticket by construction.
+- `state` cannot be filtered in SQL (it is derived), so it filters after presenting over a bounded `MAX_DISCOUNT_SCAN`, and the page says when the cap was hit rather than quietly under-reporting.
+
+### UI
+- **Vendor `/offers`** — list with the derived state rendered verbatim, plus create and edit. Nav item sits with the menu rather than under Settings: a promotion is something worked on alongside dishes, not set-once configuration.
+- **`NetPreview` is the piece that matters.** It shows customer pays, tax, commission and **what the vendor keeps**, priced against one of their real dishes rather than an invented round figure. A percentage alone tells a merchant nothing, because commission comes off the discounted amount — so 20% off does not cost 20%. Explicitly a preview; lib/pricing is authoritative and the comment says so.
+- **`discount-meta.ts` is the one place a state becomes a sentence**, same split as `VendorGoLiveBlocker` / `lib/readiness.ts`. `AWAITING_GO_LIVE` reads as "waiting for you to go live" with the reason, which is the whole point of allowing the early schedule.
+- **Admin `/vendors/discounts`** — state tabs with an **explicit `state=all`** (the unreachable-All-tab defect again), country-scoped, stop and release per row.
+- Both list pages **say a failed fetch out loud** rather than rendering empty.
+
+### Verified against the dev database
+Nine-step smoke test, cleaning up after itself: context resolved; a scheduled offer read as SCHEDULED; **the profile was temporarily unpublished to prove `AWAITING_GO_LIVE` and that the matcher returns nothing while unpublished**, then restored; eight guardrails each refused by code (ceiling, free-every-order, half a window, end-before-start, items on an order offer, nothing selected, another vendor's outlet, duplicate name); subset targeting resolved to the right dish and outlet; the vendor pause worked; **a different country's admin saw zero**; an admin stop recorded its reason, blocked the vendor's edit, and 404'd for an out-of-scope admin. 513 backend tests pass; both dashboards build.
+
+**Correction worth recording**: my first smoke run narrated the go-live path without exercising it — the test vendor *was* published, so two labels claimed something the run had not proved. Fixed by unpublishing and restoring around the assertion.
+
+### Still deferred
+Redemption and enforcement of caps (no order model), buy-one-get-one, platform-funded and co-funded campaigns, free delivery, promo codes, customer targeting, and stacking. `spentMinor` / `redemptionCount` are reported to the vendor as **not yet enforced** rather than shown as counters that never move.

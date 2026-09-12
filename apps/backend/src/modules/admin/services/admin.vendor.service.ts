@@ -1262,7 +1262,9 @@ export async function exportVendorAccountsCsv(filters: VendorAccountFilters, adm
     vendorType       : v.vendorType?.name ?? "",
     status           : v.user?.isBanned ? "BANNED" : v.status,
     outletCount      : v._count.outlets,
-    commissionRate   : v.commissionRate ?? "",
+    // Exported as a human percentage, not raw basis points: a spreadsheet
+    // cell reading 1500 for a 15% commission is a support ticket.
+    commissionRate   : v.commissionRateBps != null ? `${v.commissionRateBps / 100}%` : "",
     createdAt        : v.createdAt.toISOString().slice(0, 10),
   })), [
     { key: "legalBusinessName", label: "Business Name" },

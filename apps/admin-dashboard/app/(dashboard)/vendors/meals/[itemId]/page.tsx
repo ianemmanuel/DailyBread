@@ -17,6 +17,7 @@ interface Props { params: Promise<{ itemId: string }> }
 const FLAG_FIELD: Record<string, string> = {
   INAPPROPRIATE_NAME       : "the name",
   INAPPROPRIATE_DESCRIPTION: "the description",
+  INAPPROPRIATE_MODIFIER   : "one of the choice groups",
 }
 
 /* Vendor-facing wording for the send-back message. A vendor told
@@ -30,7 +31,14 @@ function buildSuggestedReason(meal: AdminMealDetail): string {
         ? "Name: please rewrite this for a general audience — the wording was flagged by our checks."
         : r === "INAPPROPRIATE_DESCRIPTION"
           ? "Description: please rewrite this for a general audience — the wording was flagged by our checks."
-          : r,
+          : r === "INAPPROPRIATE_MODIFIER"
+            // Named by group, because the vendor has to know WHICH one to fix
+            // and it may be shared across several of their dishes.
+            ? `Choices: please rewrite the wording in ${
+                meal.modifierGroups.filter((g) => g.flagged).map((g) => `"${g.name}"`).join(", ") ||
+                "one of your choice groups"
+              } — it was flagged by our checks.`
+            : r,
     )
     .join("\n")
 }
@@ -80,6 +88,7 @@ export default async function AdminMealDetailPage({ params }: Props) {
             {meal.vendor.legalBusinessName}
           </Link>
           {meal.section && ` · ${meal.section.name}`}
+          {meal.prepTimeMinutes != null && ` · ${meal.prepTimeMinutes} min to prepare`}
         </p>
       </div>
 
@@ -144,6 +153,69 @@ export default async function AdminMealDetailPage({ params }: Props) {
               )}
             </div>
           </div>
+
+          {meal.modifierGroups.length > 0 && (
+            <div className="admin-card space-y-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold text-foreground">What a customer can choose</h2>
+                <span className="text-xs text-muted-foreground">
+                  Priced as a change to the dish, not as a price of their own
+                </span>
+              </div>
+              <ul className="space-y-2">
+                {meal.modifierGroups.map((g) => (
+                  <li
+                    key={g.id}
+                    className={`rounded-xl border px-4 py-3 ${
+                      g.flagged ? "border-destructive/40 bg-destructive/5" : "border-border/70"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">{g.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {g.required ? "must choose" : "optional"}
+                        {g.maxSelect > 1 ? ` · up to ${g.maxSelect}` : " · one"}
+                      </span>
+                      {g.flagged && (
+                        <span className="badge-danger inline-flex items-center gap-1">
+                          <ShieldAlert className="h-3 w-3" />
+                          flagged
+                        </span>
+                      )}
+                      {g.usedByCount > 1 && (
+                        <span className="text-xs text-muted-foreground">
+                          on {g.usedByCount} dishes
+                        </span>
+                      )}
+                    </div>
+                    {g.description && (
+                      <p className="mt-1 text-xs text-muted-foreground">{g.description}</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {g.options.map((o) => (
+                        <span
+                          key={o.id}
+                          className={`rounded-full border px-2 py-0.5 text-xs ${
+                            o.isAvailable
+                              ? "border-border/70 text-foreground"
+                              : "border-border/40 text-muted-foreground line-through"
+                          }`}
+                        >
+                          {o.name}
+                          {o.priceDeltaMinor !== 0 && (
+                            <span className="ml-1 tabular-nums text-muted-foreground">
+                              {o.priceDeltaMinor > 0 ? "+" : "−"}
+                              {price(Math.abs(o.priceDeltaMinor))}
+                            </span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="admin-card space-y-3">
             <h2 className="text-sm font-semibold text-foreground">Where it&apos;s sold</h2>

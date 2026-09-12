@@ -6,7 +6,7 @@ const BACKEND = process.env.BACKEND_API_URL
 
 /**
  * PATCH /api/vendors/accounts/[id]/commission-rate
- * Body: { newRate, reason? }
+ * Body: { newRateBps, reason? } — basis points, never a percentage.
  */
 export async function PATCH(
   req    : NextRequest,

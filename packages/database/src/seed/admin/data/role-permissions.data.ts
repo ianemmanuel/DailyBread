@@ -41,6 +41,12 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "finance:payment_methods:manage",
     "finance:configuration:read",
     "finance:configuration:manage",
+    //* Tax. operations_admin is GLOBAL-only, so this grant reaches BOTH the
+    //* category catalog and any country's rates — consistent with its
+    //* country-launch-configuration remit, which already owns the vendor-type
+    //* and food-tag catalogs.
+    "finance:tax:read",
+    "finance:tax:manage",
   ],
 
   finance: [
@@ -66,6 +72,13 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "finance:payment_methods:manage",
     "finance:configuration:read",
     "finance:configuration:manage",
+    //* Tax. A statutory rate is the finance function's record to keep. The
+    //* scope rule does the separating: a COUNTRY-scoped finance admin sets
+    //* their own market's rates and tax position, while the global CATALOG
+    //* stays GLOBAL-only (assertGlobalTaxScope), so extending this grant does
+    //* not hand a country admin platform-wide vocabulary.
+    "finance:tax:read",
+    "finance:tax:manage",
     "orders:all:read",
   ],
 

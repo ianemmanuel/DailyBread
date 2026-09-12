@@ -7,6 +7,9 @@ import {
   Rocket,
   Settings,
   type LucideIcon,
+  SlidersHorizontal,
+  LayoutList,
+  BadgePercent,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -48,6 +51,18 @@ const SETUP_ITEM: NavItem = { icon: Rocket, label: 'Setup', href: '/setup', type
 
 const authoringNavItems: NavItem[] = [
   { icon: Salad, label: 'Meals', href: '/meals', type: 'link' },
+  // Options (sizes, extras) live under the menu rather than beside it: an option group
+  // of choices is not something a vendor sells, it is part of how a dish is.
+  // They are created from the meal form too, so this is a manage-them-together
+  // page rather than the only way in.
+  { icon: SlidersHorizontal, label: 'Options', href: '/meals/options', type: 'link' },
+  // Arranging needs the whole menu at once, which the paginated /meals list
+  // cannot give — hence its own page rather than controls bolted onto that one.
+  { icon: LayoutList, label: 'Arrange', href: '/meals/arrange', type: 'link' },
+  // Offers sit with the menu rather than under Settings: a promotion is
+  // something a vendor works on alongside their dishes, not configuration they
+  // set once. Authoring tier, so it is available before going live.
+  { icon: BadgePercent, label: 'Offers', href: '/offers', type: 'link' },
   { icon: Package, label: 'Meal Plans', href: '/meal-plans', type: 'link' },
 ];
 

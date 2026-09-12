@@ -8,11 +8,12 @@ export const handleUpdateVendorCommissionRate: RequestHandler = async (req, res,
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
     const { id } = req.params as { id: string }
-    const { newRate, reason } = req.body as { newRate?: number; reason?: string }
+    // Basis points, not a percentage — the admin form converts on submit.
+    const { newRateBps, reason } = req.body as { newRateBps?: number; reason?: string }
 
-    if (typeof newRate !== "number") throw new ApiError(400, "newRate is required", "MISSING_FIELDS")
+    if (typeof newRateBps !== "number") throw new ApiError(400, "newRateBps is required", "MISSING_FIELDS")
 
-    const data = await updateVendorCommissionRate(id, newRate, reason, adminUser.id, adminScope)
+    const data = await updateVendorCommissionRate(id, newRateBps, reason, adminUser.id, adminScope)
     return sendSuccess(res, data, "Commission rate updated")
   } catch (err) { next(err) }
 }

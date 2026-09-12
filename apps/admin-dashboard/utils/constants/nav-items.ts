@@ -32,6 +32,9 @@ import {
   MapPin,
   Plug,
   ClipboardCheck,
+  Receipt,
+  Layers,
+  BadgePercent,
 } from "lucide-react"
 import { AdminPermissions, type AdminPermissionKey } from "@repo/types/admin-app"
 
@@ -89,6 +92,7 @@ export const navSections: NavSection[] = [
       { label: "Compliance",   href: "/vendors/compliance",   icon: ShieldAlert,     requiredPermission: AdminPermissions.VENDORS_COMPLIANCE_READ },
       { label: "Appeals",      href: "/vendors/appeals",      icon: Scale,       requiredPermission: AdminPermissions.VENDORS_APPEALS_READ },
       { label: "Meals",        href: "/vendors/meals",    icon: UtensilsCrossed, requiredPermission: AdminPermissions.VENDORS_MEALS_READ },
+      { label: "Offers",       href: "/vendors/discounts",  icon: BadgePercent, requiredPermission: AdminPermissions.FINANCE_DISCOUNTS_READ },
       { label: "Profiles",     href: "/vendors/profiles",     icon: UserCheck,   requiredPermission: AdminPermissions.VENDORS_PROFILES_READ },
       // Revenue moved to its own "Finance" section below (CLAUDE.md) —
       // no entry here any more; /vendors/revenue still redirects there.
@@ -210,6 +214,20 @@ export const navSections: NavSection[] = [
       // (finance:configuration:read); mutations are global-scope-only,
       // enforced backend-side.
       { label: "Providers",        href: "/finance/providers",           icon: Plug,        requiredPermission: AdminPermissions.FINANCE_CONFIGURATION_READ },
+    ],
+  },
+  {
+    // Tax is its own top-level section rather than a child of Finance,
+    // mirroring the backend: it is its own module (apps/backend/src/modules/tax)
+    // and its own bounded context. Finance owns payment rails; tax owns what a
+    // price MEANS in a market, which every meal in that market depends on.
+    //
+    // Countries leads because it is the screen an admin actually works in —
+    // rates change by law — while the catalog is near-static vocabulary.
+    title: "Tax",
+    items: [
+      { label: "Countries",  href: "/tax/countries",  icon: Receipt, requiredPermission: AdminPermissions.FINANCE_TAX_READ },
+      { label: "Categories", href: "/tax/categories", icon: Layers,  requiredPermission: AdminPermissions.FINANCE_TAX_READ },
     ],
   },
   {

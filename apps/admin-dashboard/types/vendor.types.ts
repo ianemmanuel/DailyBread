@@ -288,8 +288,9 @@ export interface VendorPayoutAccount {
 
 export interface CommissionRateHistoryEntry {
   id                 : string
-  previousRate       : number | null
-  newRate            : number
+  /** BASIS POINTS — 1500 is 15%. Formatted for display, never shown raw. */
+  previousRateBps    : number | null
+  newRateBps         : number
   reason             : string | null
   changedByAdminId   : string
   changedByAdminName : string | null

@@ -20,22 +20,33 @@ import type { CommissionRateHistoryEntry } from "@/types"
 
 interface Props {
   vendorId: string
-  currentRate: number | null
+  currentRateBps: number | null
   history: CommissionRateHistoryEntry[]
   canManage: boolean
 }
 
 /**
- * Roadmap Phase 2 (CLAUDE.md) — commissionRate had no admin action to
+ * Roadmap Phase 2 (CLAUDE.md) — the commission rate had no admin action to
  * change it anywhere in the codebase and no record of past values. Every
  * change here writes a VendorCommissionRateHistory row server-side in the
  * same transaction as the live value.
  */
-export function VendorCommissionRateSection({ vendorId, currentRate, history, canManage }: Props) {
+/*
+ * A rate is TYPED as a percentage and SENT as basis points.
+ *
+ * A percentage is a human's unit and basis points are the stored one, and this
+ * is the single place they meet — exactly the split the tax-rate form makes.
+ * Sending 15 to an endpoint that means basis points would set a 0.15%
+ * commission, which is the kind of mistake nobody notices until a payout.
+ */
+const toBps   = (percent: number) => Math.round(percent * 100)
+const toPct    = (bps: number) => Number((bps / 100).toFixed(2))
+
+export function VendorCommissionRateSection({ vendorId, currentRateBps, history, canManage }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
-  const [rate, setRate] = useState(currentRate?.toString() ?? "")
+  const [rate, setRate] = useState(currentRateBps != null ? String(toPct(currentRateBps)) : "")
   const [reason, setReason] = useState("")
   const [pending, setPending] = useState(false)
 
@@ -47,7 +58,7 @@ export function VendorCommissionRateSection({ vendorId, currentRate, history, ca
       const res = await fetch(`/api/vendors/accounts/${vendorId}/commission-rate`, {
         method : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body   : JSON.stringify({ newRate: parsed, reason: reason.trim() || undefined }),
+        body   : JSON.stringify({ newRateBps: toBps(parsed), reason: reason.trim() || undefined }),
       })
       const data = await res.json()
       if (res.ok) {
@@ -76,7 +87,7 @@ export function VendorCommissionRateSection({ vendorId, currentRate, history, ca
             </Button>
           )}
           {canManage && (
-            <Button type="button" variant="outline" size="sm" className="rounded-full gap-1.5" onClick={() => { setRate(currentRate?.toString() ?? ""); setReason(""); setOpen(true) }}>
+            <Button type="button" variant="outline" size="sm" className="rounded-full gap-1.5" onClick={() => { setRate(currentRateBps != null ? String(toPct(currentRateBps)) : ""); setReason(""); setOpen(true) }}>
               <Pencil className="h-3.5 w-3.5" />
               Change
             </Button>
@@ -89,7 +100,7 @@ export function VendorCommissionRateSection({ vendorId, currentRate, history, ca
           <Percent className="h-4.5 w-4.5" />
         </div>
         <p className="text-2xl font-semibold tabular-nums text-foreground">
-          {currentRate != null ? `${currentRate}%` : "Not set"}
+          {currentRateBps != null ? `${toPct(currentRateBps)}%` : "Not set"}
         </p>
       </div>
 
@@ -99,7 +110,7 @@ export function VendorCommissionRateSection({ vendorId, currentRate, history, ca
             <li key={h.id} className="flex items-center justify-between gap-3 py-2 text-xs">
               <div className="min-w-0">
                 <p className="text-foreground">
-                  {h.previousRate != null ? `${h.previousRate}% → ` : ""}<span className="font-medium">{h.newRate}%</span>
+                  {h.previousRateBps != null ? `${toPct(h.previousRateBps)}% → ` : ""}<span className="font-medium">{toPct(h.newRateBps)}%</span>
                 </p>
                 {h.reason && <p className="truncate text-muted-foreground">{h.reason}</p>}
               </div>

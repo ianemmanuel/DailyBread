@@ -308,7 +308,7 @@ export default async function VendorAccountDetailPage({ params }: Props) {
       <div className="grid gap-4 lg:grid-cols-2">
         <VendorPayoutAccountsSection vendorId={id} accounts={account.payoutAccounts ?? []} canManage={canManagePayouts} holdStatus={account.payoutHoldStatus ?? "NONE"} holdReason={account.payoutHoldReason ?? null} />
         {canManageCommission && (
-          <VendorCommissionRateSection vendorId={id} currentRate={account.commissionRate} history={commissionHistory} canManage={canManageCommission} />
+          <VendorCommissionRateSection vendorId={id} currentRateBps={account.commissionRateBps} history={commissionHistory} canManage={canManageCommission} />
         )}
       </div>
 

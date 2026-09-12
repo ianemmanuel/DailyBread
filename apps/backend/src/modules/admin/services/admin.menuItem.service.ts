@@ -256,8 +256,9 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
     prisma.menuItem.findUniqueOrThrow({
       where : { id: itemId },
       select: {
-        portionSize: true,
-        section    : { select: { id: true, name: true } },
+        portionSize    : true,
+        prepTimeMinutes: true,
+        section        : { select: { id: true, name: true } },
         cuisines   : { select: { cuisine   : { select: { id: true, name: true } } } },
         dietaryTags: { select: { dietaryTag: { select: { id: true, name: true } } } },
         outletMeals: {
@@ -265,6 +266,32 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
           select: {
             id: true, isAvailable: true, priceMinorOverride: true, adminStatus: true,
             outlet: { select: { id: true, name: true, addressLine1: true } },
+          },
+        },
+        /*
+         * The dish's choice groups, with their option names.
+         *
+         * Load-bearing for moderation, not decoration: a group's wording is
+         * screened and a hit flags every dish using it (INAPPROPRIATE_MODIFIER).
+         * Without the text here, a moderator would see a flagged dish whose own
+         * name and description read perfectly and have nothing to act on.
+         */
+        modifierGroups: {
+          orderBy: { position: "asc" },
+          select : {
+            group: {
+              select: {
+                id: true, name: true, description: true,
+                minSelect: true, maxSelect: true, reviewStatus: true, flagReasons: true,
+                deletedAt: true,
+                _count : { select: { menuItems: true } },
+                options: {
+                  where  : { deletedAt: null },
+                  orderBy: { position: "asc" },
+                  select : { id: true, name: true, priceDeltaMinor: true, isAvailable: true },
+                },
+              },
+            },
           },
         },
       },
@@ -280,11 +307,28 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
     currency    : (code ? currencies.get(code) : null)
       ?? { code: code ?? "USD", symbol: code ?? "USD", minorUnitDigits: 2 },
     portionSize : detail.portionSize,
+    prepTimeMinutes: detail.prepTimeMinutes,
     section     : detail.section,
     cuisines    : detail.cuisines.map((c) => c.cuisine),
     dietaryTags : detail.dietaryTags.map((d) => d.dietaryTag),
     images,
     mainImageUrl: images[0]?.url ?? null,
+    modifierGroups: detail.modifierGroups
+      .filter((link) => link.group.deletedAt === null)
+      .map((link) => ({
+        id         : link.group.id,
+        name       : link.group.name,
+        description: link.group.description,
+        minSelect  : link.group.minSelect,
+        maxSelect  : link.group.maxSelect,
+        required   : link.group.minSelect >= 1,
+        flagged    : link.group.reviewStatus === "FLAGGED",
+        flagReasons: link.group.flagReasons,
+        /** How many other dishes carry the same wording — the blast radius of
+         *  the decision the moderator is about to make. */
+        usedByCount: link.group._count.menuItems,
+        options    : link.group.options,
+      })),
     outlets     : detail.outletMeals.map((m) => ({
       mealId            : m.id,
       outletId          : m.outlet.id,
