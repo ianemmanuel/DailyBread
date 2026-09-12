@@ -12,6 +12,15 @@ import {
   assertOwnedMealImageKey,
 } from "./vendor.menu"
 import { resolveImageExtension } from "./vendor.profileMedia"
+import { resolveGroupSelection, assertGroupCannotZeroOutDish } from "./vendor.modifiers"
+import {
+  recomputeModifierFlagsForItems, MODIFIER_CONTENT_FLAG,
+} from "./vendor.modifierGroup.service"
+import {
+  normalizePrepTime, resolveOrdering, nextPosition, assertSectionName,
+} from "./vendor.menuStructure"
+import { getCountryTaxProfile, resolveRateBps, type CountryTaxProfile } from "@/modules/tax"
+import { computeTax, formatRateBps } from "@/lib/pricing/tax"
 
 /*
  * The vendor's menu.
@@ -59,7 +68,7 @@ async function loadActiveVendor(vendorId: string) {
 export async function getMenuContext(vendorId: string) {
   const vendor = await loadActiveVendor(vendorId)
 
-  const [country, outlets, sections, tagOptions] = await Promise.all([
+  const [country, outlets, sections, tagOptions, taxProfile, taxCategories] = await Promise.all([
     prisma.country.findUnique({
       where : { id: vendor.countryId },
       select: { currencyCode: true, currency: true, currencySymbol: true },
@@ -75,6 +84,21 @@ export async function getMenuContext(vendorId: string) {
       select : { id: true, name: true, position: true },
     }),
     getVendorFoodTagOptions(vendor.countryId),
+    // Tax is a property of the vendor's market, so the form is TOLD what a
+    // typed price means rather than assuming a convention.
+    getCountryTaxProfile(vendor.countryId),
+    // Only the categories this country has actually rated. A flat-rate market
+    // returns one row, the form hides the control entirely, and the vendor
+    // never meets the concept — which is the whole point of the fallback.
+    prisma.countryTaxRate.findMany({
+      where  : { countryId: vendor.countryId, status: "ACTIVE", taxCategory: { deletedAt: null } },
+      orderBy: [{ isStandard: "desc" }, { taxCategory: { name: "asc" } }],
+      select : {
+        rateBps    : true,
+        isStandard : true,
+        taxCategory: { select: { id: true, name: true, description: true } },
+      },
+    }),
   ])
 
   const code = country?.currencyCode ?? country?.currency ?? "USD"
@@ -95,6 +119,25 @@ export async function getMenuContext(vendorId: string) {
     sections,
     cuisines      : tagOptions.cuisines,
     dietaryTags   : tagOptions.dietaryTags,
+    tax: {
+      /** Whether a typed price already contains tax. The form's helper text
+       *  and the preview both hang off this; it is never assumed. */
+      pricesIncludeTax: taxProfile.pricesIncludeTax,
+      /** "VAT" / "GST" / "Sales Tax", verbatim from the market. */
+      label           : taxProfile.taxName ?? "Tax",
+      /** Null when the country has set no standard rate. The form then says
+       *  tax is not configured rather than silently implying zero. */
+      standardRateBps : taxProfile.standardRateBps,
+      /** Rated categories only. One entry (or none) means no choice to make. */
+      categories      : taxCategories.map((r) => ({
+        id         : r.taxCategory.id,
+        name       : r.taxCategory.name,
+        description: r.taxCategory.description,
+        rateBps    : r.rateBps,
+        rateLabel  : formatRateBps(r.rateBps),
+        isStandard : r.isStandard,
+      })),
+    },
     maxImages     : MAX_MEAL_IMAGES,
     maxCuisines   : MAX_MEAL_CUISINES,
     maxDietaryTags: MAX_MEAL_DIETARY_TAGS,
@@ -108,20 +151,32 @@ export async function listMenuSections(vendorId: string) {
   return prisma.menuSection.findMany({
     where  : { vendorId, deletedAt: null },
     orderBy: [{ position: "asc" }, { name: "asc" }],
-    select : { id: true, name: true, position: true, status: true, _count: { select: { items: true } } },
+    select : {
+      id: true, name: true, position: true, status: true,
+      _count: { select: { items: true } },
+    },
   })
+}
+
+async function assertSectionNameAvailable(vendorId: string, name: string, excludeId?: string) {
+  const existing = await prisma.menuSection.findFirst({
+    where : {
+      vendorId,
+      name     : { equals: name, mode: "insensitive" },
+      deletedAt: null,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { id: true },
+  })
+  if (existing) {
+    throw new ApiError(409, "You already have a section with that name.", "DUPLICATE_SECTION")
+  }
 }
 
 export async function createMenuSection(vendorId: string, name: unknown) {
   await loadActiveVendor(vendorId)
-  const clean = normalizeOptionalText(name, 60, "Section name")
-  if (!clean) throw new ApiError(400, "A section needs a name.", "MISSING_FIELDS")
-
-  const existing = await prisma.menuSection.findFirst({
-    where : { vendorId, name: { equals: clean, mode: "insensitive" }, deletedAt: null },
-    select: { id: true },
-  })
-  if (existing) throw new ApiError(409, "You already have a section with that name.", "DUPLICATE_SECTION")
+  const clean = assertSectionName(name)
+  await assertSectionNameAvailable(vendorId, clean)
 
   // New sections go to the end; reordering is its own action, not a side
   // effect of creating one.
@@ -132,9 +187,116 @@ export async function createMenuSection(vendorId: string, name: unknown) {
   })
 
   return prisma.menuSection.create({
-    data  : { vendorId, name: clean, position: (last?.position ?? -1) + 1 },
+    data  : { vendorId, name: clean, position: nextPosition(last?.position) },
     select: { id: true, name: true, position: true },
   })
+}
+
+export async function renameMenuSection(vendorId: string, sectionId: string, name: unknown) {
+  await loadActiveVendor(vendorId)
+
+  const section = await prisma.menuSection.findFirst({
+    where : { id: sectionId, vendorId, deletedAt: null },
+    select: { id: true },
+  })
+  if (!section) throw new ApiError(404, "That section doesn't exist", "SECTION_NOT_FOUND")
+
+  const clean = assertSectionName(name)
+  await assertSectionNameAvailable(vendorId, clean, sectionId)
+
+  return prisma.menuSection.update({
+    where : { id: sectionId },
+    data  : { name: clean },
+    select: { id: true, name: true, position: true },
+  })
+}
+
+/**
+ * Removes a section. Its dishes are NEVER removed with it — they fall back to
+ * unsectioned and stay on the menu, which is what MenuItem.sectionId being
+ * nullable is for. A vendor tidying their headings must not be able to delete
+ * forty dishes by accident.
+ *
+ * The soft delete is why this nulls sectionId explicitly: the SetNull on the
+ * relation only fires on a real row delete, which this deliberately is not.
+ */
+export async function deleteMenuSection(vendorId: string, sectionId: string) {
+  await loadActiveVendor(vendorId)
+
+  const section = await prisma.menuSection.findFirst({
+    where : { id: sectionId, vendorId, deletedAt: null },
+    select: { id: true, name: true, _count: { select: { items: true } } },
+  })
+  if (!section) throw new ApiError(404, "That section doesn't exist", "SECTION_NOT_FOUND")
+
+  await prisma.$transaction([
+    prisma.menuItem.updateMany({
+      where: { sectionId, vendorId, deletedAt: null },
+      data : { sectionId: null },
+    }),
+    prisma.menuSection.update({ where: { id: sectionId }, data: { deletedAt: new Date() } }),
+  ])
+
+  serviceLog.info({ vendorId, sectionId, freedItems: section._count.items }, "Menu section deleted")
+  return { id: sectionId, deleted: true, freedItems: section._count.items }
+}
+
+/** The submitted order IS the order — see resolveOrdering for why a partial
+ *  list is refused rather than guessed at. */
+export async function reorderMenuSections(vendorId: string, sectionIds: unknown) {
+  await loadActiveVendor(vendorId)
+
+  const existing = await prisma.menuSection.findMany({
+    where : { vendorId, deletedAt: null },
+    select: { id: true },
+  })
+  const ordered = resolveOrdering(sectionIds, existing.map((s) => s.id))
+
+  await prisma.$transaction(
+    ordered.map((id, position) =>
+      prisma.menuSection.update({ where: { id }, data: { position } }),
+    ),
+  )
+
+  return listMenuSections(vendorId)
+}
+
+/**
+ * Arranges the dishes inside ONE section, or the unsectioned ones when
+ * sectionId is null.
+ *
+ * Scoped to a single section rather than the whole menu because position is
+ * only meaningful within one: moving a dish BETWEEN sections is a change of
+ * section, which the meal form already does.
+ */
+export async function reorderMenuItems(
+  vendorId : string,
+  sectionId: string | null,
+  itemIds  : unknown,
+) {
+  await loadActiveVendor(vendorId)
+
+  if (sectionId) {
+    const section = await prisma.menuSection.findFirst({
+      where : { id: sectionId, vendorId, deletedAt: null },
+      select: { id: true },
+    })
+    if (!section) throw new ApiError(404, "That section doesn't exist", "SECTION_NOT_FOUND")
+  }
+
+  const existing = await prisma.menuItem.findMany({
+    where : { vendorId, deletedAt: null, sectionId },
+    select: { id: true },
+  })
+  const ordered = resolveOrdering(itemIds, existing.map((i) => i.id))
+
+  await prisma.$transaction(
+    ordered.map((id, position) =>
+      prisma.menuItem.update({ where: { id }, data: { position } }),
+    ),
+  )
+
+  return { sectionId, ordered }
 }
 
 // ─── Reading meals ────────────────────────────────────────────────────────────
@@ -144,9 +306,12 @@ const ITEM_SELECT = {
   name          : true,
   description   : true,
   basePriceMinor: true,
+  taxCategoryId : true,
   mainImageKey  : true,
   imageKeys     : true,
   portionSize   : true,
+  position      : true,
+  prepTimeMinutes: true,
   isArchived    : true,
   reviewStatus  : true,
   flagReasons   : true,
@@ -155,8 +320,26 @@ const ITEM_SELECT = {
   createdAt     : true,
   updatedAt     : true,
   section       : { select: { id: true, name: true } },
+  taxCategory   : { select: { id: true, name: true } },
   cuisines      : { select: { cuisine   : { select: { id: true, name: true } } } },
   dietaryTags   : { select: { dietaryTag: { select: { id: true, name: true } } } },
+  modifierGroups: {
+    orderBy: { position: "asc" },
+    select : {
+      position: true,
+      group   : {
+        select: {
+          id: true, name: true, description: true, minSelect: true, maxSelect: true,
+          reviewStatus: true, deletedAt: true,
+          options: {
+            where  : { deletedAt: null },
+            orderBy: { position: "asc" },
+            select : { id: true, name: true, priceDeltaMinor: true, isAvailable: true },
+          },
+        },
+      },
+    },
+  },
   outletMeals   : {
     where : { deletedAt: null },
     select: {
@@ -170,7 +353,7 @@ type ItemRow = Awaited<ReturnType<typeof prisma.menuItem.findFirstOrThrow<{ sele
 
 /** Keys become short-lived signed URLs at the response boundary, never before
  *  — the same single-exit-point rule presentVendorProfile follows. */
-async function presentMenuItem(item: ItemRow) {
+async function presentMenuItem(item: ItemRow, taxProfile: CountryTaxProfile) {
   const imageUrls = await Promise.all(
     item.imageKeys.map(async (key) => {
       try {
@@ -184,13 +367,50 @@ async function presentMenuItem(item: ItemRow) {
     }),
   )
 
-  const { cuisines, dietaryTags, outletMeals, ...rest } = item
+  /*
+   * What the price actually breaks down to, computed here rather than in the
+   * dashboard so the vendor's screen and any future customer checkout can
+   * never disagree about the same dish. Null when the country has set no
+   * rate: saying nothing is honest, inventing a zero is not.
+   */
+  const rateBps = resolveRateBps(taxProfile, item.taxCategoryId)
+  const tax =
+    rateBps === null
+      ? null
+      : {
+          ...computeTax(item.basePriceMinor, rateBps, taxProfile.pricesIncludeTax),
+          rateLabel: formatRateBps(rateBps),
+          label    : taxProfile.taxName ?? "Tax",
+          inclusive: taxProfile.pricesIncludeTax,
+        }
+
+  const { cuisines, dietaryTags, outletMeals, modifierGroups, ...rest } = item
   return {
     ...rest,
+    tax,
     images     : imageUrls,
     mainImageUrl: imageUrls[0]?.url ?? null,
     cuisines   : cuisines.map((c) => c.cuisine),
     dietaryTags: dietaryTags.map((d) => d.dietaryTag),
+    /*
+     * What a customer chooses on this dish, in the vendor's own order. A
+     * deleted group is filtered here rather than relied on to be absent: the
+     * join is hard-deleted on delete, so this is belt and braces against a
+     * group that was soft-deleted by some other path.
+     */
+    modifierGroups: modifierGroups
+      .filter((link) => link.group.deletedAt === null)
+      .map((link) => ({
+        id         : link.group.id,
+        name       : link.group.name,
+        description: link.group.description,
+        minSelect  : link.group.minSelect,
+        maxSelect  : link.group.maxSelect,
+        required   : link.group.minSelect >= 1,
+        flagged    : link.group.reviewStatus === "FLAGGED",
+        position   : link.position,
+        options    : link.group.options,
+      })),
     outlets    : outletMeals.map((m) => ({
       mealId            : m.id,
       outletId          : m.outletId,
@@ -206,7 +426,7 @@ export async function listMenuItems(
   vendorId: string,
   params  : { search?: string; sectionId?: string; outletId?: string; page?: number; pageSize?: number } = {},
 ) {
-  await loadActiveVendor(vendorId)
+  const vendor = await loadActiveVendor(vendorId)
   const page     = Math.max(params.page ?? 1, 1)
   const pageSize = Math.min(Math.max(params.pageSize ?? 20, 1), 100)
 
@@ -227,19 +447,27 @@ export async function listMenuItems(
     ...(params.outletId ? { outletMeals: { some: { outletId: params.outletId, deletedAt: null } } } : {}),
   }
 
-  const [items, total] = await Promise.all([
+  // One tax read for the whole page, never one per row.
+  const [taxProfile, items, total] = await Promise.all([
+    getCountryTaxProfile(vendor.countryId),
     prisma.menuItem.findMany({
       where,
       skip   : (page - 1) * pageSize,
       take   : pageSize,
-      orderBy: [{ section: { position: "asc" } }, { name: "asc" }],
+      orderBy: [
+        // Unsectioned dishes sort last: a section is a deliberate grouping and
+        // the leftovers belong under it, not above it.
+        { section: { position: "asc" } },
+        { position: "asc" },
+        { name: "asc" },
+      ],
       select : ITEM_SELECT,
     }),
     prisma.menuItem.count({ where }),
   ])
 
   return {
-    items     : await Promise.all(items.map(presentMenuItem)),
+    items     : await Promise.all(items.map((i) => presentMenuItem(i, taxProfile))),
     total,
     page,
     pageSize,
@@ -248,13 +476,16 @@ export async function listMenuItems(
 }
 
 export async function getMenuItem(vendorId: string, itemId: string) {
-  await loadActiveVendor(vendorId)
-  const item = await prisma.menuItem.findFirst({
-    where : { id: itemId, vendorId, deletedAt: null },
-    select: ITEM_SELECT,
-  })
+  const vendor = await loadActiveVendor(vendorId)
+  const [item, taxProfile] = await Promise.all([
+    prisma.menuItem.findFirst({
+      where : { id: itemId, vendorId, deletedAt: null },
+      select: ITEM_SELECT,
+    }),
+    getCountryTaxProfile(vendor.countryId),
+  ])
   if (!item) throw new ApiError(404, "Meal not found", "NOT_FOUND")
-  return presentMenuItem(item)
+  return presentMenuItem(item, taxProfile)
 }
 
 // ─── Images ───────────────────────────────────────────────────────────────────
@@ -309,13 +540,16 @@ export interface UpsertMenuItemInput {
   name          ?: unknown
   description   ?: unknown
   portionSize   ?: unknown
+  prepTimeMinutes?: unknown
   basePriceMinor?: unknown
   sectionId     ?: unknown
+  taxCategoryId ?: unknown
   imageKeys     ?: unknown
   cuisineIds    ?: unknown
   dietaryTagIds ?: unknown
   outletIds     ?: unknown
   priceOverrides?: unknown
+  modifierGroupIds?: unknown
 }
 
 async function screenMenuItem(name: string, description: string | null): Promise<string[]> {
@@ -368,6 +602,7 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
   const name           = assertMealName(input.name)
   const description    = normalizeOptionalText(input.description, MAX_MEAL_DESCRIPTION_LENGTH, "Description")
   const portionSize    = normalizeOptionalText(input.portionSize, MAX_PORTION_SIZE_LENGTH, "Portion size")
+  const prepTimeMinutes = normalizePrepTime(input.prepTimeMinutes)
   const basePriceMinor = assertValidPriceMinor(input.basePriceMinor)
   const { mainImageKey, imageKeys } = normalizeMealImages(input.imageKeys, vendorId)
 
@@ -380,13 +615,23 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
   const outletIds = resolveSelectedOutlets(input.outletIds, ownedOutlets.map((o) => o.id))
   const overrides = normalizeOverrides(input.priceOverrides, outletIds)
 
-  const sectionId = await resolveSectionId(vendorId, input.sectionId)
+  const sectionId       = await resolveSectionId(vendorId, input.sectionId)
+  const taxCategoryId   = await resolveTaxCategoryId(vendor.countryId, input.taxCategoryId)
+  const modifierGroupIds = await resolveModifierGroups(vendorId, basePriceMinor, input.modifierGroupIds)
   const { cuisineIds, dietaryTagIds } = await resolveSelectedFoodTags(vendor.countryId, {
     cuisineIds   : input.cuisineIds,
     dietaryTagIds: input.dietaryTagIds,
   }, { maxCuisines: MAX_MEAL_CUISINES, maxDietaryTags: MAX_MEAL_DIETARY_TAGS })
 
   const flagReasons = await screenMenuItem(name, description)
+
+  // End of its section, never the top — see nextPosition.
+  const last = await prisma.menuItem.findFirst({
+    where  : { vendorId, deletedAt: null, sectionId },
+    orderBy: { position: "desc" },
+    select : { position: true },
+  })
+  const position = nextPosition(last?.position)
 
   // The item and every outlet it is sold at are one transaction: a dish that
   // exists but is sold nowhere is invisible, and half-created is worse than
@@ -396,9 +641,12 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
       data: {
         vendorId,
         sectionId,
+        taxCategoryId,
         name,
         description,
         portionSize,
+        prepTimeMinutes,
+        position,
         basePriceMinor,
         mainImageKey,
         imageKeys,
@@ -419,6 +667,17 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
       await tx.menuItemDietaryTag.createMany({
         data: dietaryTagIds.map((dietaryTagId) => ({ menuItemId: item.id, dietaryTagId })),
       })
+    }
+
+    if (modifierGroupIds.length > 0) {
+      await tx.menuItemModifierGroup.createMany({
+        data: modifierGroupIds.map((groupId, position) => ({
+          menuItemId: item.id, groupId, position,
+        })),
+      })
+      // An already-flagged group flags the dish too, so it lands in the
+      // existing meal review queue rather than needing one of its own.
+      await recomputeModifierFlagsForItems([item.id], tx)
     }
 
     await tx.meal.createMany({
@@ -447,7 +706,7 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
     where : { id: itemId, vendorId, deletedAt: null },
     select: {
       id: true, name: true, description: true, imageKeys: true,
-      reviewStatus: true, flagReasons: true, adminStatus: true,
+      reviewStatus: true, flagReasons: true, adminStatus: true, taxCategoryId: true,
     },
   })
   if (!existing) throw new ApiError(404, "Meal not found", "NOT_FOUND")
@@ -458,6 +717,7 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
   const name           = assertMealName(input.name)
   const description    = normalizeOptionalText(input.description, MAX_MEAL_DESCRIPTION_LENGTH, "Description")
   const portionSize    = normalizeOptionalText(input.portionSize, MAX_PORTION_SIZE_LENGTH, "Portion size")
+  const prepTimeMinutes = normalizePrepTime(input.prepTimeMinutes)
   const basePriceMinor = assertValidPriceMinor(input.basePriceMinor)
   const { mainImageKey, imageKeys } = normalizeMealImages(input.imageKeys, vendorId)
 
@@ -471,6 +731,19 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
   const overrides = normalizeOverrides(input.priceOverrides, outletIds)
 
   const sectionId = await resolveSectionId(vendorId, input.sectionId)
+  /*
+   * ABSENT means "leave it alone", not "clear it".
+   *
+   * The vendor form deliberately does not send this — a vendor does not
+   * classify their own dish for tax — so treating an omitted field as null
+   * would let every vendor edit silently wipe a classification set elsewhere.
+   * An explicit null still clears it, which is what a caller that means to
+   * clear it sends.
+   */
+  const taxCategoryId = input.taxCategoryId === undefined
+    ? existing.taxCategoryId
+    : await resolveTaxCategoryId(vendor.countryId, input.taxCategoryId)
+  const modifierGroupIds = await resolveModifierGroups(vendorId, basePriceMinor, input.modifierGroupIds)
   const { cuisineIds, dietaryTagIds } = await resolveSelectedFoodTags(vendor.countryId, {
     cuisineIds   : input.cuisineIds,
     dietaryTagIds: input.dietaryTagIds,
@@ -483,7 +756,18 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
    * the same convention updateOutlet and upsertVendorProfile follow.
    */
   const textChanged = name !== existing.name || description !== existing.description
-  const flagReasons = textChanged ? await screenMenuItem(name, description) : existing.flagReasons
+  /*
+   * Re-screening replaces the whole reason array, so the modifier flag has to
+   * be carried across deliberately — it comes from the attached groups, not
+   * from this dish's own text, and dropping it here would quietly clear a
+   * flagged dish out of the review queue.
+   */
+  const carriedModifierFlag = existing.flagReasons.includes(MODIFIER_CONTENT_FLAG)
+    ? [MODIFIER_CONTENT_FLAG]
+    : []
+  const flagReasons = textChanged
+    ? [...await screenMenuItem(name, description), ...carriedModifierFlag]
+    : existing.flagReasons
   const reviewStatus = textChanged
     ? (flagReasons.length > 0 ? ProfileReviewStatus.FLAGGED : ProfileReviewStatus.AUTO_APPROVED)
     : existing.reviewStatus
@@ -492,7 +776,8 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
     await tx.menuItem.update({
       where: { id: itemId },
       data : {
-        sectionId, name, description, portionSize, basePriceMinor, mainImageKey, imageKeys,
+        sectionId, taxCategoryId, name, description, portionSize, prepTimeMinutes,
+        basePriceMinor, mainImageKey, imageKeys,
         flagReasons,
         reviewStatus,
         ...(textChanged
@@ -551,6 +836,20 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
       // Soft-deleted, for the MealPlanMeal reason above.
       await tx.meal.updateMany({ where: { id: { in: removed } }, data: { deletedAt: new Date() } })
     }
+
+    /*
+     * Group attachments are replaced wholesale — this is a full-form save, so
+     * the submitted list IS the list. Unlike Meal rows there is nothing to
+     * preserve: a join row carries only the fact that a dish currently offers
+     * a group, plus its order.
+     */
+    await tx.menuItemModifierGroup.deleteMany({ where: { menuItemId: itemId } })
+    if (modifierGroupIds.length > 0) {
+      await tx.menuItemModifierGroup.createMany({
+        data: modifierGroupIds.map((groupId, position) => ({ menuItemId: itemId, groupId, position })),
+      })
+    }
+    await recomputeModifierFlagsForItems([itemId], tx)
   })
 
   // After the transaction and best-effort: a storage hiccup must never roll
@@ -566,6 +865,71 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
 
   serviceLog.info({ vendorId, menuItemId: itemId, outlets: outletIds.length }, "Menu item updated")
   return getMenuItem(vendorId, itemId)
+}
+
+/**
+ * The groups this dish offers, validated against the vendor's own library.
+ *
+ * The zero-out check runs HERE rather than when a group is saved, because it
+ * is the only place both halves are known: a group of discounting options is
+ * perfectly fine on an expensive dish and ruinous on a cheap one, so the
+ * question can only be answered against a specific base price.
+ */
+async function resolveModifierGroups(
+  vendorId      : string,
+  basePriceMinor: number,
+  value         : unknown,
+): Promise<string[]> {
+  const owned = await prisma.modifierGroup.findMany({
+    where : { vendorId, deletedAt: null },
+    select: {
+      id: true, name: true, minSelect: true,
+      options: { where: { deletedAt: null }, select: { priceDeltaMinor: true } },
+    },
+  })
+
+  const groupIds = resolveGroupSelection(value, owned.map((g) => g.id))
+  if (groupIds.length === 0) return []
+
+  const chosen = owned.filter((g) => groupIds.includes(g.id))
+  assertGroupCannotZeroOutDish(basePriceMinor, chosen)
+
+  return groupIds
+}
+
+/**
+ * Which tax treatment this dish takes, if the vendor named one.
+ *
+ * Null is the normal answer and a real one: it means "whatever this country
+ * taxes prepared food at", resolved at pricing time against the country's
+ * standard rate. A vendor in a flat-rate market never sends this field.
+ *
+ * A category the vendor's own country has not rated is REFUSED rather than
+ * silently dropped. Dropping it would leave them looking at a dish they
+ * believe is zero-rated while it is charged at the standard rate, which is
+ * the kind of quiet mismatch that surfaces as a tax liability.
+ */
+async function resolveTaxCategoryId(countryId: string, value: unknown): Promise<string | null> {
+  if (value === undefined || value === null || value === "") return null
+  if (typeof value !== "string") throw new ApiError(400, "Invalid tax category", "INVALID_FIELD")
+
+  const rate = await prisma.countryTaxRate.findFirst({
+    where : {
+      countryId,
+      taxCategoryId: value,
+      status       : "ACTIVE",
+      taxCategory  : { deletedAt: null },
+    },
+    select: { taxCategoryId: true },
+  })
+  if (!rate) {
+    throw new ApiError(
+      404,
+      "That tax category isn't available in your country.",
+      "TAX_CATEGORY_NOT_AVAILABLE",
+    )
+  }
+  return rate.taxCategoryId
 }
 
 async function resolveSectionId(vendorId: string, value: unknown): Promise<string | null> {

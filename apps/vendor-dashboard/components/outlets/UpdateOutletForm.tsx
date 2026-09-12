@@ -41,6 +41,8 @@ const OutletLocationPicker = dynamic(
 import { updateOutletSchema } from "@/lib/validations/update-outlet"
 import type { Outlet } from "@/types/outlet"
 import type { OutletPlacement } from "@repo/types/vendor-app"
+import { majorToMinor, minorToMajor } from "@/lib/menu/money"
+import { useVendorCurrency } from "@/lib/queries/menu"
 
 interface Props { outlet: Outlet }
 
@@ -197,6 +199,8 @@ export function UpdateOutletForm({ outlet }: Props) {
   }
 
   // ✅ No explicit type argument — TanStack Form infers types from defaultValues
+  const { currency } = useVendorCurrency()
+
   const form = useForm({
     defaultValues: {
       name         : outlet.name,
@@ -210,8 +214,10 @@ export function UpdateOutletForm({ outlet }: Props) {
       latitude     : outlet.latitude,
       longitude    : outlet.longitude,
       deliveryRadius: outlet.deliveryRadius ?? undefined as number | undefined,
-      deliveryFee  : outlet.deliveryFee    ?? undefined as number | undefined,
-      minimumOrder : outlet.minimumOrder   ?? undefined as number | undefined,
+      // Seeded back into MAJOR units for the human — the same round trip the
+      // meal form's price makes.
+      deliveryFee  : minorToMajor(outlet.deliveryFeeMinor,  currency),
+      minimumOrder : minorToMajor(outlet.minimumOrderMinor, currency),
     },
     onSubmit: async ({ value }) => {
       const parsed = updateOutletSchema.safeParse(value)
@@ -230,8 +236,8 @@ export function UpdateOutletForm({ outlet }: Props) {
       if (d.latitude      !== outlet.latitude)                                    payload.latitude      = d.latitude
       if (d.longitude     !== outlet.longitude)                                   payload.longitude     = d.longitude
       if (d.deliveryRadius !== (outlet.deliveryRadius ?? undefined))              payload.deliveryRadius = d.deliveryRadius
-      if (d.deliveryFee   !== (outlet.deliveryFee    ?? undefined))               payload.deliveryFee   = d.deliveryFee
-      if (d.minimumOrder  !== (outlet.minimumOrder   ?? undefined))               payload.minimumOrder  = d.minimumOrder
+      if (d.deliveryFee   !== minorToMajor(outlet.deliveryFeeMinor,  currency))   payload.deliveryFeeMinor  = majorToMinor(d.deliveryFee,  currency)
+      if (d.minimumOrder  !== minorToMajor(outlet.minimumOrderMinor, currency))   payload.minimumOrderMinor = majorToMinor(d.minimumOrder, currency)
 
       if (Object.keys(payload).length === 0) return
 

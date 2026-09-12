@@ -34,8 +34,9 @@ export interface Outlet {
   latitude              : number
   longitude             : number
   deliveryRadius        : number | null
-  deliveryFee           : number | null
-  minimumOrder          : number | null
+  /** MINOR UNITS. Null means not set, which is not the same as zero. */
+  deliveryFeeMinor      : number | null
+  minimumOrderMinor     : number | null
   phone                 : string | null
   email                 : string | null
   isMainOutlet          : boolean
@@ -72,8 +73,8 @@ export interface CreateOutletPayload {
   email?         : string
   bio?           : string
   deliveryRadius?: number
-  minimumOrder?  : number
-  deliveryFee?   : number
+  minimumOrderMinor? : number
+  deliveryFeeMinor?  : number
 }
 
 export interface UpdateOutletPayload extends Partial<CreateOutletPayload> {}

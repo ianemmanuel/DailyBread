@@ -352,6 +352,8 @@ model Country {
   //* (1:1) and its provider-account wiring (1:N, only one ACTIVE).
   financialConfig  CountryFinancialConfig?
   providerAccounts CountryProviderAccount[]
+  taxRates         CountryTaxRate[]
+  taxConfig        CountryTaxConfig?
 
   @@index([status])
   @@index([slug])
@@ -721,8 +723,8 @@ model CountryProviderAccount {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  country         Country         @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  paymentProvider PaymentProvider @relation(fields: [paymentProviderId], references: [id])
+  country                    Country                  @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  paymentProvider            PaymentProvider          @relation(fields: [paymentProviderId], references: [id])
   //* The country-global bank-account verification/resolution bindings that
   //* point at this account. Keyed on (id, countryId) — same DB-enforced
   //* same-country guarantee as paymentMethods below. Modelled as a list for
@@ -734,7 +736,7 @@ model CountryProviderAccount {
   //* account. The relation is keyed on (id, countryId) so a method can
   //* NEVER be wired to another country's provider account (DB-enforced, not
   //* just service-checked) — see CountryPaymentMethod.countryProviderAccount.
-  paymentMethods  CountryPaymentMethod[]
+  paymentMethods             CountryPaymentMethod[]
 
   @@unique([id, countryId])
   @@index([countryId, status])
@@ -762,9 +764,9 @@ model CountryProviderAccount {
 //* bankVerificationProviderAccountId below. A country may use the same
 //* provider for all of them, or a different provider for each.
 model CountryFinancialConfig {
-  id           String  @id @default(uuid())
-  countryId    String  @unique
-  currencyCode String?
+  id                                String                       @id @default(uuid())
+  countryId                         String                       @unique
+  currencyCode                      String?
   //* Country-global routing binding for the BANK_ACCOUNT_RESOLUTION /
   //* BANK_LIST capability (automatic vendor payout-account verification +
   //* the bank directory the vendor picks from — one provider by nature).
@@ -788,13 +790,13 @@ model CountryFinancialConfig {
   //* The two paths are deliberately SEPARATE: a PROVIDER-mode country never
   //* offers a manual document fallback, and a MANUAL-mode country never
   //* calls a provider. (A failure-driven fallback is a later decision.)
-  bankVerificationMode BankVerificationMode @default(PROVIDER)
+  bankVerificationMode              BankVerificationMode         @default(PROVIDER)
   //* Operational switches — the admin's deliberate "we are collecting /
   //* paying out here" decision, distinct from "the provider can technically
   //* do it". Mutable while ACTIVE (validated + audited).
-  collectionsEnabled Boolean                      @default(false)
-  payoutsEnabled     Boolean                      @default(false)
-  status             CountryFinancialConfigStatus @default(DRAFT)
+  collectionsEnabled                Boolean                      @default(false)
+  payoutsEnabled                    Boolean                      @default(false)
+  status                            CountryFinancialConfigStatus @default(DRAFT)
 
   activatedAt        DateTime?
   activatedByAdminId String?
@@ -808,8 +810,8 @@ model CountryFinancialConfig {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  country  Country   @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  currency Currency? @relation(fields: [currencyCode], references: [code])
+  country                         Country                 @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  currency                        Currency?               @relation(fields: [currencyCode], references: [code])
   //* NoAction (not SetNull): Prisma forbids SetNull on a composite FK whose
   //* countryId leg is non-nullable — same reason CountryPaymentMethod uses
   //* NoAction. A provider account is never hard-deleted (retired via
@@ -819,6 +821,117 @@ model CountryFinancialConfig {
   @@index([status])
   @@index([currencyCode])
   @@index([bankVerificationProviderAccountId])
+}
+
+//* =========CONSUMPTION TAX==========
+//*
+//* Tax is JURISDICTIONAL, and within one jurisdiction the rate depends on
+//* WHAT the food is — in the UK a hot takeaway meal is standard-rated while
+//* the same shop's cold sandwich is zero-rated, and several US states and
+//* Canadian provinces draw comparable lines. A single rate per country is
+//* therefore wrong in most markets, which is why Uber Eats carries a tax
+//* category on the menu item rather than a store-wide rate.
+//*
+//* Shape is the global-catalog-plus-per-country-config pattern this schema
+//* already uses four times (VendorType/VendorTypeCountry,
+//* Cuisine/CuisineCountry, DietaryTag/DietaryTagCountry,
+//* PaymentMethod/CountryPaymentMethod): TaxCategory is the platform's
+//* vocabulary, CountryTaxRate is what ONE country charges for ONE category.
+//* A flat-rate market configures exactly one category and its vendors never
+//* meet the concept — MenuItem.taxCategoryId stays null and resolution falls
+//* back to that country's standard rate.
+//*
+//* Deliberately NOT effective-dated, and deliberately no separate history
+//* table. An order line snapshots the rate it was charged at, so "what rate
+//* applied to this order" is answerable from the order; "when did this
+//* country's rate change" is answerable from the append-only AuditLog, which
+//* every mutation already writes. A third record of the same fact could only
+//* disagree with the other two.
+
+//* One country's tax POSITION: how prices are quoted here, who is legally
+//* the collector, and what the tax is called. Deliberately a table of its own
+//* rather than columns on CountryFinancialConfig: the tax module owns its own
+//* data so it stays independently extractable, and finance owns payment
+//* rails, which is a different concern that merely sits adjacent. 1:1 with
+//* Country, mirroring CountryFinancialConfig's shape.
+model CountryTaxConfig {
+  id        String @id @default(uuid())
+  countryId String @unique
+
+  //* Whether a menu price already contains tax. Kenya, the UK, the EU and
+  //* most of Africa quote tax-inclusive prices; the United States adds it at
+  //* checkout. Default inclusive because it is the wider convention and the
+  //* safer wrong answer: an inclusive price read as exclusive under-charges,
+  //* while the reverse over-charges the customer.
+  pricesIncludeTax Boolean     @default(true)
+  //* Who is legally the collector. VENDOR is the default and the lighter
+  //* model, but this is NOT a business preference everywhere: marketplace
+  //* facilitator rules in several jurisdictions force the platform to collect
+  //* and remit regardless. Hence a column, not a platform policy.
+  taxRemittedBy    TaxRemitter @default(VENDOR)
+  //* What this market calls it — "VAT", "GST", "Sales Tax". Shown to vendors
+  //* and customers verbatim. Null falls back to a generic "Tax".
+  taxName          String?
+
+  createdByAdminId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  country Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
+}
+
+model TaxCategory {
+  id          String  @id @default(uuid())
+  //* Stable identifier. name and slug are both admin-editable, so keying
+  //* seeds or code on either would duplicate on the first rename — same
+  //* reasoning as the cuisine and dietary-tag catalogs.
+  code        String  @unique // "STANDARD", "ZERO_RATED", "EXEMPT"
+  slug        String  @unique
+  name        String
+  description String?
+
+  status           TaxonomyStatus @default(ACTIVE)
+  createdByAdminId String?
+  deletedAt        DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  countryRates CountryTaxRate[]
+  menuItems    MenuItem[]
+
+  @@index([status])
+  @@index([deletedAt])
+}
+
+//* What one country charges for one tax category.
+model CountryTaxRate {
+  id            String @id @default(uuid())
+  countryId     String
+  taxCategoryId String
+
+  //* BASIS POINTS, integer — 1600 is 16.00%. A rate multiplies money, so a
+  //* float here reintroduces exactly the representation problem minor units
+  //* were adopted to avoid; bps also expresses a fractional statutory rate
+  //* (7.5% = 750) exactly.
+  rateBps Int
+
+  //* The fallback for a dish that names no category. Exactly one ACTIVE row
+  //* per country may set this, enforced by a partial unique index in the
+  //* migration rather than by the service alone.
+  isStandard Boolean   @default(false)
+  status     GeoStatus @default(ACTIVE)
+
+  createdByAdminId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  country     Country     @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  taxCategory TaxCategory @relation(fields: [taxCategoryId], references: [id], onDelete: Restrict)
+
+  @@unique([countryId, taxCategoryId])
+  @@index([countryId])
+  @@index([taxCategoryId])
+  @@index([status])
 }
 
 //* =========PAYMENT CONFIGURATION==========
@@ -923,7 +1036,9 @@ model ProviderWebhookEvent {
 model VendorCommissionConfig {
   id               String   @id @default(uuid())
   countryId        String   @unique // country-level default
-  rate             Float // 0.15 = 15%
+  //* BASIS POINTS — 1500 is 15%. Was a Float holding a fraction while
+  //* VendorAccount held a percentage; see the note there.
+  rateBps          Int
   effectiveFrom    DateTime @default(now())
   createdByAdminId String?
   createdAt        DateTime @default(now())
@@ -1183,8 +1298,9 @@ model VendorNotification {
 model VendorCommissionRateHistory {
   id               String   @id @default(uuid())
   vendorId         String
-  previousRate     Float?
-  newRate          Float
+  //* BASIS POINTS, matching VendorAccount.commissionRateBps.
+  previousRateBps  Int?
+  newRateBps       Int
   reason           String?
   changedByAdminId String
   createdAt        DateTime @default(now())
@@ -1235,7 +1351,16 @@ model VendorAccount {
   businessAddress       String
   addressLine2          String?
   postalCode            String?
-  commissionRate        Float?
+  //* BASIS POINTS, integer — 1500 is 15.00%. A rate multiplies money, so a
+  //* float reintroduces exactly the representation problem minor units exist
+  //* to avoid, and bps expresses a negotiated 12.5% exactly. Same convention
+  //* as CountryTaxRate.rateBps.
+  //*
+  //* This also settles a real ambiguity: the old Float here held a PERCENTAGE
+  //* (15 meant 15%) while VendorCommissionConfig.rate held a FRACTION (0.15
+  //* meant the same thing). One concept, two scales, and nothing in the type
+  //* system to catch a mix-up. There is now one scale.
+  commissionRateBps     Int?
   payoutSchedule        PayoutSchedule @default(BIWEEKLY)
   nextPayoutDate        DateTime?
   addressVerified       Boolean        @default(false)
@@ -1269,6 +1394,8 @@ model VendorAccount {
   marketSignals         MarketSignal[]
   menuSections          MenuSection[]
   menuItems             MenuItem[]
+  modifierGroups        ModifierGroup[]
+  discounts             Discount[]
 
   @@unique([companyRegNumber, countryId])
   @@unique([taxRegistrationNumber, countryId])
@@ -1345,8 +1472,8 @@ model VendorProfile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  primaryCuisine Cuisine?      @relation(fields: [primaryCuisineId], references: [id])
-  vendorAccount  VendorAccount @relation(fields: [vendorAccountId], references: [id], onDelete: Cascade)
+  primaryCuisine Cuisine?                  @relation(fields: [primaryCuisineId], references: [id])
+  vendorAccount  VendorAccount             @relation(fields: [vendorAccountId], references: [id], onDelete: Cascade)
   //* Replaced the free-text specialties[] / dietaryOptions[] columns — see the
   //* FOOD TAXONOMY block above for why.
   cuisines       VendorProfileCuisine[]
@@ -1588,11 +1715,11 @@ model VendorDocument {
 }
 
 model VendorPayoutAccount {
-  id                     String  @id @default(uuid())
+  id                     String    @id @default(uuid())
   vendorId               String
   countryPaymentMethodId String // points to CountryPaymentMethod (OUTBOUND direction)
-  isDefault              Boolean @default(false)
-  isActive               Boolean @default(true)
+  isDefault              Boolean   @default(false)
+  isActive               Boolean   @default(true)
   //* Admin deactivation trail. Distinct from a rejected verification: this is
   //* an account that WAS verified and has since been taken out of service, so
   //* it must not be recorded as a verification failure.
@@ -1670,13 +1797,13 @@ model VendorPayoutAccount {
   //*                         from self-claiming out of the open pool — that
   //*                         admin is the end of the line and cannot escalate
   //*                         again. A reassignment resets it to false.
-  assignedReviewerId    String?
-  assignedAt            DateTime?
-  escalatedByAdminId    String?
-  escalatedAt           DateTime?
-  escalationReason      String?
-  claimedFromEscalation Boolean   @default(false)
-  failureReason      String? // human-readable, safe (never account data)
+  assignedReviewerId      String?
+  assignedAt              DateTime?
+  escalatedByAdminId      String?
+  escalatedAt             DateTime?
+  escalationReason        String?
+  claimedFromEscalation   Boolean   @default(false)
+  failureReason           String? // human-readable, safe (never account data)
   // Safe internal code for the ERP review surface — see
   // PayoutVerificationFailureCode (lib/payout-verification/types.ts). Null
   // when VERIFIED, or a plain PENDING that just needs a look.
@@ -1726,10 +1853,21 @@ model Outlet {
   neighborhood       String?
   latitude           Float
   longitude          Float
+  //* Kilometres. A genuine measurement, so a float is right here — unlike the
+  //* two money columns below, which are not.
   deliveryRadius     Float?
   deliveryZones      Json?
-  deliveryFee        Float?
-  minimumOrder       Float?
+  //* MINOR UNITS, always, and named so the unit cannot be mistaken. These were
+  //* Float, which is wrong for money for exactly the reason MenuItem's price
+  //* was changed: it cannot hold 0.10 exactly, and every payment provider takes
+  //* an integer anyway. The scale comes from the outlet's country currency
+  //* (Currency.minorUnitDigits) and is never assumed to be 2.
+  //*
+  //* Nullable, and null means "not set" rather than zero — a free delivery of 0
+  //* and an unset fee are different statements, and the difference matters the
+  //* moment a checkout has to decide whether to charge anything.
+  deliveryFeeMinor   Int?
+  minimumOrderMinor  Int?
   phone              String?
   email              String?
   reviewStatus       OutletReviewStatus    @default(AUTO_APPROVED)
@@ -1771,6 +1909,7 @@ model Outlet {
   meals                    Meal[]
   mealPlans                MealPlan[]
   cuisines                 OutletCuisine[]
+  discounts                DiscountOutlet[]
   documents                OutletDocument[]
   inspections              OutletInspection[]
   operatingHours           OutletOperatingHours[]
@@ -2050,6 +2189,12 @@ model OutletCuisine {
 //* A vendor's own menu grouping (Starters, Mains, Drinks). Vendor-owned rather
 //* than outlet-owned so one business presents one menu structure everywhere;
 //* which ITEMS appear at an outlet is the Meal rows' job, not the section's.
+//* A heading on the vendor's menu: Starters, Mains, Drinks.
+//*
+//* Vendor-scoped, not outlet-scoped, deliberately: one business presents one
+//* menu structure everywhere, and WHICH dishes appear at a given outlet is the
+//* Meal rows' job. Deleting a section never deletes its dishes — they fall back
+//* to unsectioned, which is why MenuItem.sectionId is nullable and SetNull.
 model MenuSection {
   id        String         @id @default(uuid())
   vendorId  String
@@ -2073,7 +2218,7 @@ model MenuSection {
 //* The dish itself — the vendor's catalog entry, and the thing a variant, an
 //* addon or a discount will eventually hang off.
 model MenuItem {
-  id             String     @id @default(uuid())
+  id             String   @id @default(uuid())
   vendorId       String
   sectionId      String?
   name           String
@@ -2083,6 +2228,11 @@ model MenuItem {
   //* an integer anyway. The scale comes from the vendor's country currency
   //* (Currency.minorUnitDigits), which is never assumed to be 2.
   basePriceMinor Int
+  //* Which tax rate this dish attracts in its country. NULL is the common
+  //* case and is a real answer, not a missing one: it means "whatever this
+  //* country taxes prepared food at", resolved via the country's standard
+  //* CountryTaxRate. A vendor in a flat-rate market never sees this field.
+  taxCategoryId  String?
   //* R2 storage KEYS, not URLs — the bucket is private, so reads go out as
   //* short-lived signed URLs. Named ...Key for the same reason the profile's
   //* media columns were renamed: a key in a column called ...Url invites an
@@ -2092,17 +2242,32 @@ model MenuItem {
   //* reasoning that removed the profile gallery applies here.
   imageKeys      String[]
   portionSize    String?
+
+  //* Where this dish sits INSIDE its section. Authored, never alphabetical —
+  //* a menu is ordered by intent, which is the same reason MenuSection.position
+  //* exists. A dish with no section is ordered against the other unsectioned
+  //* ones. New dishes go to the end of their section rather than the top: a
+  //* vendor adding their fortieth dish did not ask for it to lead the menu.
+  position Int @default(0)
+
+  //* Minutes from order accepted to ready for collection. Uber Eats and
+  //* DoorDash both carry this per item, because a courier arrival time is only
+  //* as good as the slowest dish on the ticket. Nullable — a vendor who has not
+  //* said is different from one who said zero, and nothing consumes it yet
+  //* (there is no order), so an invented default would be a lie with a number
+  //* attached.
+  prepTimeMinutes Int?
   //* The vendor's own switch: a dish they have stopped selling everywhere
   //* without deleting it (deleting is impossible once it is in a meal plan).
-  isArchived     Boolean    @default(false)
+  isArchived      Boolean @default(false)
 
   //* Content moderation, mirroring Outlet/VendorProfile exactly.
-  reviewStatus     ProfileReviewStatus @default(AUTO_APPROVED)
-  flagReasons      String[]
-  flaggedAt        DateTime?
-  reviewedAt       DateTime?
+  reviewStatus      ProfileReviewStatus @default(AUTO_APPROVED)
+  flagReasons       String[]
+  flaggedAt         DateTime?
+  reviewedAt        DateTime?
   reviewedByAdminId String?
-  rejectionReason  String?
+  rejectionReason   String?
 
   //* Platform-side lifecycle, independent of the vendor's own archive flag —
   //* same capability/health/moderation axis separation as Outlet.
@@ -2115,15 +2280,22 @@ model MenuItem {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  vendor      VendorAccount        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  section     MenuSection?         @relation(fields: [sectionId], references: [id], onDelete: SetNull)
-  cuisines    MenuItemCuisine[]
-  dietaryTags MenuItemDietaryTag[]
-  outletMeals Meal[]
+  vendor         VendorAccount           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  section        MenuSection?            @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  //* Restrict, like cuisines: a category vendors have applied must be
+  //* suspended rather than vanish and silently reprice their menu.
+  taxCategory    TaxCategory?            @relation(fields: [taxCategoryId], references: [id], onDelete: Restrict)
+  cuisines       MenuItemCuisine[]
+  dietaryTags    MenuItemDietaryTag[]
+  outletMeals    Meal[]
+  modifierGroups MenuItemModifierGroup[]
+  discounts      DiscountMenuItem[]
 
   @@unique([vendorId, name])
   @@index([vendorId])
   @@index([sectionId])
+  @@index([sectionId, position])
+  @@index([taxCategoryId])
   @@index([reviewStatus])
   @@index([adminStatus])
   @@index([deletedAt])
@@ -2185,6 +2357,245 @@ model Meal {
   @@index([adminStatus])
   @@index([deletedAt])
   @@index([createdAt])
+}
+
+//* ─── MODIFIERS ─────────────────────────────────────────────────────────────
+//*
+//* What a customer chooses ON a dish: size, flavour, a drink, sauces, extras.
+//*
+//* ONE primitive, not two. "Variants" and "addons" are the same thing with
+//* different selection rules, and every serious platform models them that way —
+//* Uber Eats calls them customizations, DoorDash option lists, Toast and Square
+//* modifier groups. A size group is "pick exactly one", a sauce group is "pick
+//* up to three", and that is the entire difference. Modelling them as separate
+//* tables would mean two pricing paths, two forms and two order-line shapes,
+//* and every future rule (a discount, a tax category) written twice.
+//*
+//* Groups are VENDOR-scoped and reusable: one "Sauces" group attached to
+//* twelve dishes, edited once. That reuse is the whole reason a vendor with a
+//* real menu can maintain this at all, and it is what Deliveroo, Toast, Square
+//* and Olo all do.
+//*
+//* Deliberately NOT here, and each is a real decision rather than an oversight:
+//*   - NESTED modifiers (an option opening its own group, DoorDash's
+//*     half-and-half pizza). Roughly doubles cart-resolution complexity.
+//*   - PER-OUTLET option pricing. Only price and availability vary by location
+//*     on a Meal, and letting the option SET differ per outlet would mean the
+//*     dish is no longer one dish.
+model ModifierGroup {
+  id          String  @id @default(uuid())
+  vendorId    String
+  name        String
+  //* Shown under the group heading when the choice needs explaining
+  //* ("Pick a side — the first one is included").
+  description String?
+
+  //* The selection rule, and the ONLY thing separating a variant from an
+  //* addon. `required` is deliberately NOT a column: it is exactly
+  //* minSelect >= 1, and storing it as well would give one question two
+  //* answers that can disagree.
+  minSelect Int @default(0)
+  maxSelect Int @default(1)
+
+  //* Content moderation, mirroring MenuItem/Outlet/VendorProfile. Option names
+  //* are screened into this too — they are customer-visible vendor free text
+  //* exactly as the group name is. A flag here also re-flags every attached
+  //* MenuItem, so a flagged modifier lands in the existing meal review queue
+  //* rather than needing a queue of its own.
+  reviewStatus      ProfileReviewStatus @default(AUTO_APPROVED)
+  flagReasons       String[]
+  flaggedAt         DateTime?
+  reviewedAt        DateTime?
+  reviewedByAdminId String?
+  rejectionReason   String?
+
+  deletedAt       DateTime?
+  vendorUpdatedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  vendor    VendorAccount           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  options   ModifierOption[]
+  menuItems MenuItemModifierGroup[]
+
+  @@unique([vendorId, name])
+  @@index([vendorId])
+  @@index([reviewStatus])
+  @@index([deletedAt])
+}
+
+//* One choice inside a group.
+model ModifierOption {
+  id      String @id @default(uuid())
+  groupId String
+  name    String
+
+  //* A DELTA on the dish price, in minor units, never an absolute price.
+  //* Small is +0 and Large is +200, so one dish has one price and the options
+  //* move it. May be negative (a smaller portion that costs less) and is
+  //* routinely zero, which is why there is no "above zero" rule here unlike
+  //* MenuItem.basePriceMinor.
+  priceDeltaMinor Int @default(0)
+
+  //* 86-ing at option granularity: out of tomatoes takes "extra tomato" off
+  //* without taking the burger down. Vendor-level for now — per-outlet option
+  //* availability is the same deferred decision as per-outlet option pricing.
+  isAvailable Boolean @default(true)
+
+  //* Authored order, never alphabetical: Small/Medium/Large is the point.
+  position Int @default(0)
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  group ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, name])
+  @@index([groupId])
+  @@index([deletedAt])
+}
+
+//* Which dishes use which group. Carries the per-dish ORDER only: the
+//* selection rule belongs to the group, so the same group behaves identically
+//* everywhere it appears. A vendor wanting different rules makes a second
+//* group, which keeps "what does this group do" a question with one answer.
+model MenuItemModifierGroup {
+  menuItemId String
+  groupId    String
+  position   Int    @default(0)
+
+  menuItem MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  group    ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([menuItemId, groupId])
+  @@index([groupId])
+}
+
+//* ─── DISCOUNTS ─────────────────────────────────────────────────────────────
+//*
+//* A discount is NEVER a mutation of a price. The menu price stays exactly as
+//* the vendor set it and the discount applies at cart time, recording itself as
+//* its own line. That is what lets gross sales, discounts and net be reported
+//* separately, lets an offer expire without a data migration, and lets anyone
+//* answer what a campaign actually cost. Uber Eats, DoorDash and Bolt Food all
+//* work this way.
+//*
+//* Composition order, fixed in lib/pricing and not negotiable per-feature:
+//*     base + selected option deltas = line subtotal
+//*   - discount                      = taxable amount
+//*   ± tax                           = what the customer pays
+//* Commission is then charged on the DISCOUNTED amount (explicit product
+//* decision, following Uber Eats): the platform takes no cut of a discount the
+//* vendor funded.
+//*
+//* STATUS IS DERIVED, NOT STORED. Scheduled / running / expired / exhausted all
+//* follow from the window, the caps and the clock, so only genuine state gets a
+//* column here: a vendor's pause and an admin's suspension. This is the same
+//* choice payoutReviewState and VendorLifecycleState make, and it means no cron
+//* flipping rows and no second answer to "is this offer running".
+//*
+//* A vendor may create and SCHEDULE a discount before their storefront is live
+//* — building a launch promotion during onboarding is normal — and it simply
+//* never reaches the running state until they publish. That needs no extra
+//* column; it falls out of the derived state.
+model Discount {
+  id          String  @id @default(uuid())
+  vendorId    String
+  //* The vendor's own label for it. Not customer-facing copy.
+  name        String
+  description String?
+
+  type          DiscountType
+  //* Who pays. Only VENDOR is writable today; the column exists from the start
+  //* because retrofitting attribution after real money has moved is the
+  //* expensive version of this.
+  fundingSource DiscountFunding @default(VENDOR)
+
+  //* PERCENTAGE_OFF_ITEMS — basis points, 2000 is 20%. Same unit as
+  //* CountryTaxRate.rateBps and VendorAccount.commissionRateBps.
+  percentBps       Int?
+  //* AMOUNT_OFF_ORDER — minor units off, and the subtotal a basket must reach
+  //* before it applies at all.
+  amountMinor      Int?
+  minSubtotalMinor Int?
+
+  //* Targeting is EXPLICIT, never inferred from an empty list. A vendor who
+  //* deselects every item means "I have not chosen yet", not "discount my whole
+  //* menu" — the same reasoning that makes a partial reorder an error rather
+  //* than a guess.
+  appliesToAllOutlets Boolean @default(true)
+  appliesToAllItems   Boolean @default(true)
+
+  startsAt   DateTime
+  endsAt     DateTime?
+  //* Happy-hour windows. An EMPTY day list means no day restriction, which is
+  //* different from the flags above: a day filter is an optional narrowing, and
+  //* there is no such thing as an offer that runs on no days.
+  daysOfWeek DayOfWeek[]
+  //* "17:00" / "19:00", local to the outlet. Null means all day.
+  startTime  String?
+  endTime    String?
+
+  //* Caps. RECORDED BUT NOT YET ENFORCED — there is no order to redeem
+  //* against, so nothing increments these. Same "designed, not enforced"
+  //* honesty as VendorAccount.payoutHoldStatus.
+  budgetMinor     Int?
+  spentMinor      Int  @default(0)
+  maxRedemptions  Int?
+  redemptionCount Int  @default(0)
+  //* Needs a per-customer redemption record, which needs orders and a consumer.
+  maxPerCustomer  Int?
+
+  //* The vendor's own switch. Genuine state, so it is stored.
+  isPaused Boolean @default(false)
+
+  //* An admin stopping someone else's offer. Also genuine state, and kept
+  //* apart from the vendor's pause so neither can silently undo the other.
+  suspendedAt        DateTime?
+  suspendedByAdminId String?
+  suspensionReason   String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  vendor  VendorAccount      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  outlets DiscountOutlet[]
+  items   DiscountMenuItem[]
+
+  @@unique([vendorId, name])
+  @@index([vendorId])
+  @@index([startsAt])
+  @@index([endsAt])
+  @@index([deletedAt])
+}
+
+//* Which of the vendor's outlets an offer runs at. Only consulted when
+//* appliesToAllOutlets is false.
+model DiscountOutlet {
+  discountId String
+  outletId   String
+
+  discount Discount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  outlet   Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@id([discountId, outletId])
+  @@index([outletId])
+}
+
+//* Which dishes a percentage offer covers. Only consulted when
+//* appliesToAllItems is false. Cascade rather than Restrict: unlike a cuisine,
+//* a discount target carries no history worth preserving once the dish is gone.
+model DiscountMenuItem {
+  discountId String
+  menuItemId String
+
+  discount Discount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@id([discountId, menuItemId])
+  @@index([menuItemId])
 }
 
 model MealPlan {
@@ -2480,6 +2891,28 @@ enum DocumentStatus {
   WITHDRAWN
 }
 
+//* Two types only, deliberately. These cover most of what a merchant actually
+//* wants and both are easy to reason about. Buy-one-get-one is the highest
+//* engagement offer and has the most intricate resolution logic, so it is
+//* third rather than first.
+enum DiscountType {
+  //* A percentage off each covered line, applied to base + selected options —
+  //* 20% off a pizza discounts the large upcharge and the extra cheese too,
+  //* because that is what the customer is paying for the dish.
+  PERCENTAGE_OFF_ITEMS
+  //* A flat amount off the basket once it reaches minSubtotalMinor.
+  AMOUNT_OFF_ORDER
+}
+
+//* Who pays for the discount. Merchant-funded is the common case and the only
+//* one writable today; the platform-funded and split flows need a platform
+//* budget and payout attribution, which are deferred.
+enum DiscountFunding {
+  VENDOR
+  PLATFORM
+  SPLIT
+}
+
 enum DayOfWeek {
   MONDAY
   TUESDAY
@@ -2648,6 +3081,18 @@ enum PayoutTypeStatus {
   SUSPENDED
 }
 
+//* Who is legally the collector of consumption tax on the food itself.
+//* Per country, because marketplace facilitator rules in some jurisdictions
+//* remove the choice.
+enum TaxRemitter {
+  //* The vendor is the seller of record and remits tax on food themselves;
+  //* DailyBread remits only on its own commission.
+  VENDOR
+  //* DailyBread is the marketplace facilitator: it collects tax on the sale
+  //* and remits it, paying the vendor net.
+  PLATFORM
+}
+
 enum MealStatus {
   ACTIVE
   SUSPENDED
@@ -2696,7 +3141,6 @@ enum ServiceAreaMode {
   WAITLIST // pre-onboarding; not yet live
   EXCLUDED // not serviceable — never surfaced to vendors or customers
 }
-
 
 enum BatchZoneStatus {
   PENDING // computed, awaiting courier assignment

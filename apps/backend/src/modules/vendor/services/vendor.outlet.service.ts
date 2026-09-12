@@ -195,7 +195,7 @@ export async function createOutlet(vendorId: string, input: CreateOutletRequest)
   const {
     name, addressLine1, addressLine2, cityId, neighborhood,
     postalCode, latitude, longitude, phone, email, bio,
-    deliveryRadius, minimumOrder, deliveryFee,
+    deliveryRadius, minimumOrderMinor, deliveryFeeMinor,
   } = input
 
   const vendor = await prisma.vendorAccount.findUnique({
@@ -239,8 +239,8 @@ export async function createOutlet(vendorId: string, input: CreateOutletRequest)
       email         : email          ?? null,
       bio           : bio            ?? null,
       deliveryRadius: deliveryRadius ?? null,
-      minimumOrder  : minimumOrder   ?? null,
-      deliveryFee   : deliveryFee    ?? null,
+      minimumOrderMinor : minimumOrderMinor ?? null,
+      deliveryFeeMinor  : deliveryFeeMinor  ?? null,
       isMainOutlet  : existingCount === 0,
       adminStatus   : OutletAdminStatus.ACTIVE,
       reviewStatus  : isFlagged ? OutletReviewStatus.FLAGGED : OutletReviewStatus.AUTO_APPROVED,
@@ -324,8 +324,8 @@ export async function updateOutlet(vendorId: string, outletId: string, input: Up
       ...(input.email          != null ? { email         : input.email          } : {}),
       ...(input.bio            != null ? { bio           : input.bio            } : {}),
       ...(input.deliveryRadius != null ? { deliveryRadius: input.deliveryRadius } : {}),
-      ...(input.minimumOrder   != null ? { minimumOrder  : input.minimumOrder   } : {}),
-      ...(input.deliveryFee    != null ? { deliveryFee   : input.deliveryFee    } : {}),
+      ...(input.minimumOrderMinor != null ? { minimumOrderMinor: input.minimumOrderMinor } : {}),
+      ...(input.deliveryFeeMinor  != null ? { deliveryFeeMinor : input.deliveryFeeMinor  } : {}),
       ...(input.latitude       != null ? { latitude      : input.latitude       } : {}),
       ...(input.longitude      != null ? { longitude     : input.longitude      } : {}),
       ...(zoneId !== undefined ? { zoneId } : {}),

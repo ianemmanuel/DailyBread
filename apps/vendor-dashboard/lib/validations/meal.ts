@@ -51,6 +51,21 @@ export const mealSchema = z.object({
   description: optionalText(MEAL_LIMITS.description, "Description"),
   portionSize: optionalText(MEAL_LIMITS.portionSize, "Portion size"),
 
+  /*
+   * Minutes, as typed. Empty is a real answer and the default — a vendor who
+   * hasn't said is deliberately different from one who said zero, and nothing
+   * consumes this yet, so an invented default would be a lie with a number
+   * attached. Zero is refused and points back at the empty field.
+   */
+  prepTime : z
+    .string()
+    .trim()
+    .refine((v) => v === "" || /^\d+$/.test(v), "Use whole minutes, for example 20")
+    .refine((v) => v === "" || Number(v) >= 1, "Leave it empty if you'd rather not say")
+    .refine((v) => v === "" || Number(v) <= 240, "That's more than four hours — please check it")
+    .optional()
+    .or(z.literal("")),
+
   price    : priceText,
   sectionId: z.string().optional().or(z.literal("")),
 

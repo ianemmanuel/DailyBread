@@ -19,6 +19,8 @@ export const createOutletSchema = z.object({
     .min(-180, "Must be between -180 and 180")
     .max(180,  "Must be between -180 and 180"),
   deliveryRadius: z.number().min(0, "Must be 0 or more").optional(),
+  // Typed in MAJOR units by a human; converted to minor units on submit,
+  // which is the only place the currency's scale is known.
   deliveryFee  : z.number().min(0, "Must be 0 or more").optional(),
   minimumOrder : z.number().min(0, "Must be 0 or more").optional(),
 })

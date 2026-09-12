@@ -46,6 +46,8 @@ const OutletLocationPicker = dynamic(
 import { createOutletSchema } from "@/lib/validations/create-outlet"
 import type { City } from "@/types/outlet"
 import type { OutletPlacement } from "@repo/types/vendor-app"
+import { majorToMinor, minorToMajor } from "@/lib/menu/money"
+import { useVendorCurrency } from "@/lib/queries/menu"
 
 interface Props { cities: City[] }
 
@@ -124,6 +126,8 @@ export function CreateOutletForm({ cities }: Props) {
     TanStack Form v1 infers all types from defaultValues.
     Passing an explicit type causes "Expected 12 type arguments" TS error.
   */
+  const { currency } = useVendorCurrency()
+
   const form = useForm({
     defaultValues: {
       name         : "",
@@ -155,8 +159,18 @@ export function CreateOutletForm({ cities }: Props) {
         return
       }
 
+      /*
+       * Money leaves in MINOR UNITS. The two money fields are typed in major
+       * units because that is what a human types, and converted here because
+       * this is the only place the currency's scale is known — 0 digits for
+       * UGX, 2 for KES, 3 for KWD. Sending "150" straight into a minor-units
+       * column would price a delivery at one and a half shillings.
+       */
+      const { deliveryFee, minimumOrder, ...rest } = parsed.data
       const payload = {
-        ...parsed.data,
+        ...rest,
+        deliveryFeeMinor : majorToMinor(deliveryFee,  currency),
+        minimumOrderMinor: majorToMinor(minimumOrder, currency),
         email       : parsed.data.email        || undefined,
         phone       : parsed.data.phone        || undefined,
         bio         : parsed.data.bio          || undefined,
@@ -489,8 +503,8 @@ export function CreateOutletForm({ cities }: Props) {
           {(
             [
               { name: "deliveryRadius", label: "Delivery Radius (km)", placeholder: "5",   step: "0.5" },
-              { name: "deliveryFee",    label: "Delivery Fee (KSh)",    placeholder: "150", step: "1"   },
-              { name: "minimumOrder",   label: "Min. Order (KSh)",      placeholder: "500", step: "1"   },
+              { name: "deliveryFee",    label: `Delivery fee (${currency?.symbol ?? ""})`.trim(),   placeholder: "150", step: "1" },
+              { name: "minimumOrder",   label: `Minimum order (${currency?.symbol ?? ""})`.trim(), placeholder: "500", step: "1" },
             ] as const
           ).map(({ name, label, placeholder, step }) => (
             <form.Field

@@ -3,6 +3,8 @@
 import Link from "next/link"
 import { MapPin, Star, Crown } from "lucide-react"
 import type { Outlet } from "@/types/outlet"
+import { formatPrice } from "@/lib/menu/money"
+import { useVendorCurrency } from "@/lib/queries/menu"
 import { OutletStatusBadges } from "./OutletStatusBadges"
 
 interface OutletCardProps {
@@ -10,6 +12,9 @@ interface OutletCardProps {
 }
 
 export function OutletCard({ outlet }: OutletCardProps) {
+  // The vendor's own currency, so a delivery fee is never labelled in a
+  // currency this market does not use.
+  const { currency } = useVendorCurrency()
   const isOperational =
     !outlet.vendorDisabledAt &&
     outlet.adminStatus === "ACTIVE" &&
@@ -84,7 +89,9 @@ export function OutletCard({ outlet }: OutletCardProps) {
         </div>
         <div className="px-3" style={{ borderRight: "1px solid var(--border)" }}>
           <p className="font-semibold text-[var(--foreground)]">
-            {outlet.deliveryFee != null ? `KSh ${outlet.deliveryFee}` : "—"}
+            {outlet.deliveryFeeMinor != null && currency
+              ? formatPrice(outlet.deliveryFeeMinor, currency)
+              : "—"}
           </p>
           <p className="text-[var(--muted-foreground)]">Del. Fee</p>
         </div>

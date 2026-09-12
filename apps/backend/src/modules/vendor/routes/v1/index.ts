@@ -7,6 +7,7 @@ import cityRouter from "./vendor.city.routes"
 import payoutRouter from "./vendor.payout.routes"
 import profileRouter from "./vendor.profile.routes"
 import menuRouter from './vendor.menu.routes'
+import discountRouter from './vendor.discount.routes'
 import authRouter from "../vendor.auth.routes"
 import { requireVendorState, NON_BANNED_STATES } from "../../middlewares"
 
@@ -29,6 +30,8 @@ v1Router.use('/cities',cityRouter)
 v1Router.use('/payouts',payoutRouter)
 v1Router.use('/profile',profileRouter)
 v1Router.use('/menu',menuRouter)
+//* Merchant-funded offers. Authoring tier, like the menu.
+v1Router.use('/discounts', discountRouter)
 
 // Vendor module info endpoint (optional)
 v1Router.get('/', (req: Request, res: Response) => {

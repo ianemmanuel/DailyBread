@@ -58,7 +58,7 @@ export const handleCreateOutlet = async (req: Request, res: Response, next: Next
     const {
       name, addressLine1, addressLine2, cityId, neighborhood,
       postalCode, latitude, longitude, phone, email, bio,
-      deliveryRadius, minimumOrder, deliveryFee,
+      deliveryRadius, minimumOrderMinor, deliveryFeeMinor,
     } = req.body
 
     if (!name || !addressLine1 || !cityId || latitude == null || longitude == null) {
@@ -70,7 +70,7 @@ export const handleCreateOutlet = async (req: Request, res: Response, next: Next
       postalCode,
       latitude     : Number(latitude),
       longitude    : Number(longitude),
-      phone, email, bio, deliveryRadius, minimumOrder, deliveryFee,
+      phone, email, bio, deliveryRadius, minimumOrderMinor, deliveryFeeMinor,
     }
 
     const outlet = await createOutlet(auth.vendorAccount.id, input)
@@ -87,7 +87,7 @@ export const handleUpdateOutlet = async (req: Request, res: Response, next: Next
     const { id } = req.params as idParam
     const {
       name, addressLine1, addressLine2, neighborhood, postalCode,
-      phone, email, bio, deliveryRadius, minimumOrder, deliveryFee,
+      phone, email, bio, deliveryRadius, minimumOrderMinor, deliveryFeeMinor,
       latitude, longitude,
     } = req.body
 
@@ -101,8 +101,8 @@ export const handleUpdateOutlet = async (req: Request, res: Response, next: Next
       ...(email          != null ? { email          }                             : {}),
       ...(bio            != null ? { bio            }                             : {}),
       ...(deliveryRadius != null ? { deliveryRadius : Number(deliveryRadius) }    : {}),
-      ...(minimumOrder   != null ? { minimumOrder   : Number(minimumOrder)   }    : {}),
-      ...(deliveryFee    != null ? { deliveryFee    : Number(deliveryFee)    }    : {}),
+      ...(minimumOrderMinor != null ? { minimumOrderMinor: Number(minimumOrderMinor) } : {}),
+      ...(deliveryFeeMinor  != null ? { deliveryFeeMinor : Number(deliveryFeeMinor)  } : {}),
       ...(latitude       != null ? { latitude       : Number(latitude)       }    : {}),
       ...(longitude      != null ? { longitude      : Number(longitude)      }    : {}),
     }

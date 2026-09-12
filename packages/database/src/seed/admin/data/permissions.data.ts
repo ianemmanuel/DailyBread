@@ -285,6 +285,16 @@ export const PERMISSIONS = [
     description: "Create/edit currencies and the payment-provider catalog, and activate/deactivate them (global scope only)",
   },
   {
+    key        : "finance:tax:read",
+    module     : "finance",
+    description: "View the tax-category catalog and a country's tax position — how prices are quoted, who remits, and every rate on the books",
+  },
+  {
+    key        : "finance:tax:manage",
+    module     : "finance",
+    description: "Set a country's tax position and rates (own country), and create/edit the global tax-category catalog (global scope only)",
+  },
+  {
     key        : "finance:reports:read",
     module     : "finance",
     description: "View financial reports, revenue dashboards, and summary statistics",

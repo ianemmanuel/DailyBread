@@ -926,9 +926,13 @@ export interface CreateOutletRequest {
   phone?       : string
   email?       : string
   bio?         : string
-  deliveryRadius? : number
-  minimumOrder?   : number
-  deliveryFee?    : number
+  /** Kilometres — a genuine measurement, so a float is right here. */
+  deliveryRadius?    : number
+  /** MINOR UNITS. Named so the unit cannot be mistaken, the same rule
+   *  MenuItem.basePriceMinor follows: money is never a float and never a
+   *  decimal on the wire. The form converts using the country's own scale. */
+  minimumOrderMinor? : number
+  deliveryFeeMinor?  : number
 }
 
 export interface UpdateOutletRequest {
@@ -940,9 +944,13 @@ export interface UpdateOutletRequest {
   phone?       : string
   email?       : string
   bio?         : string
-  deliveryRadius? : number
-  minimumOrder?   : number
-  deliveryFee?    : number
+  /** Kilometres — a genuine measurement, so a float is right here. */
+  deliveryRadius?    : number
+  /** MINOR UNITS. Named so the unit cannot be mistaken, the same rule
+   *  MenuItem.basePriceMinor follows: money is never a float and never a
+   *  decimal on the wire. The form converts using the country's own scale. */
+  minimumOrderMinor? : number
+  deliveryFeeMinor?  : number
   // Coordinates may change if vendor corrects a pin — re-runs coordinate check
   latitude?    : number
   longitude?   : number

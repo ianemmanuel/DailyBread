@@ -53,3 +53,31 @@ export function formatPrice(minor: number, currency: MenuCurrency): string {
     return `${currency.symbol} ${(minor / factor).toFixed(currency.minorUnitDigits)}`
   }
 }
+
+/*
+ * The numeric twins of toMinorUnits / fromMinorUnits, for forms whose money
+ * field is already a number rather than a string the user is mid-way through
+ * typing. Same rule, same scale, same reason they exist at all.
+ */
+
+/** 150 -> 15000 for a 2-digit currency, 150 for a 0-digit one. */
+export function majorToMinor(
+  value   : number | undefined | null,
+  currency: MenuCurrency | null | undefined,
+): number | undefined {
+  if (value == null) return undefined
+  // Without a resolved currency the scale is unknown, and a number in the
+  // wrong scale is worse than no number: these fields are optional, so
+  // omitting is the safe outcome.
+  if (!currency) return undefined
+  return Math.round(value * 10 ** currency.minorUnitDigits)
+}
+
+/** 15000 -> 150. Seeds an edit form back into the units a human typed. */
+export function minorToMajor(
+  minor   : number | undefined | null,
+  currency: MenuCurrency | null | undefined,
+): number | undefined {
+  if (minor == null || !currency) return undefined
+  return minor / 10 ** currency.minorUnitDigits
+}

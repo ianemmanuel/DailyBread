@@ -2,6 +2,12 @@ import { Router } from "express"
 import { AdminPermissions } from "@repo/types/enums"
 import { requirePermission } from "@/modules/admin/middleware"
 import {
+  handleListDiscounts,
+  handleGetDiscount,
+  handleSuspendDiscount,
+  handleLiftSuspension,
+} from "../../controllers/admin.discount.controller"
+import {
   handleListApplications,
   handleExportApplicationsCsv,
   handleGetApplication,
@@ -275,6 +281,20 @@ vendorRouter.get("/meals/:itemId", MEALS_READ, handleGetMenuItem)
 vendorRouter.post("/meals/:itemId/approve",   MEALS_MODERATE, handleApproveMenuItem)
 vendorRouter.post("/meals/:itemId/send-back", MEALS_MODERATE, handleSendBackMenuItem)
 vendorRouter.post("/meals/:itemId/status",    MEALS_MODERATE, handleSetMenuItemStatus)
+
+//* Discounts — vendor-authored offers. Oversight only: merchants self-serve
+//* their own promotions, and what an admin gets here is visibility and a stop
+//* button. finance:discounts:create is deliberately NOT used — it describes
+//* platform-funded campaigns, which are deferred, and borrowing it for someone
+//* else's offer would misrepresent what it grants.
+//* Scope is enforced per call in the service, on the VENDOR's country.
+const DISCOUNTS_READ = requirePermission(AdminPermissions.FINANCE_DISCOUNTS_READ)
+const DISCOUNTS_STOP = requirePermission(AdminPermissions.FINANCE_DISCOUNTS_DEACTIVATE)
+
+vendorRouter.get("/discounts", DISCOUNTS_READ, handleListDiscounts)
+vendorRouter.get("/discounts/:discountId", DISCOUNTS_READ, handleGetDiscount)
+vendorRouter.post("/discounts/:discountId/suspend", DISCOUNTS_STOP, handleSuspendDiscount)
+vendorRouter.delete("/discounts/:discountId/suspend", DISCOUNTS_STOP, handleLiftSuspension)
 
 vendorRouter.get("/profiles", requirePermission(AdminPermissions.VENDORS_PROFILES_READ), handleListVendorProfiles)
 // Must be registered before "/profiles/:vendorId".

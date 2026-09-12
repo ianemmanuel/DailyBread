@@ -17,13 +17,15 @@ import { cn } from "@/lib/utils"
 import { FormSection, FormField } from "@/components/dashboard/form"
 import { TagMultiSelect } from "@/components/profile/TagMultiSelect"
 import { MealImageGallery, type MealImageValue } from "./MealImageGallery"
+import { MealModifierSection } from "./MealModifierSection"
 import { validateMeal, MEAL_LIMITS, type MealFormValues } from "@/lib/validations/meal"
-import { toMinorUnits, fromMinorUnits, formatPrice } from "@/lib/menu/money"
+import { toMinorUnits, fromMinorUnits, formatPrice, type MenuCurrency } from "@/lib/menu/money"
 import { releasePreview } from "@/lib/menu/media"
 import { ClientApiError } from "@/lib/api/client"
 import {
   useMenuContext, useCreateMenuItem, useUpdateMenuItem, useCreateMenuSection,
   type MenuItem,
+  type MenuTaxContext,
 } from "@/lib/queries/menu"
 
 /*
@@ -52,7 +54,7 @@ interface Props {
 }
 
 const EMPTY: MealFormValues = {
-  name: "", description: "", portionSize: "", price: "",
+  name: "", description: "", portionSize: "", prepTime: "", price: "",
   sectionId: "", cuisineIds: [], dietaryTagIds: [], outletIds: [], imageKeys: [],
 }
 
@@ -67,6 +69,10 @@ export function MealForm({ item }: Props) {
   const [images, setImages] = React.useState<MealImageValue[]>([])
   /** Per-outlet local prices, keyed by outlet id, in major units as typed. */
   const [overrides, setOverrides] = React.useState<Record<string, string>>({})
+  /* Attached option groups, in the vendor's display order. Held outside
+   * `values` because there is nothing to validate on this side — an id is
+   * either one of the vendor's own groups or the backend refuses it. */
+  const [modifierGroupIds, setModifierGroupIds] = React.useState<string[]>([])
   const [errors, setErrors] = React.useState<Partial<Record<keyof MealFormValues, string>>>({})
   const [newSection, setNewSection] = React.useState("")
   const [addingSection, setAddingSection] = React.useState(false)
@@ -87,6 +93,7 @@ export function MealForm({ item }: Props) {
         name         : item.name,
         description  : item.description ?? "",
         portionSize  : item.portionSize ?? "",
+        prepTime     : item.prepTimeMinutes != null ? String(item.prepTimeMinutes) : "",
         price        : fromMinorUnits(item.basePriceMinor, currency),
         sectionId    : item.section?.id ?? "",
         cuisineIds   : item.cuisines.map((c) => c.id),
@@ -94,6 +101,7 @@ export function MealForm({ item }: Props) {
         outletIds    : item.outlets.map((o) => o.outletId),
         imageKeys    : item.images.map((i) => i.storageKey),
       })
+      setModifierGroupIds([...item.modifierGroups].sort((a, b) => a.position - b.position).map((g) => g.id))
       setImages(item.images.map((i) => ({ storageKey: i.storageKey, url: i.url, isLocal: false })))
       setOverrides(
         Object.fromEntries(
@@ -171,13 +179,18 @@ export function MealForm({ item }: Props) {
       name          : values.name.trim(),
       description   : values.description?.trim() || null,
       portionSize   : values.portionSize?.trim() || null,
+      // Empty stays null rather than becoming 0 — "hasn't said" is its own
+      // answer, and the backend refuses a zero for the same reason.
+      prepTimeMinutes: values.prepTime?.trim() ? Number(values.prepTime) : null,
       basePriceMinor,
       sectionId     : values.sectionId || null,
+      // Empty means "the country's default rate", which is a real answer.
       imageKeys     : values.imageKeys,
       cuisineIds    : values.cuisineIds,
       dietaryTagIds : values.dietaryTagIds,
       outletIds     : values.outletIds,
       priceOverrides,
+      modifierGroupIds,
     }
 
     setSaving(true)
@@ -227,7 +240,7 @@ export function MealForm({ item }: Props) {
   const previewPrice  = toMinorUnits(values.price, currency)
 
   return (
-    <form onSubmit={submit} className="space-y-4 pb-28">
+    <form onSubmit={submit} className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <div className="space-y-4">
           <FormSection
@@ -355,14 +368,31 @@ export function MealForm({ item }: Props) {
               </div>
             </FormField>
 
-            {previewPrice != null && previewPrice > 0 && (
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 px-4 py-3">
-                <p className="text-xs text-[var(--muted-foreground)]">Customers will see</p>
-                <p className="mt-0.5 font-display text-xl font-semibold tabular-nums text-[var(--foreground)]">
-                  {formatPrice(previewPrice, currency)}
-                </p>
+            <FormField
+              label="Prep time"
+              error={errors.prepTime}
+              hint="Roughly how long from an order coming in to this being ready. Leave it empty if it varies too much to say."
+            >
+              <div className="flex items-center gap-2">
+                <Input
+                  value={values.prepTime}
+                  onChange={(e) => set("prepTime", e.target.value)}
+                  inputMode="numeric"
+                  placeholder="20"
+                  className="w-24 tabular-nums"
+                />
+                <span className="text-sm text-[var(--muted-foreground)]">minutes</span>
               </div>
+            </FormField>
+
+            {previewPrice != null && previewPrice > 0 && (
+              <PricePreview
+                priceMinor={previewPrice}
+                currency={currency}
+                tax={context?.tax}
+              />
             )}
+
           </FormSection>
         </div>
 
@@ -418,6 +448,12 @@ export function MealForm({ item }: Props) {
           </FormSection>
         </div>
       </div>
+
+      <MealModifierSection
+        currency={currency}
+        value={modifierGroupIds}
+        onChange={setModifierGroupIds}
+      />
 
       {/* Only shown when there is a real choice to make. */}
       {multiOutlet && (
@@ -505,10 +541,16 @@ export function MealForm({ item }: Props) {
         </FormSection>
       )}
 
-      {/* Sticky, because the form is taller than a phone screen and a save
-          button you have to hunt for is a save that does not happen. */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border)] bg-[var(--background)]/95 px-4 py-3 backdrop-blur sm:px-6 lg:left-64">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
+      {/*
+        * The actions END the form and scroll with it. They used to be pinned to
+        * the viewport, which made them read as app chrome rather than as part
+        * of the form — you looked at the bar and had to ask whether it belonged
+        * to the page or to what you were filling in. Scrolling to the end to
+        * submit is how a form has always worked, and it gives a phone back the
+        * height a permanent bar was taking.
+        */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-[var(--muted-foreground)]">
             <span className="text-[var(--destructive)]">*</span> Required. Everything else is optional.
           </p>
@@ -530,5 +572,90 @@ export function MealForm({ item }: Props) {
         </div>
       </div>
     </form>
+  )
+}
+
+/*
+ * What the typed price actually breaks down to.
+ *
+ * The vendor sees this before they save, because "1,300" means two different
+ * things depending on whether the market quotes tax-inclusive prices, and they
+ * cannot price a dish sensibly without knowing which. Same principle that will
+ * govern the discount builder: show the number they end up with, never just
+ * the one they typed.
+ *
+ * The arithmetic mirrors the backend's lib/pricing/tax.ts, including deriving
+ * the other side by subtraction so the parts always sum to the whole. It is a
+ * preview: every saved price is broken down server-side, and that is what the
+ * meal list and any future checkout read.
+ */
+function PricePreview({
+  priceMinor, currency, tax,
+}: {
+  priceMinor: number
+  currency  : MenuCurrency
+  tax       : MenuTaxContext | undefined
+}) {
+  /*
+   * The market's standard rate, always.
+   *
+   * The vendor is never asked how their dish is taxed, and should not be: this
+   * platform sells ready-cooked food only, so every dish takes the same
+   * treatment, and a merchant self-classifying for tax is a compliance
+   * question rather than a menu one. Uber Eats and DoorDash both classify
+   * centrally and never put the choice on the merchant's item form.
+   *
+   * Null means the market has configured no rate at all, and then no tax line
+   * is shown — saying nothing is honest, inventing a zero is not.
+   */
+  const standard = tax?.categories.find((c) => c.isStandard)
+  const rateBps = standard?.rateBps ?? tax?.standardRateBps ?? null
+
+  if (!tax || rateBps === null) {
+    return (
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 px-4 py-3">
+        <p className="text-xs text-[var(--muted-foreground)]">Customers will see</p>
+        <p className="mt-0.5 font-display text-xl font-semibold tabular-nums text-[var(--foreground)]">
+          {formatPrice(priceMinor, currency)}
+        </p>
+      </div>
+    )
+  }
+
+  const inclusive = tax.pricesIncludeTax
+  const taxMinor = inclusive
+    ? Math.round((priceMinor * rateBps) / (10_000 + rateBps))
+    : Math.round((priceMinor * rateBps) / 10_000)
+  const grossMinor = inclusive ? priceMinor : priceMinor + taxMinor
+  const netMinor = inclusive ? priceMinor - taxMinor : priceMinor
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 px-4 py-3">
+      <p className="text-xs text-[var(--muted-foreground)]">Customers will see</p>
+      <p className="mt-0.5 font-display text-xl font-semibold tabular-nums text-[var(--foreground)]">
+        {formatPrice(grossMinor, currency)}
+      </p>
+
+      <dl className="mt-3 space-y-1 border-t border-[var(--border)] pt-3 text-xs">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[var(--muted-foreground)]">
+            {tax.label} at {standard?.rateLabel ?? `${Number((rateBps / 100).toFixed(2))}%`}
+          </dt>
+          <dd className="tabular-nums text-[var(--foreground)]">{formatPrice(taxMinor, currency)}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[var(--muted-foreground)]">You earn, before commission</dt>
+          <dd className="font-medium tabular-nums text-[var(--foreground)]">
+            {formatPrice(netMinor, currency)}
+          </dd>
+        </div>
+      </dl>
+
+      <p className="mt-2 text-xs leading-relaxed text-[var(--muted-foreground)]">
+        {inclusive
+          ? `Prices here include ${tax.label}, so it comes out of what you typed.`
+          : `${tax.label} is added on top of your price at checkout.`}
+      </p>
+    </div>
   )
 }
