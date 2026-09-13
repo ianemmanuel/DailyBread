@@ -108,6 +108,38 @@ describe("isWithinWindow", () => {
     expect(isWithinWindow(late, new Date("2026-06-06T23:00:00"))).toBe(false) // Sat night
     expect(isWithinWindow(late, new Date("2026-06-05T21:00:00"))).toBe(false) // too early
   })
+
+  /*
+   * A happy-hour window is LOCAL TO THE OUTLET — the schema says so — and was
+   * previously evaluated against the server's own clock, which is correct only
+   * when the server happens to sit in the outlet's zone. On a platform spanning
+   * seven countries it silently shifted every window by the offset between the
+   * two. These pin the fix.
+   */
+  it("evaluates the window in the OUTLET's timezone, not the server's", () => {
+    const happy = { daysOfWeek: [] as DayOfWeek[], startTime: "17:00", endTime: "19:00" }
+
+    // 15:00 UTC is 18:00 in Nairobi (inside) and 15:00 in London (outside).
+    const instant = new Date("2026-06-03T15:00:00Z")
+    expect(isWithinWindow(happy, instant, "Africa/Nairobi")).toBe(true)
+    expect(isWithinWindow(happy, instant, "Europe/London")).toBe(false)
+  })
+
+  it("matches the DAY in the outlet's timezone too", () => {
+    // Wednesday 22:30 UTC is already Thursday 01:30 in Nairobi, so a
+    // Wednesday-only all-day offer is over there while still running in London.
+    const weds = { daysOfWeek: ["WEDNESDAY"] as DayOfWeek[], startTime: null, endTime: null }
+    const instant = new Date("2026-06-03T22:30:00Z")
+
+    expect(isWithinWindow(weds, instant, "Europe/London")).toBe(true)
+    expect(isWithinWindow(weds, instant, "Africa/Nairobi")).toBe(false)
+  })
+
+  it("falls back to server time when no timezone is given, unchanged", () => {
+    const happy = { daysOfWeek: [] as DayOfWeek[], startTime: "17:00", endTime: "19:00" }
+    const local = new Date("2026-06-03T18:00:00")
+    expect(isWithinWindow(happy, local)).toBe(isWithinWindow(happy, local, undefined))
+  })
 })
 
 describe("parseHhMm", () => {

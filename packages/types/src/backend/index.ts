@@ -1,5 +1,6 @@
 export * from "./admin"
 export * from "./vendor"
+export * from "./customer"
 
 //* Finance domain (Phase 1A + 1B) — reference data, Money, country config.
 export type {

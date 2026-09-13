@@ -1,3 +1,4 @@
+import { uniqueViolationFields } from "./prismaUnique"
 import { Prisma } from "@repo/db"
 
 import { ApiError } from "./ApiError"
@@ -44,7 +45,11 @@ export function mapPrismaError(err: unknown): ApiError | null {
 
     switch (err.code) {
       case "P2002": {
-        const fields = (err.meta?.target as string[])?.join(", ") ?? "unknown field"
+        // Reads BOTH P2002 payload shapes — under the pg driver adapter this
+        // app uses, meta.target is undefined and every message here said
+        // "unknown field". See errors/prismaUnique.ts.
+        const named = uniqueViolationFields(err)
+        const fields = named.length > 0 ? named.join(", ") : "unknown field"
         return new ApiError(409, `A record with this ${fields} already exists.`, "DUPLICATE_RECORD")
       }
       case "P2025":

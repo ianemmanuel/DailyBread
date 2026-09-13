@@ -115,6 +115,7 @@ export default async function CitiesPage({ searchParams }: PageProps) {
           <CreateCityDialog
             countrySlug={selected.slug}
             countryName={selected.name}
+            countryTimezones={selected.timezones}
             disabled={selected.status !== "ACTIVE"}
             disabledHint="Activate this country before adding cities."
           />

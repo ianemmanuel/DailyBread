@@ -1,4 +1,5 @@
 
+import { validateCityTimezone } from "@/lib/time/timezone"
 import { buildCountrySlug, buildCitySlug } from "@/utils/geo-slug.utils"
 import { prisma, GeoStatus, Prisma } from "@repo/db"
 import { recomputeOutletZonesForCity } from "@/modules/vendor/services/vendor.geography.service"
@@ -167,6 +168,22 @@ export async function createCity(
         throw new ApiError(400, "Cannot add a city to an inactive country", "COUNTRY_INACTIVE")
     }
 
+    /*
+     * A city's timezone must be one its own country actually uses.
+     *
+     * Previously unvalidated, and it showed: both Kenyan cities were saved as
+     * Africa/Addis_Ababa. Nothing broke because both are UTC+3, which is
+     * precisely what makes this dangerous — the same slip between two countries
+     * on different offsets silently shifts every operating-hours and
+     * happy-hour calculation in that market.
+     */
+    const countryZones = await prisma.country.findUnique({
+        where : { id: country.id },
+        select: { timezones: true },
+    })
+    const tz = validateCityTimezone(input.timezone, countryZones?.timezones ?? [], country.name)
+    if (!tz.ok) throw new ApiError(400, tz.problem.message, tz.problem.code)
+
     const duplicate = await prisma.city.findFirst({
         where: {
             countryId: country.id,
@@ -192,7 +209,7 @@ export async function createCity(
             name : input.name,
             slug,
             code,
-            timezone : input.timezone,
+            timezone : tz.timezone,
             latitude : input.latitude ?? null,
             longitude: input.longitude ?? null,
             status : GeoStatus.ACTIVE,
@@ -222,6 +239,19 @@ export async function updateCity(
     assertCountryInScope(city.countryId, scope)
 
     // Regenerate slug if name is changing
+    // Same rule on update as on create — an edit is the other way a wrong
+    // timezone gets in, and it is the one that reaches an already-live market.
+    let checkedTimezone: string | undefined
+    if (input.timezone != null) {
+        const owner = await prisma.country.findUnique({
+            where : { id: city.countryId },
+            select: { name: true, timezones: true },
+        })
+        const tz = validateCityTimezone(input.timezone, owner?.timezones ?? [], owner?.name ?? "this country")
+        if (!tz.ok) throw new ApiError(400, tz.problem.message, tz.problem.code)
+        checkedTimezone = tz.timezone
+    }
+
     let newSlug: string | undefined
     if (input.name && input.name !== city.name) {
         const country = await prisma.country.findUnique({
@@ -244,7 +274,7 @@ export async function updateCity(
         ...(input.name != null ? { name: input.name } : {}),
         ...(input.latitude != null ? { latitude: input.latitude } : {}),
         ...(input.longitude != null ? { longitude: input.longitude } : {}),
-        ...(input.timezone != null ? { timezone: input.timezone } : {}),
+        ...(checkedTimezone != null ? { timezone: checkedTimezone } : {}),
         ...(input.status != null ? { status: input.status } : {}),
         ...(newSlug != null ? { slug: newSlug } : {}),
         },

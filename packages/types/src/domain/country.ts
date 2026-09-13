@@ -52,6 +52,8 @@ export interface CountrySummaryResult {
   code: string
   currency: string
   phoneCode: string
+  /** IANA zones this country uses. Narrows the city timezone picker. */
+  timezones: string[]
   status: string
   createdAt: Date
   region?: {

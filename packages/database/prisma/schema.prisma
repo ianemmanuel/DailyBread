@@ -1908,7 +1908,6 @@ model Outlet {
   zone                     Zone?                       @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   meals                    Meal[]
   mealPlans                MealPlan[]
-  cuisines                 OutletCuisine[]
   discounts                DiscountOutlet[]
   documents                OutletDocument[]
   inspections              OutletInspection[]
@@ -2066,7 +2065,6 @@ model Cuisine {
   updatedAt        DateTime       @updatedAt
 
   menuItems      MenuItemCuisine[]
-  outlets        OutletCuisine[]
   //* Kept from the original model and still unused: a single "primary"
   //* category is a real Uber Eats concept, but the vendor form only sets the
   //* multi-select (vendorProfiles) today. Adopt or drop deliberately.
@@ -2158,17 +2156,6 @@ model VendorProfileDietaryTag {
 
   @@id([vendorProfileId, dietaryTagId])
   @@index([dietaryTagId])
-}
-
-model OutletCuisine {
-  outletId  String
-  cuisineId String
-
-  cuisine Cuisine @relation(fields: [cuisineId], references: [id])
-  outlet  Outlet  @relation(fields: [outletId], references: [id], onDelete: Cascade)
-
-  @@id([outletId, cuisineId])
-  @@index([cuisineId])
 }
 
 //* ─── MENU ──────────────────────────────────────────────────────────────────

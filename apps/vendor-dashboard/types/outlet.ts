@@ -52,7 +52,12 @@ export interface Outlet {
   vendorDisabledAt      : string | null
   createdAt             : string
   city                  : { id: string; name: string } | null
-  cuisines              : { cuisine: { id: string; name: string; code: string } }[]
+  /*
+   * DERIVED by the backend from the vendor's profile plus the dishes this
+   * outlet actually sells — no longer the OutletCuisine join, which nothing
+   * ever wrote, so this list was always empty. Flat now, not { cuisine: ... }.
+   */
+  cuisines              : { id: string; name: string; slug: string }[]
   operatingHours        : OperatingHours[]
   _count?               : { meals: number }
   /** Present on the single-outlet detail response (getOutlet). */

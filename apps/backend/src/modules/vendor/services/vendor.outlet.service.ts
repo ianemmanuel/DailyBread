@@ -1,3 +1,5 @@
+import { validateDeliveryRadiusKm } from "@/lib/delivery/radius"
+import { resolveOutletCuisines, flattenCuisineLinks } from "@/lib/menu/cuisines"
 import { prisma, Prisma, OutletReviewStatus, OutletAdminStatus } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
@@ -213,6 +215,14 @@ export async function createOutlet(vendorId: string, input: CreateOutletRequest)
   if (city.countryId !== vendor.countryId) throw new ApiError(400, "City does not belong to your registered country", "CITY_COUNTRY_MISMATCH")
   if (city.status !== "ACTIVE") throw new ApiError(400, "This city is not currently active", "CITY_INACTIVE")
 
+  /*
+   * The radius decides who can see this outlet at all, so a bad value is a
+   * refusal rather than something to coerce. Number("abc") is NaN and
+   * Number("") is 0 — both previously reached Prisma unchallenged.
+   */
+  const radius = validateDeliveryRadiusKm(deliveryRadius)
+  if (!radius.ok) throw new ApiError(400, radius.problem.message, radius.problem.code)
+
   const placement = await resolveOutletPlacement(cityId, latitude, longitude)
   const zoneId = placement?.zoneId ?? null
   const clearanceStatus = await resolveInitialClearance(vendor, cityId)
@@ -238,7 +248,7 @@ export async function createOutlet(vendorId: string, input: CreateOutletRequest)
       phone         : phone          ?? null,
       email         : email          ?? null,
       bio           : bio            ?? null,
-      deliveryRadius: deliveryRadius ?? null,
+      deliveryRadius: radius.km,
       minimumOrderMinor : minimumOrderMinor ?? null,
       deliveryFeeMinor  : deliveryFeeMinor  ?? null,
       isMainOutlet  : existingCount === 0,
@@ -312,6 +322,18 @@ export async function updateOutlet(vendorId: string, outletId: string, input: Up
     }
   }
 
+  /*
+   * Validated on update too, and keyed on `!== undefined` rather than
+   * `!= null`: an explicit null is how a merchant CLEARS the radius back to the
+   * platform default, and the old `!= null` check silently discarded that.
+   */
+  let updatedRadiusKm: number | null = null
+  if (input.deliveryRadius !== undefined) {
+    const radius = validateDeliveryRadiusKm(input.deliveryRadius)
+    if (!radius.ok) throw new ApiError(400, radius.problem.message, radius.problem.code)
+    updatedRadiusKm = radius.km
+  }
+
   const updated = await prisma.outlet.update({
     where: { id: outletId },
     data : {
@@ -323,7 +345,7 @@ export async function updateOutlet(vendorId: string, outletId: string, input: Up
       ...(input.phone          != null ? { phone         : input.phone          } : {}),
       ...(input.email          != null ? { email         : input.email          } : {}),
       ...(input.bio            != null ? { bio           : input.bio            } : {}),
-      ...(input.deliveryRadius != null ? { deliveryRadius: input.deliveryRadius } : {}),
+      ...(input.deliveryRadius !== undefined ? { deliveryRadius: updatedRadiusKm } : {}),
       ...(input.minimumOrderMinor != null ? { minimumOrderMinor: input.minimumOrderMinor } : {}),
       ...(input.deliveryFeeMinor  != null ? { deliveryFeeMinor : input.deliveryFeeMinor  } : {}),
       ...(input.latitude       != null ? { latitude      : input.latitude       } : {}),
@@ -346,9 +368,29 @@ export async function getOutlet(vendorId: string, outletId: string) {
   const outlet = await prisma.outlet.findUnique({
     where  : { id: outletId },
     include: {
-      cuisines      : { include: { cuisine: { select: { id: true, name: true, code: true } } } },
       operatingHours: { orderBy: { dayOfWeek: "asc" } },
       zone          : { select: { id: true, name: true, level: true, operationalStatus: true, status: true } },
+      /*
+       * Cuisines are DERIVED from the vendor's profile plus the dishes this
+       * outlet actually sells. The old `cuisines` include read OutletCuisine,
+       * which nothing ever wrote — so this panel has always rendered an empty
+       * list. See lib/menu/cuisines.ts.
+       */
+      vendor: {
+        select: {
+          vendorProfile: {
+            select: { cuisines: { select: { cuisine: { select: { id: true, name: true, slug: true } } } } },
+          },
+        },
+      },
+      meals: {
+        where : { deletedAt: null },
+        select: {
+          menuItem: {
+            select: { cuisines: { select: { cuisine: { select: { id: true, name: true, slug: true } } } } },
+          },
+        },
+      },
     },
   })
 
@@ -364,7 +406,15 @@ export async function getOutlet(vendorId: string, outletId: string) {
     getOutletMealPlanReadiness(outletId),
   ])
 
-  return { ...outlet, city, goLiveStatus, mealPlanReadiness }
+  // The two raw relations exist only to feed the derivation; they are stripped
+  // so the response keeps the flat `cuisines` shape the page already renders.
+  const { vendor, meals, ...rest } = outlet
+  const cuisines = resolveOutletCuisines({
+    profileCuisines: flattenCuisineLinks(vendor?.vendorProfile?.cuisines),
+    dishCuisines   : meals.flatMap((meal) => flattenCuisineLinks(meal.menuItem.cuisines)),
+  })
+
+  return { ...rest, cuisines, city, goLiveStatus, mealPlanReadiness }
 }
 
 //* Meal-plan eligibility — the single chokepoint a future meal-plan-creation
@@ -570,10 +620,9 @@ export async function listOutlets(vendorId: string, params: ListOutletsParams = 
       orderBy: [{ isMainOutlet: "desc" }, { createdAt: "asc" }],
       skip   : (page - 1) * pageSize,
       take   : pageSize,
-      include: {
-        cuisines: { include: { cuisine: { select: { id: true, name: true, code: true } } } },
-        _count  : { select: { meals: true } },
-      },
+      // No cuisines here: nothing on the list page renders them, and deriving
+      // them per row would mean a menu read for every outlet on the page.
+      include: { _count: { select: { meals: true } } },
     }),
     prisma.outlet.count({ where }),
   ])

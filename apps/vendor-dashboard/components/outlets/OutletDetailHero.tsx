@@ -96,7 +96,7 @@ export function OutletDetailHero({ outlet }: { outlet: Outlet }) {
 
       {outlet.cuisines.length > 0 && (
         <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
-          {outlet.cuisines.map(({ cuisine }) => (
+          {outlet.cuisines.map((cuisine) => (
             <span key={cuisine.id} className="badge-primary">
               <Utensils className="size-2.5" />{cuisine.name}
             </span>

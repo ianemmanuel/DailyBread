@@ -100,7 +100,12 @@ export const handleUpdateOutlet = async (req: Request, res: Response, next: Next
       ...(phone          != null ? { phone          }                             : {}),
       ...(email          != null ? { email          }                             : {}),
       ...(bio            != null ? { bio            }                             : {}),
-      ...(deliveryRadius != null ? { deliveryRadius : Number(deliveryRadius) }    : {}),
+      // Passed through RAW, deliberately. Number("abc") is NaN and Number("")
+      // is 0, so coercing here would destroy the distinction the validator in
+      // lib/delivery/radius.ts needs in order to give a useful message. It also
+      // keys on `!== undefined` so an explicit null still reaches the service
+      // as "clear this back to the default".
+      ...(deliveryRadius !== undefined ? { deliveryRadius }                        : {}),
       ...(minimumOrderMinor != null ? { minimumOrderMinor: Number(minimumOrderMinor) } : {}),
       ...(deliveryFeeMinor  != null ? { deliveryFeeMinor : Number(deliveryFeeMinor)  } : {}),
       ...(latitude       != null ? { latitude       : Number(latitude)       }    : {}),

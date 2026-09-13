@@ -12,6 +12,7 @@
  * A 5-to-7pm offer is RUNNING all week and outside its window most of it.
  */
 
+import { localClock, parseHhMm } from "@/lib/time/localClock"
 import type { DayOfWeek } from "@repo/db"
 
 // ─── Platform guardrails ──────────────────────────────────────────────────────
@@ -139,9 +140,23 @@ export interface DiscountWindow {
  * DAY is matched against the day the window opened, so a Friday 22:00–02:00
  * offer still applies at 01:00 on Saturday.
  */
-export function isWithinWindow(window: DiscountWindow, now: Date): boolean {
-  const minutes = now.getHours() * 60 + now.getMinutes()
-  const today = DAY_ORDER[now.getDay()]!
+export function isWithinWindow(
+  window  : DiscountWindow,
+  now     : Date,
+  /*
+   * The OUTLET's timezone, as an IANA name (City.timezone).
+   *
+   * Optional only so the existing vendor- and admin-facing callers keep their
+   * current behaviour unchanged; every caller that decides what a CUSTOMER is
+   * charged passes it, and should. Omitting it evaluates the window against
+   * the server's own clock, which is correct only when the server sits in the
+   * same zone as the outlet — see lib/time/localClock.ts.
+   */
+  timeZone?: string | null,
+): boolean {
+  const clock = localClock(now, timeZone)
+  const minutes = clock.minutes
+  const today = DAY_ORDER[clock.dayIndex]!
 
   const open = window.startTime ? parseHhMm(window.startTime) : null
   const close = window.endTime ? parseHhMm(window.endTime) : null
@@ -161,7 +176,7 @@ export function isWithinWindow(window: DiscountWindow, now: Date): boolean {
    * would blink off at midnight, which is precisely when it is wanted.
    */
   if (minutes < close) {
-    const yesterday = DAY_ORDER[(now.getDay() + 6) % 7]!
+    const yesterday = DAY_ORDER[(clock.dayIndex + 6) % 7]!
     return matchesDay(window.daysOfWeek, yesterday)
   }
   return matchesDay(window.daysOfWeek, today) && minutes >= open
@@ -171,15 +186,10 @@ function matchesDay(days: DayOfWeek[], day: DayOfWeek): boolean {
   return days.length === 0 || days.includes(day)
 }
 
-/** Returns minutes past midnight, or null when the string is not "HH:mm". */
-export function parseHhMm(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value)
-  if (!match) return null
-  const hours = Number(match[1])
-  const mins = Number(match[2])
-  if (hours > 23 || mins > 59) return null
-  return hours * 60 + mins
-}
+/** Re-exported rather than redefined: the operating-hours reader and this
+ *  window reader must agree on what "17:00" means, and two regexes eventually
+ *  would not. */
+export { parseHhMm }
 
 // ─── Applying it ──────────────────────────────────────────────────────────────
 

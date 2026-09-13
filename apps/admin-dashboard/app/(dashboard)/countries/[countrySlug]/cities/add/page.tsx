@@ -52,7 +52,7 @@ export default async function AddCityPage({ params }: Props) {
         </div>
       </div>
 
-      <CityAddForm countrySlug={country.slug} countryName={country.name} />
+      <CityAddForm countrySlug={country.slug} countryName={country.name} countryTimezones={country.timezones} />
     </div>
   )
 }

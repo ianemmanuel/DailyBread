@@ -5,9 +5,20 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
-  //* Customer module — JWKS-verify only, no backend client needed
+  //* Customer module — JWKS-verify for API auth, plus the Svix secret for the
+  //* signup webhook. No backend Clerk client: nothing server-side ever creates
+  //* or invites a customer, they self-register.
+  //*
+  //* The webhook secret is optional in dev and required in production, the same
+  //* treatment CLERK_ADMIN_INVITE_REDIRECT_URL gets below — the backend has to
+  //* keep booting for everyone working on another module while the Clerk
+  //* customer application is still being wired up. processCustomerClerkWebhook
+  //* throws a clear error if it is missing when a real event arrives, so an
+  //* unset secret fails loudly at the one place it matters rather than silently
+  //* accepting unverified payloads.
   CLERK_CUSTOMER_ISSUER: z.string().url(),
   CLERK_CUSTOMER_JWKS_URL: z.string().url(),
+  CLERK_CUSTOMER_WEBHOOK_SECRET: z.string().min(1).optional(),
 
   //* Vendor module
   CLERK_VENDOR_ISSUER: z.string().url(),
@@ -114,6 +125,13 @@ function loadEnv() {
 
   if (parsed.data.NODE_ENV === "production" && !parsed.data.CLERK_ADMIN_INVITE_REDIRECT_URL) {
     console.error("✗ CLERK_ADMIN_INVITE_REDIRECT_URL is required when NODE_ENV=production")
+    process.exit(1)
+  }
+
+  // In production an unset customer webhook secret means every customer signup
+  // silently fails to reach the database — a worse failure than not booting.
+  if (parsed.data.NODE_ENV === "production" && !parsed.data.CLERK_CUSTOMER_WEBHOOK_SECRET) {
+    console.error("✗ CLERK_CUSTOMER_WEBHOOK_SECRET is required when NODE_ENV=production")
     process.exit(1)
   }
 

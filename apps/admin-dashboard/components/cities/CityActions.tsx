@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { TimezoneCombobox } from "./TimezoneCombobox"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Power, PowerOff, Pencil } from "lucide-react"
@@ -20,6 +21,9 @@ import type { City } from "@repo/types/admin-app"
 
 interface Props {
   city      : Pick<City, "id" | "slug" | "name" | "timezone" | "latitude" | "longitude" | "status">
+  /** Optional: narrows the timezone picker where the caller knows the country.
+   *  Absent simply means the full IANA list, still validated server-side. */
+  countryTimezones?: readonly string[]
   canWrite  : boolean
   /** When set, also busts the country-scoped cities tags (see /countries/[slug]/cities). */
   countryRef?: string
@@ -31,7 +35,7 @@ interface Props {
  * updates (see admin.city.service.ts), so exposing it would just lie to
  * the admin about what changed.
  */
-export function CityActions({ city, canWrite, countryRef }: Props) {
+export function CityActions({ city, canWrite, countryRef, countryTimezones}: Props) {
   const router = useRouter()
   const [editOpen, setEditOpen]     = useState(false)
   const [statusOpen, setStatusOpen] = useState(false)
@@ -203,12 +207,13 @@ export function CityActions({ city, canWrite, countryRef }: Props) {
 
             <div className="space-y-1.5">
               <Label className="text-xs" htmlFor="city-timezone">Timezone *</Label>
-              <Input
-                id="city-timezone"
+              {/* Was a free-text box, which is how a city ended up in another
+                  country's timezone. The backend now refuses one the country
+                  does not use; this stops it being typed. */}
+              <TimezoneCombobox
                 value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-                placeholder="e.g. Africa/Nairobi"
-                className="rounded-xl text-sm"
+                onChange={setTimezone}
+                countryTimezones={countryTimezones}
               />
             </div>
 

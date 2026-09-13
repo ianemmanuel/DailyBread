@@ -106,6 +106,9 @@ export async function getCountriesByStatus(
         code     : true,
         currency : true,
         phoneCode: true,
+        //* Powers the city timezone picker's narrowing (see lib/time/timezone.ts).
+        //* A tiny string[] already on the row — cheaper than a second fetch.
+        timezones: true,
         status   : true,
         createdAt: true,
         region: {

@@ -16,16 +16,20 @@ import { getFieldError } from "@/lib/forms/form-helpers"
 interface Props {
   countrySlug: string
   countryName: string
+  /** Country.timezones — narrows the picker to the zones this country uses. */
+  countryTimezones?: readonly string[]
 }
 
-export function CityAddForm({ countrySlug, countryName }: Props) {
+export function CityAddForm({ countrySlug, countryName, countryTimezones }: Props) {
   const router = useRouter()
   const [formError, setFormError] = useState<string | null>(null)
 
   const form = useForm({
     defaultValues: {
       name     : "",
-      timezone : "",
+      // Pre-selected for a single-zone country (most of them) so the choice
+      // cannot be made wrongly, and usually does not have to be made at all.
+      timezone : countryTimezones?.length === 1 ? countryTimezones[0]! : "",
       latitude : undefined,
       longitude: undefined,
     } as unknown as CreateCityFormValues,
@@ -94,7 +98,7 @@ export function CityAddForm({ countrySlug, countryName }: Props) {
         {(field) => (
           <div className="space-y-1.5">
             <Label className="text-xs">Timezone *</Label>
-            <TimezoneCombobox value={field.state.value} onChange={field.handleChange} />
+            <TimezoneCombobox value={field.state.value} onChange={field.handleChange} countryTimezones={countryTimezones} />
             {field.state.meta.errors.length > 0 && (
               <p className="text-xs text-destructive">{getFieldError(field.state.meta.errors[0])}</p>
             )}

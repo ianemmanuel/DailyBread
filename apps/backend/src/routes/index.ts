@@ -3,6 +3,7 @@ import vendorRoutes from '../modules/vendor/routes'
 import metaRoutes from '@/modules/meta/routes'
 import { vendorAuthChain } from '@/modules/vendor/middlewares'
 import adminRoutes from '../modules/admin/routes'
+import { customerRouter } from '@/modules/customer'
 const router: Router = Router()
 
 
@@ -27,7 +28,12 @@ router.use(
 )
 router.use("/admin", adminRoutes)
 
-// router.use('/customer', customerRoutes)
+// The customer module applies its own auth per sub-router rather than one chain
+// here, because most of it is deliberately PUBLIC — browsing, storefronts and
+// cart pricing all work signed-out, and only the account half requires an
+// identity. Mounting a required chain at this level and exempting routes below
+// it is the shape that eventually leaks.
+router.use('/customer', customerRouter)
 
 
 router.get('/', (req, res) => {

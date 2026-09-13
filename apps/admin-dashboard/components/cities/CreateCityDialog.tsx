@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { TimezoneCombobox } from "./TimezoneCombobox"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Plus, MapPin } from "lucide-react"
@@ -19,12 +20,15 @@ import {
 interface Props {
   countrySlug : string
   countryName : string
+  /** Country.timezones — narrows the picker so a city cannot be given a zone
+   *  its own country does not use. The backend refuses it either way. */
+  countryTimezones?: readonly string[]
   disabled?   : boolean
   disabledHint?: string
 }
 
 /** POST /api/countries/:countrySlug/cities — name + timezone are the only required fields */
-export function CreateCityDialog({ countrySlug, countryName, disabled, disabledHint }: Props) {
+export function CreateCityDialog({ countrySlug, countryName, countryTimezones, disabled, disabledHint }: Props) {
   const router = useRouter()
   const [open, setOpen]         = useState(false)
   const [pending, setPending]   = useState(false)
@@ -32,12 +36,17 @@ export function CreateCityDialog({ countrySlug, countryName, disabled, disabledH
 
   const [name, setName]           = useState("")
   const [code, setCode]           = useState("")
-  const [timezone, setTimezone]   = useState("")
+  /* Pre-selected when the country uses exactly one zone, which is true for most
+   * countries — an admin then never has to make this choice at all, and cannot
+   * make it wrongly. */
+  const [timezone, setTimezone]   = useState(countryTimezones?.length === 1 ? countryTimezones[0]! : "")
   const [latitude, setLatitude]   = useState("")
   const [longitude, setLongitude] = useState("")
 
   function reset() {
-    setName(""); setCode(""); setTimezone(""); setLatitude(""); setLongitude(""); setFormError(null)
+    setName(""); setCode("")
+    setTimezone(countryTimezones?.length === 1 ? countryTimezones[0]! : "")
+    setLatitude(""); setLongitude(""); setFormError(null)
   }
 
   async function submit() {
@@ -109,12 +118,10 @@ export function CreateCityDialog({ countrySlug, countryName, disabled, disabledH
 
             <div className="space-y-1.5">
               <Label className="text-xs" htmlFor="new-city-timezone">Timezone *</Label>
-              <Input
-                id="new-city-timezone"
+              <TimezoneCombobox
                 value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-                placeholder="e.g. Africa/Nairobi"
-                className="rounded-xl text-sm"
+                onChange={setTimezone}
+                countryTimezones={countryTimezones}
               />
             </div>
 

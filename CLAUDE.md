@@ -1349,3 +1349,144 @@ New `DiscountStateBadge` is shared by the list, the offer detail page and the no
 `cursor-pointer` on every link and button in the offer surfaces, and the admin **Stop** button is now destructive-red with white text and lifts on hover. Stopping someone else's promotion is irreversible without a second admin action, so it should not look like the ghost buttons beside it; the lift is the hover affordance that says the thing under the cursor is the button.
 
 **532 backend tests pass** (19 new); both dashboards build.
+
+## Customer module — signup, discovery, storefront, cart pricing (2026-09-13)
+
+The first customer-facing backend. No migration — `ConsumerAccount` and `ConsumerAddress` already existed; everything here reads what the vendor, tax and geography modules own and writes only the consumer's own rows.
+
+**`apps/backend/src/modules/customer`** — `middlewares/`, `controllers/`, `services/`, `routes/v1/`, plus an `index.ts` barrel exporting **resolution only** (`resolveCustomerLocation`, `getOperatingCities`). Mounted at `/api/customer`.
+
+### Clerk signup via the existing ngrok tunnel
+
+`/webhooks/clerk/customer`, a sibling of the vendor path on the same tunnel, using the same `express.raw()` mount (the Svix signature is over the exact bytes). `CLERK_CUSTOMER_WEBHOOK_SECRET` is optional in dev and required in production — the treatment `CLERK_ADMIN_INVITE_REDIRECT_URL` already had, so the backend keeps booting while the Clerk customer app is being wired, and the service throws loudly rather than accepting an unverified payload.
+
+Three deliberate differences from the vendor handler:
+- **`user.updated` IS handled.** A customer's name, email and phone are their own profile and they change them in Clerk. A vendor's are attached to an application an admin reviewed, which is why that handler ignores updates.
+- **`user.deleted` soft-deletes** (`status: DELETED` + `deletedAt`) — the row is referenced by addresses and later by orders.
+- **A re-signup ADOPTS the deleted account.** `ConsumerAccount.email` is unique and a deleted row keeps it, and Clerk issues a *new* clerkId on re-registration — so the plain upsert collides and Svix would retry that failure forever. When the colliding row is DELETED *and* Clerk reports the email VERIFIED, the row is handed to the new identity, so the address book and order history come back with the person. A collision with a LIVE account throws (it should be impossible), and an unverified claim adopts nothing.
+
+### Auth: two chains, because most of this surface is public
+
+`verifyCustomerToken` asserts `app === "customer"` — load-bearing, since `verifyClerkJwt` trusts four issuers. Then:
+- **`customerAuthChain`** (required) for the account and address book.
+- **`attachCustomerContext`** (optional) for browsing — resolves an identity if present, continues anonymously otherwise, and **never rejects**. Uber Eats, DoorDash and Bolt Food all let you browse and build a basket before signing in. The identity is used for exactly one thing: resolving a saved address id.
+
+No module-wide chain on the v1 router with exemptions below it — the exemption list is the thing people forget to update. Each sub-router applies its own.
+
+A verified token with no row yet returns **503 `CUSTOMER_ACCOUNT_PENDING`**, not 401: the webhook has not landed, nothing is wrong with the credentials, and the client should retry rather than bounce someone back to a sign-in they just completed.
+
+### Discovery — zones decide coverage, distance decides the list
+
+**The rule, and the pushback that shaped it.** Serving a customer only from outlets in *their own zone* is wrong and no marketplace does it — a `Zone` is a **capability container**, not a delivery boundary, and it would lose every restaurant across an invisible administrative line. Three separate things have to hold instead:
+1. the **customer's point** is in a zone permitting on-demand listing and operational;
+2. the **outlet** is cleared to sell (its own zone, plus the go-live columns);
+3. the two are **within the outlet's delivery radius**.
+
+Same **city** is the hard boundary (zones are city-scoped; nothing models cross-city delivery).
+
+Copied from Uber Eats beyond that: relevance as the default sort with distance/rating/delivery-time alternatives, cuisine and dietary filters, open-now, free-delivery and has-offer filters, an offer badge, a delivery-time range, and **search across dish names as well as store names** (typing "pizza" should find the place that sells pizza).
+
+**`customer.discovery.ts`** is pure and unit-tested (32 cases): `boundingBox` (a deliberate *superset* — an approximation that were ever too small would silently hide outlets), `effectiveRadiusMeters`, `estimateDelivery`, `isOpenAt`, `relevanceScore`, `sortOutlets`. Relevance weights are explicit and coarse rather than tuned — there is no order history to tune against, and a weighting nobody can explain is worse than one that is merely coarse. **Every sort puts open outlets first**; a rating backed by fewer than 5 reviews counts for nothing; featured placement deliberately cannot beat a much nearer outlet.
+
+**Two-phase query**, because distance cannot be expressed in Prisma without PostGIS and the alternative is the "scan with a page-shaped hole" this codebase already rejected for admin discounts. Phase 1 is a narrow select bounded by a lat/lng box that uses `@@index([latitude, longitude])`, with every SQL-expressible filter applied; distance, the zone check and open-now are then applied in memory and the result sorted and paged. Phase 2 does the expensive read (profile, media, cuisines, signed URLs) for **one page of ids**. `MAX_CANDIDATE_SCAN` (2000) bounds phase 1 honestly; PostGIS + `ST_DWithin` is the named upgrade.
+
+`ServiceabilityStatus` distinguishes **OUTSIDE_COVERAGE / AREA_NOT_LAUNCHED / AREA_PAUSED / CITY_INACTIVE / AREA_NOT_CONFIGURED** rather than returning an empty list. Verified live: a point inside the Nairobi boundary but outside both drawn zones correctly reads `AREA_NOT_LAUNCHED` — the two zones do not tile the city, so most of Nairobi is registration-only today.
+
+City boundaries and zone polygons are cached in-process for 60s (`customer.geo.service.ts`). They are admin-curated and change on the order of weeks, every request needs the whole set to answer "which city is this point in", and a MultiPolygon is a large JSON column. Deliberately NOT invalidated from the admin module — that would couple admin geography writes to this module and would be wrong across instances anyway; the TTL is correct everywhere without coordination.
+
+### Storefront and cart
+
+`customer.visibility.ts` is the ONE definition of what a customer may see, shared by discovery, the storefront and the cart — three copies would drift into a dish you can add to a basket but cannot be charged for. **FLAGGED content is hidden** (the schema says a flagged profile cannot be published, and the vendor dashboard already tells a vendor a flagged dish "is not selling"); flags stay non-blocking for the *vendor*. `Meal.isAvailable` is deliberately NOT a visibility rule — a sold-out dish is shown greyed out with a reason, as both reference platforms do.
+
+An outlet that is suspended, unpublished or in a non-selling zone **404s, never 403s** — the opaque-id rule.
+
+**`customer.cart.service.ts` is the first caller of `lib/pricing/cart.ts`**, written earlier with no caller precisely so the arithmetic could be proven without a database. The cart is **stateless**: the client holds lines and posts them, the server prices from scratch every time. A persisted cross-device cart is storage on top of this same endpoint and belongs with the order model.
+
+Everything a customer can fix — sold out, a missing required choice, below the minimum — comes back in `problems[]` **alongside a fully priced cart**, never as a thrown error. Options arrive flat and are grouped server-side from the menu; accepting the client's grouping is how a "pick one" rule gets bypassed.
+
+**Offers never stack, and this is where it is enforced for a whole basket.** Per-line percentage offers and a basket-level amount-off are costed against each other and the customer gets **whichever is worth more, never both**. A winning basket offer is apportioned back across lines *before* tax, because rates differ per dish. The `MAX_DISCOUNT_BPS` ceiling is re-applied at read time — a ceiling only enforced on the way in is not a ceiling. Commission is computed (priceCart is the one composition function) but **never returned to a customer**.
+
+### Two real bugs found and fixed on the way
+
+**1. Happy-hour windows were evaluated in SERVER local time.** `isWithinWindow` used `now.getHours()`, but a discount window is local to the outlet — the schema says so. On a seven-country platform that shifts every window by the offset between server and outlet. New `lib/time/localClock.ts` is the one place a wall clock is read (`City.timezone` is a required column, so an outlet's local time is always knowable); `isWithinWindow` gained an optional `timeZone` so existing vendor/admin callers are unchanged, and every customer path — where it decides what someone is charged — passes it. Three regression tests pin it. `isOpenAt` reads the same clock, so operating hours and offer windows cannot disagree about what "17:00" means.
+
+**2. P2002 payloads have two shapes, and the app only read one.** Prisma 7 with `@prisma/adapter-pg` nests the violated columns at `meta.driverAdapterError.cause.constraint.fields` and leaves `meta.target` undefined. Found live when the signup webhook's email-collision check silently answered "no". Same latent bug in `errors/PrismaError.ts`, where **every unique-violation message in the whole application said "unknown field"**. New `errors/prismaUnique.ts` reads both shapes; both callers use it.
+
+### Verified
+
+584 backend tests pass (52 new); backend and both dashboards typecheck clean. A 9-step smoke test ran the whole module against the dev database and cleaned up after itself: signed Svix webhooks (create/update/delete, retry-safety, a forged signature refused, unverified adoption refused **by the guard** rather than by a leaked database error), serviceability in and out of coverage, discovery from the doorstep and from 6 km away in another zone, dish-name search, the storefront with `net + tax === gross` exactly (68966 + 11034 = 80000 KES at 16% VAT), cart pricing with three-of-something costing exactly three times one, a forged option id refused, and the full address book. Database left with zero consumer rows, exactly as found.
+
+One assertion initially passed for the WRONG reason — the unverified-adoption test threw because of the leaked Prisma error above, not because the guard fired — so it now asserts on the error's reason, not merely that one was thrown.
+
+**Found in live data, not fixed (admin-owned):** Nairobi's `City.timezone` is `Africa/Addis_Ababa`. Both are UTC+3 so nothing currently misbehaves, but it is wrong.
+
+### Deliberately not done
+- **Orders, checkout, payment.** The named next decision, and the reason discount caps and redemption still do not increment.
+- **Persisted carts** — storage on top of the pricing endpoint, belongs with the order model.
+- **Reviews.** `Outlet.ratings`/`totalReviews` and `VendorProfile.averageRating` are read and displayed but nothing writes them — there is no review model, so every rating shown is currently 0.
+- **Meal plans** on the customer side; `getOutletMealPlanReadiness` is still the ready gate nothing calls.
+- **`OutletCuisine` is dead** — grep-confirmed no writer anywhere, like `ServiceArea` before it. Cuisines come from `VendorProfileCuisine` and `MenuItemCuisine`. A removal candidate, deliberately left alone this pass.
+- **PostGIS.** Named as the upgrade path in `customer.discovery.service.ts` when a market outgrows the 2000-row candidate scan.
+
+## Customer module follow-up — radius, timezone, dead cuisine table (2026-09-13)
+
+A correction-and-hardening pass on the customer module. Migration `20260913120000_drop_outlet_cuisine_and_repair_city_timezones`. **No seed data** — per explicit direction, outlets and meals are entered by hand, so the work was proving that path rather than filling the database.
+
+### Delivery radius is the primary reach, zones are the capability gate
+
+Per explicit product direction. The two answer different questions and both are required:
+
+- **ZONE** — may anyone sell or deliver here at all? An admin decision, drawn as polygons. Neither can substitute for the other: zone-only would give every outlet in Nairobi identical reach, and radius-only would let a merchant opt into an area the platform has not launched.
+- **RADIUS** — how far does *this* outlet send its own food? A merchant decision, already on the outlet form.
+
+**Correction to the previous pass's note**: `Outlet.deliveryRadius` is NOT unwritten. Both the create and update vendor forms have had a "Delivery Radius (km)" field all along, and the live outlet carries 5 km. The comment claiming otherwise was wrong and is gone.
+
+What WAS missing is validation. `createOutlet` wrote `deliveryRadius ?? null` unchecked and the update controller coerced with `Number(...)`, so `"abc"` became NaN and `""` became 0 — a zero radius making the outlet invisible from its own doorstep. New **`lib/delivery/radius.ts`** (pure, 15 tests) is the single home for the numbers, in `lib/` because the vendor module validates them and the customer module enforces them and the two must not import each other:
+- `validateDeliveryRadiusKm` — refuses NaN, zero, negative and anything over 30 km; **blank/null is allowed** and means "use the platform default", because a merchant who has not decided should not be blocked or silently pinned to a number they never typed. Zero is refused rather than read as "default": it is a specific, wrong statement.
+- `effectiveRadiusMeters` — **clamps** a stored value rather than trusting it, so a row written before validation existed cannot widen an outlet's reach. A ceiling only enforced on the way in is not a ceiling, the same rule `MAX_DISCOUNT_BPS` follows.
+
+The update path now keys on `!== undefined` rather than `!= null`, so an explicit null CLEARS the radius back to the default — the old check silently discarded that.
+
+Uber Eats and DoorDash ultimately derive range from travel *time*, which is the eventual upgrade; it needs a routing provider and real courier timings, neither of which exists. A merchant-set radius is the honest version of the same idea.
+
+### City timezones — repaired, and the mistake made unrepeatable
+
+**Both** Kenyan cities were `Africa/Addis_Ababa`, not just Nairobi. Nothing visibly misbehaved because it is also UTC+3 — which is exactly what makes the class dangerous: the same slip between countries on different offsets silently shifts every operating-hours and happy-hour window in a market, with nothing on screen to show it.
+
+Cause, found by reading rather than guessing: the backend validated the timezone **not at all**, and of the three admin city forms only one used the searchable picker — the other two were **free-text inputs**.
+
+- **`lib/time/timezone.ts`** (pure, 16 tests) — `validateCityTimezone` requires a real IANA zone that is one of the country's own. `Country.timezones` is seeded for all 193 countries, so there is a free authority; an empty list reads as "no opinion" rather than "nothing allowed", so a country without seeded zones never becomes unable to add cities.
+- Deliberately **stricter than "Intl can parse it"**, and both extra cases were verified against this runtime rather than assumed: Intl also accepts a raw offset (`+03:00` — not a place, no DST rule, so a city pinned to one drifts twice a year) and a legacy abbreviation (`EAT`, `CST` — ambiguous by construction). The canonical list is the definition, plus an explicit alias set holding `UTC`, which `Intl.supportedValuesOf` omits even though `localClock` falls back to exactly that string.
+- Wired into `createCity` **and** `updateCity` — an edit is the other way a wrong zone gets in, and the one that reaches an already-live market.
+- Frontend: `CreateCityDialog` and `CityActions` converted from free text to the picker; `TimezoneCombobox` now takes `countryTimezones` and shows only those, with a visible "show all instead" escape hatch for genuinely multi-zone territories. A single-zone country (most of them) is **pre-selected**, so an admin usually makes no choice at all and cannot make it wrongly. `CountrySummaryResult` gained `timezones` to feed it.
+- The migration repairs existing rows, but **only where the answer is unambiguous** (the country uses exactly one zone). A multi-zone country cannot be guessed from a migration; those are left for the new validation to catch on the next edit rather than inventing a location.
+
+### `OutletCuisine` dropped, cuisines derived instead
+
+**Correction to the previous pass**: it was not "zero references". It had zero *writers* and **two reads** — `getOutlet` and `listOutlets` both included it, and `OutletDetailHero` rendered it, so a vendor-facing panel had always shown an empty list. The earlier grep missed them because the relation field is `cuisines`, not `outletCuisine`. The type-checker found them the moment the model was removed. Same shape as `Outlet.serviceMode`: a consumer reading a value that never reflected reality.
+
+Dropped (0 rows), and replaced with a derivation in **`lib/menu/cuisines.ts`** — the union of the vendor's profile cuisines and the cuisines of the dishes an outlet actually sells, deduplicated and name-ordered so two outlets of one vendor never list the same tags in a different order. Better than the stored tag it replaces:
+- it cannot go stale;
+- it is correct **per outlet** — a vendor whose Westlands branch sells pizza and whose coast branch sells seafood gets two honest lists, which a vendor-level tag can never express;
+- it needs no new vendor UI, so nobody maintains a third place saying what they cook.
+
+Uber Eats shows category tags on a store card; this produces the same thing from data that is already true. Used by both the customer discovery card and the vendor outlet page. `listOutlets` simply dropped the include — nothing renders cuisines on that list, and deriving per row would mean a menu read per outlet.
+
+### Both earlier bugs re-verified
+
+- **P2002 shape** — `errors/prismaUnique.test.ts` (12 cases) pins both payload shapes, including the driver-adapter nesting that was missed and the index-name form, and asserts `"mail"` does not match `"email"`.
+- **Timezone-aware discount windows** — unchanged from the previous pass, still covered by three regression tests, and now additionally exercised live.
+
+### Verified
+
+622 backend tests pass (38 new); backend and both dashboards typecheck clean.
+
+A second smoke test answers the actual question — *does manual entry work?* — by driving the **real vendor service functions the dashboard calls**, then deleting everything:
+- the wrong timezone is now refused with a message naming the right answer (*"Cities in Kenya use Africa/Nairobi, not Africa/Addis_Ababa."*) and the refused edit changes nothing;
+- four bad delivery radii (`"abc"`, 0, −5, 500) each refused;
+- a new outlet created at 6 km radius, resolved into the Karen zone by point-in-polygon, cleared to serve;
+- a new dish created and screened clean;
+- a customer standing nearby finds it, at its own fee and minimum, **with cuisines derived from the dish and no OutletCuisine row**, findable by searching the dish name, and correctly **absent** from beyond its 6 km radius;
+- the storefront prices it with VAT resolved, and a basket of two totals exactly, delivery on top.
+
+Both smoke tests sweep strays from any aborted earlier run before starting, and the database is left at its original 1 outlet / 1 dish / 0 consumers.

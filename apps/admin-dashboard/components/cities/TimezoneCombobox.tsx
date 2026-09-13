@@ -21,6 +21,19 @@ import { cn } from "@repo/ui/lib/utils"
 interface Props {
   value   : string
   onChange: (value: string) => void
+  /*
+   * The timezones this city's COUNTRY actually uses (Country.timezones, seeded
+   * for all 193 countries).
+   *
+   * Offering all ~420 IANA zones alphabetically is how both Kenyan cities ended
+   * up on Africa/Addis_Ababa — one careless click, and nothing visibly broke
+   * because it is also UTC+3. The backend now refuses a timezone outside the
+   * country's own list; this stops it being offered in the first place.
+   *
+   * Omit or pass an empty list to fall back to every zone — a country with no
+   * seeded timezones must not become unable to add cities.
+   */
+  countryTimezones?: readonly string[]
 }
 
 // Intl.supportedValuesOf("timeZone") — the IANA tz database baked into the
@@ -40,12 +53,17 @@ function formatOffset(tz: string): string {
 }
 
 /** Searchable timezone dropdown — backed by the platform's own IANA tz data. */
-export function TimezoneCombobox({ value, onChange }: Props) {
+export function TimezoneCombobox({ value, onChange, countryTimezones }: Props) {
   const [open, setOpen] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+
+  const scoped = countryTimezones?.filter((tz) => ALL_TIMEZONES.includes(tz)) ?? []
+  const narrowed = scoped.length > 0 && !showAll
 
   const options = useMemo(
-    () => ALL_TIMEZONES.map((tz) => ({ tz, label: tz.replace(/_/g, " "), offset: formatOffset(tz) })),
-    [],
+    () => (narrowed ? scoped : ALL_TIMEZONES)
+      .map((tz) => ({ tz, label: tz.replace(/_/g, " "), offset: formatOffset(tz) })),
+    [narrowed, scoped.join(",")],
   )
 
   return (
@@ -91,6 +109,24 @@ export function TimezoneCombobox({ value, onChange }: Props) {
               ))}
             </CommandGroup>
           </CommandList>
+
+          {/* The escape hatch. A country's seeded zone list can be incomplete
+              for a genuinely multi-zone territory, so an admin is never hard
+              blocked — but the default is the correct short list, and choosing
+              outside it is now a deliberate act. The backend still refuses
+              anything the country does not use. */}
+          {scoped.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll((v) => !v)}
+              className="w-full cursor-pointer border-t px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+              style={{ borderColor: "var(--border)" }}
+            >
+              {narrowed
+                ? `Showing the ${scoped.length === 1 ? "timezone" : `${scoped.length} timezones`} used in this country — show all instead`
+                : "Show only this country's timezones"}
+            </button>
+          )}
         </Command>
       </PopoverContent>
     </Popover>
