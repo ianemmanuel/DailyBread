@@ -28,6 +28,11 @@
       "import": "./src/frontend/vendor.ts",
       "require": "./src/frontend/vendor.ts"
     },
+    "./customer-app": {
+      "types": "./src/frontend/customer.ts",
+      "import": "./src/frontend/customer.ts",
+      "require": "./src/frontend/customer.ts"
+    },
     "./admin-app": {
       "types": "./src/frontend/admin.ts",
       "import": "./src/frontend/admin.ts",
