@@ -8,11 +8,11 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
-} from "@repo/ui/components/alert-dialog"
-import { Textarea } from "@repo/ui/components/textarea"
+} from "@/components/ui/alert-dialog"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import type { AdminPayoutAccountDetail } from "@repo/types/admin-app"
 
 /*

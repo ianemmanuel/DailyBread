@@ -4,15 +4,15 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Plus, Pencil, ArrowDownToLine, ArrowUpFromLine } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
-import { Input } from "@repo/ui/components/input"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter,
-} from "@repo/ui/components/sheet"
+} from "@/components/ui/sheet"
 import type { PaymentMethod, PaymentDirection, CountryPaymentMethodConfig } from "@/types"
 
 interface Props {

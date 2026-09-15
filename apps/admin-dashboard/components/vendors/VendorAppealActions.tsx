@@ -5,16 +5,16 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Loader2, UserCheck, Flag, UserCog, Gavel, ArrowUpRight } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
-import { Textarea } from "@repo/ui/components/textarea"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -22,7 +22,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import { useAdminSession } from "@/providers/admin-session-provider"
 import { AdminPermissions } from "@repo/types/admin-app"
 import type { VendorAppeal, EligibleReviewer } from "@/types"

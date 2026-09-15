@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
-import { cn } from '@repo/ui/lib/utils'
+import { cn } from '@/lib/utils'
 import { NavItem, isNavActive } from '@/utils/constants/nav-links'
 
 interface SidebarDropdownProps {

@@ -4,7 +4,7 @@ import Link from "next/link"
 import { ClipboardCheck, CalendarClock, Clock, XCircle } from "lucide-react"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@repo/ui/components/table"
+} from "@/components/ui/table"
 import { adminFetch } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { getFilterableCountries } from "@/lib/countries/filterable-countries"

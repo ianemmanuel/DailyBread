@@ -2,14 +2,14 @@
 
 import { Bell, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
-import { Button } from '@repo/ui/components/button'
+import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@repo/ui/components/dropdown-menu'
-import { cn } from '@repo/ui/lib/utils'
+} from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
 
 const notifications = [
   {

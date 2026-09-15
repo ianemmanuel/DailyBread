@@ -38,3 +38,10 @@ yarn-error.log*
 *.pem
 
 packages/database/generated
+# Compiler emit must never land next to sources. packages/ui once built with
+# `tsc -b` and no outDir, which littered src/ with .js/.d.ts/.d.ts.map — and a
+# sweep of those strays is what deleted the shared component library in 30facf5.
+*.tsbuildinfo
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map

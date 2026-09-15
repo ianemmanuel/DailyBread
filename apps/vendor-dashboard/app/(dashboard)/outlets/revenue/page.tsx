@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { ChevronLeft } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import { PageGrid } from "@/components/dashboard/layout/DashboardShell"
 import { PageHeader } from "@/components/dashboard/layout/PageHeader"
 import { ComingSoon } from "@/components/dashboard/layout/ComingSoon"

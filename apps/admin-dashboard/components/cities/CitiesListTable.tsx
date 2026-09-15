@@ -7,7 +7,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
+} from "@/components/ui/table"
 import { EmptyState } from "@/components/shared/EmptyState"
 import { CityActions } from "@/components/cities/CityActions"
 import { TablePagination } from "@/components/shared/TablePagination"

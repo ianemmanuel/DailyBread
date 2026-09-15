@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, CheckCircle2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 
 interface Props {
   documentTypeId: string

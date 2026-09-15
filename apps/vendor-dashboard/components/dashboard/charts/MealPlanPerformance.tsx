@@ -4,8 +4,8 @@ import { TrendingUp, Users } from 'lucide-react'
 import { Label, PolarGrid, PolarRadiusAxis, RadialBar, RadialBarChart } from 'recharts'
 import {
   Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
-} from '@repo/ui/components/card'
-import { ChartConfig, ChartContainer } from '@repo/ui/components/chart'
+} from '@/components/ui/card'
+import { ChartConfig, ChartContainer } from '@/components/ui/chart'
 
 const chartData = [{ metric: 'adoption', value: 68, fill: 'var(--chart-1)' }]
 

@@ -3,12 +3,12 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { ColumnDef, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@repo/ui/components/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@repo/ui/components/table'
-import { Button } from '@repo/ui/components/button'
-import { Avatar, AvatarFallback, AvatarImage } from '@repo/ui/components/avatar'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ArrowUpRight, TrendingUp, TrendingDown, Utensils } from 'lucide-react'
-import { cn } from '@repo/ui/lib/utils'
+import { cn } from '@/lib/utils'
 
 export type Meal = {
   id: string

@@ -5,14 +5,14 @@ import { Area, AreaChart, CartesianGrid, XAxis } from 'recharts'
 import { TrendingUp, TrendingDown, Banknote } from 'lucide-react'
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from '@repo/ui/components/card'
+} from '@/components/ui/card'
 import {
   ChartConfig, ChartContainer, ChartLegend, ChartLegendContent,
   ChartTooltip, ChartTooltipContent,
-} from '@repo/ui/components/chart'
+} from '@/components/ui/chart'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@repo/ui/components/select'
+} from '@/components/ui/select'
 
 const chartData = [
   { date: '2024-01-01', revenue: 4000,  orders: 2400 },

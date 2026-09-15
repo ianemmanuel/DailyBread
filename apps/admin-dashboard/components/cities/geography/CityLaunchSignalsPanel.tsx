@@ -4,17 +4,17 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Plus, TrendingUp, Store, Users, ChevronDown, ChevronRight, Check, X } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
-import { Textarea } from "@repo/ui/components/textarea"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import type {
   CityMarketSignalSummary, MarketSignal, MarketSignalType, MarketSignalStatus,
 } from "@repo/types/admin-app"

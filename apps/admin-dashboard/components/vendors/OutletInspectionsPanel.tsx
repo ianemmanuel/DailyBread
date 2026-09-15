@@ -6,14 +6,14 @@ import { toast } from "sonner"
 import {
   Loader2, ClipboardCheck, CheckCircle2, XCircle, Clock, CalendarClock, Ban, ShieldOff, Camera, X,
 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Textarea } from "@repo/ui/components/textarea"
-import { Label } from "@repo/ui/components/label"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import type { OutletInspectionRow, OutletInspectionStatus } from "@/types"
 
 const STATUS: Record<OutletInspectionStatus, { label: string; cls: string; icon: typeof Clock }> = {

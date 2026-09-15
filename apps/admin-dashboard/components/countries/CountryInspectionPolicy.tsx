@@ -4,10 +4,10 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, ClipboardCheck } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 
 type Policy = "NONE" | "MEAL_PLAN_ONLY" | "ALL"
 

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { Bell } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 
 // Polled, not real-time — same "subtle glow, not a live counter" convention
 // as the sidebar's compliance dot (see SidebarNav.tsx). A 60s interval is

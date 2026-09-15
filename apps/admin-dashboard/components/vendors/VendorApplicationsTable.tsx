@@ -1,6 +1,6 @@
 import Link                      from "next/link"
 import { ArrowUpDown, ArrowUp, ArrowDown, ArrowRight, Inbox } from "lucide-react"
-import { Button }                from "@repo/ui/components/button"
+import { Button }                from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -8,7 +8,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
+} from "@/components/ui/table"
 import { VendorApplicationStatusBadge } from "@/components/vendors/VendorApplicationStatusBadge"
 import { EmptyState } from "@/components/shared/EmptyState"
 import { TablePagination } from "@/components/shared/TablePagination"

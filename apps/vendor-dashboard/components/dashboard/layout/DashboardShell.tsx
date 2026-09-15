@@ -23,7 +23,7 @@
   ─────────────────────────────────────────────────────────────────
 */
 
-import { cn } from '@repo/ui/lib/utils'
+import { cn } from '@/lib/utils'
 
 // ── PageGrid ──────────────────────────────────────────────────────
 // Vertical stack for an entire page. Consistent gap between sections.

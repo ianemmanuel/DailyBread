@@ -4,11 +4,11 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Plus, Pencil } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
-import { Input } from "@repo/ui/components/input"
-import { Textarea } from "@repo/ui/components/textarea"
-import { Checkbox } from "@repo/ui/components/checkbox"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Sheet,
   SheetContent,
@@ -16,7 +16,7 @@ import {
   SheetTitle,
   SheetDescription,
   SheetFooter,
-} from "@repo/ui/components/sheet"
+} from "@/components/ui/sheet"
 import {
   PAYMENT_PROVIDER_CAPABILITIES,
   type PaymentProvider,

@@ -4,7 +4,7 @@ import { useTransition } from "react"
 import { useRouter }     from "next/navigation"
 import { toast }         from "sonner"
 import { Mail }          from "lucide-react"
-import { Button }        from "@repo/ui/components/button"
+import { Button }        from "@/components/ui/button"
 
 interface Props {
   userId    : string

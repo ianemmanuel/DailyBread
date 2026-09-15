@@ -5,18 +5,18 @@ import { useRouter } from "next/navigation"
 import { useForm } from "@tanstack/react-form"
 import { toast } from "sonner"
 import { Loader2, Plus } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
-import { Input } from "@repo/ui/components/input"
-import { Textarea } from "@repo/ui/components/textarea"
-import { Checkbox } from "@repo/ui/components/checkbox"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import {
   Sheet,
   SheetContent,
@@ -25,7 +25,7 @@ import {
   SheetDescription,
   SheetFooter,
   SheetTrigger,
-} from "@repo/ui/components/sheet"
+} from "@/components/ui/sheet"
 import {
   documentTypeBaseSchema,
   documentTypeCreateSchema,

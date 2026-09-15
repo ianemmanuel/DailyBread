@@ -1,98 +1,90 @@
 import type { Metadata, Viewport } from "next"
-import { ClerkProvider } from "@clerk/nextjs"
 import { Inter, Playfair_Display } from "next/font/google"
-import { Toaster } from "@repo/ui/components/sonner"
-import { Providers } from "./providers"
-import { SiteHeader } from "@/components/layout/SiteHeader"
-import { SiteFooter } from "@/components/layout/SiteFooter"
-import { getStoredLocation } from "@/lib/location/cookie"
-import { isSignedIn } from "@/lib/api/server"
-import "@/app/globals.css"
+import { Navbar } from "@/components/layout/Navbar"
+import { ClerkProvider } from "@clerk/nextjs"
+import "./globals.css"
 
-/*
- * Same two faces as the rest of the platform — Playfair for display, Inter for
- * everything else — so a customer who later opens the vendor dashboard meets
- * the same product. Deliberately no mono face here: nothing on a storefront is
- * a code value, and a third font is a third download.
- */
 const inter = Inter({
   subsets : ["latin"],
   variable: "--font-inter",
-  weight  : ["400", "500", "600", "700"],
   display : "swap",
 })
 
 const playfair = Playfair_Display({
   subsets : ["latin"],
   variable: "--font-playfair",
-  weight  : ["500", "600", "700"],
   display : "swap",
 })
 
+/*
+ * metadataBase resolves relative Open Graph and canonical URLs to absolute
+ * ones. Without it a share card's image quietly fails to resolve in production
+ * — the kind of bug nobody notices until a link is posted somewhere public.
+ */
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL!
+
 export const metadata: Metadata = {
-  title: {
-    default : "DailyBread | Meal delivery",
-    template : "%s | DailyBread",
+  metadataBase: new URL(siteUrl),
+  title       : {
+    default : "DailyBread — Good food, right when you want it",
+    template: "%s | DailyBread",
   },
-  description: "Order Meals from the best restaurants and commercial kitchens near you, and eat well today.",
+  description : "Discover meals from great local kitchens and restaurants near you, delivered to your door.",
+  openGraph   : {
+    type    : "website",
+    siteName: "DailyBread",
+    locale  : "en",
+  },
 }
 
 export const viewport: Viewport = {
-  themeColor: "#fdf8f1",
-  width     : "device-width",
+  // Matches --background, so the browser chrome blends into the page on mobile.
+  themeColor  : "#faf7f3",
+  width       : "device-width",
   initialScale: 1,
   // Deliberately zoomable. Pinning maximumScale is an accessibility failure on
   // a page whose whole job is small text over photographs.
 }
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  /*
-   * Both read on the server so the header renders its final state in the first
-   * paint — no flash of "Set your location" for someone who already has one,
-   * and no flash of a signed-out header for someone who is signed in.
-   */
-  const [location, signedIn] = await Promise.all([getStoredLocation(), isSignedIn()])
 
+
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>){
   return (
-    <ClerkProvider
-      appearance={{
-        variables: {
-          colorPrimary        : "var(--primary)",
-          colorBackground     : "var(--card)",
-          colorText           : "var(--foreground)",
-          colorTextSecondary  : "var(--muted-foreground)",
-          colorInputBackground: "var(--input)",
-          colorInputText      : "var(--foreground)",
-          colorDanger         : "var(--destructive)",
-          borderRadius        : "var(--radius-md)",
-          fontFamily          : "var(--font-inter)",
-        },
-        elements: {
-          // Clerk's own OS-level colour-scheme detection would otherwise leave
-          // these looking transparent; this app is light-only.
-          socialButtonsBlockButton: "bg-card border border-border shadow-xs",
-          dividerLine             : "bg-border",
-        },
-      }}
+    <html
+      lang="en"
+      className={`${inter.variable} ${playfair.variable}`}
+      suppressHydrationWarning
     >
-      <html
-        lang="en"
-        className={`${inter.variable} ${playfair.variable}`}
-        // Browser extensions routinely add attributes to <html> before React
-        // hydrates. Suppresses that one element only — nothing below it.
-        suppressHydrationWarning
-      >
-        <body className="font-sans antialiased">
-          <Providers>
-            <div className="flex min-h-dvh flex-col">
-              <SiteHeader location={location} signedIn={signedIn} />
-              <main className="flex-1">{children}</main>
-              <SiteFooter />
-            </div>
-            <Toaster position="top-center" richColors closeButton duration={4000} />
-          </Providers>
-        </body>
-      </html>
-    </ClerkProvider>
+      <body className="flex min-h-dvh flex-col bg-background font-sans text-foreground antialiased">
+        {/*
+          * Deliberately NOT `dynamic`. ClerkProvider renders statically by
+          * default, which is what keeps `/` a static route — passing `dynamic`
+          * resolves auth on the server and opts EVERY route into dynamic
+          * rendering. AuthActions explains the trade.
+          *
+          * Colours are literal hex, not var(--token): Clerk parses each one to
+          * derive its own shades and alpha variants, and cannot do that with an
+          * unresolved custom property. They mirror globals.css and must be
+          * updated alongside it.
+          */}
+        <ClerkProvider>
+          {/* A same-page fragment jump — the one thing a raw anchor is still the
+            right element for, since next/link would route for what the browser
+            already does natively. Invisible until focused. */}
+          <a
+            href="#main"
+            className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-60 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
+          >
+            Skip to content
+          </a>
+
+          <Navbar />
+
+          <main id="main" className="flex-1">
+            {children}
+          </main>
+        </ClerkProvider>
+      </body>
+    </html>
   )
 }

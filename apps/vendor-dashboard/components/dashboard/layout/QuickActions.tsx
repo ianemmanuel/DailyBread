@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { Utensils, Calendar, Tag, Cake, ArrowRight } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@repo/ui/components/card'
-import { cn } from '@repo/ui/lib/utils'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 
 const quickActions = [
   {

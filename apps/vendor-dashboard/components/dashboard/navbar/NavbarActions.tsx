@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { Button } from '@repo/ui/components/button'
+import { Button } from '@/components/ui/button'
 import { Plus, CalendarDays } from 'lucide-react'
 
 export function NavbarActions() {

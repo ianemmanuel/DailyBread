@@ -3,7 +3,7 @@
 import { useTransition } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Globe2 } from "lucide-react"
-import { Label } from "@repo/ui/components/label"
+import { Label } from "@/components/ui/label"
 import { SearchableSelect } from "@/components/shared/SearchableSelect"
 
 /**

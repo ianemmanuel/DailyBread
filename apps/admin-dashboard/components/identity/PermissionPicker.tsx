@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Checkbox }                    from "@repo/ui/components/checkbox"
-import { Label }                       from "@repo/ui/components/label"
+import { Checkbox }                    from "@/components/ui/checkbox"
+import { Label }                       from "@/components/ui/label"
 import { AdminPermission } from "@/types"
 
 

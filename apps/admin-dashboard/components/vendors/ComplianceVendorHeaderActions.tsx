@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, UserCheck, Bell } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import type { ClaimAllComplianceResult } from "@/types"
 
 interface Props {

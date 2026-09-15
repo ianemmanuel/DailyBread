@@ -4,11 +4,11 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Globe2 } from "lucide-react"
-import { Switch } from "@repo/ui/components/switch"
+import { Switch } from "@/components/ui/switch"
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import type { FoodTagKind } from "@/types/food-tag.types"
 
 /*

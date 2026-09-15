@@ -2,13 +2,13 @@
 
 import { Menu } from 'lucide-react'
 import Link from 'next/link'
-import { Button } from '@repo/ui/components/button'
+import { Button } from '@/components/ui/button'
 import {
   Sheet,
   SheetContent,
   SheetTrigger,
   SheetTitle,
-} from '@repo/ui/components/sheet'
+} from '@/components/ui/sheet'
 import { SidebarNav } from './SidebarNav'
 
 export function MobileSidebarSheet() {

@@ -3,16 +3,16 @@
 import { useState } from "react"
 import { useRouter }          from "next/navigation"
 import { MoreHorizontal, Mail, Eye, Ban, RefreshCw, UserX, Loader2 } from "lucide-react"
-import { Button }             from "@repo/ui/components/button"
-import { Textarea }           from "@repo/ui/components/textarea"
-import { Label }              from "@repo/ui/components/label"
+import { Button }             from "@/components/ui/button"
+import { Textarea }           from "@/components/ui/textarea"
+import { Label }              from "@/components/ui/label"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
+} from "@/components/ui/dropdown-menu"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -20,7 +20,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
 
 interface User {

@@ -4,7 +4,7 @@ import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { useClerk, useUser } from "@clerk/nextjs"
 import { ShieldAlert, Clock, Ban, HelpCircle } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 
 const REASONS: Record<string, { icon: typeof ShieldAlert; title: string; description: string }> = {
   ADMIN_USER_NOT_FOUND: {

@@ -13,8 +13,8 @@ import {
   CheckCircle2,
   XCircle,
 } from "lucide-react"
-import { Button }              from "@repo/ui/components/button"
-import { TableCell, TableRow } from "@repo/ui/components/table"
+import { Button }              from "@/components/ui/button"
+import { TableCell, TableRow } from "@/components/ui/table"
 import { DocumentStatus }      from "@repo/types/admin-app"
 import type { Doc, ViewerState } from "@/types/vendor.types"
 

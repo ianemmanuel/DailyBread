@@ -4,17 +4,17 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useForm } from "@tanstack/react-form"
 import { toast } from "sonner"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
-import { Textarea } from "@repo/ui/components/textarea"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   CardDescription,
-} from "@repo/ui/components/card"
+} from "@/components/ui/card"
 import {
   Loader2,
   MapPin,

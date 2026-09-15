@@ -4,14 +4,14 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Ban, Undo2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Textarea } from "@repo/ui/components/textarea"
-import { Label } from "@repo/ui/components/label"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 
 /*
  * Oversight, not authoring.

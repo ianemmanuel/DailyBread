@@ -4,15 +4,15 @@ import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Globe2, Plus, X } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import { SearchableSelect } from "@/components/shared/SearchableSelect"
 import {
   AlertDialog,
@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import { EmptyState } from "@/components/shared/EmptyState"
 import type { CountryLite, VendorTypeCountryLink } from "@/types/vendor-type.types"
 

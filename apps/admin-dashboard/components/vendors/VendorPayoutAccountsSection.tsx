@@ -4,9 +4,9 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, ShieldCheck, ShieldX, Landmark, Star, AlertTriangle, PauseCircle, PlayCircle } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
-import { Textarea } from "@repo/ui/components/textarea"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -14,7 +14,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import { EmptyState } from "@/components/shared/EmptyState"
 import type { VendorPayoutAccount, PayoutRiskFlag, PayoutHoldStatus } from "@/types"
 

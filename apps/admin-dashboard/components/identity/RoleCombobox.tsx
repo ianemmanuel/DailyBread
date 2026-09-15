@@ -2,7 +2,7 @@
 
 import { useState }    from "react"
 import { Check, ChevronsUpDown } from "lucide-react"
-import { Button }      from "@repo/ui/components/button"
+import { Button }      from "@/components/ui/button"
 import {
   Command,
   CommandEmpty,
@@ -10,13 +10,13 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@repo/ui/components/command"
+} from "@/components/ui/command"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@repo/ui/components/popover"
-import { cn } from "@repo/ui/lib/utils"
+} from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 import type { AdminRole } from "@/types"
 
 interface Props {
