@@ -5,10 +5,10 @@ import { TimezoneCombobox } from "./TimezoneCombobox"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Power, PowerOff, Pencil } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
-import { Textarea } from "@repo/ui/components/textarea"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -16,7 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import type { City } from "@repo/types/admin-app"
 
 interface Props {

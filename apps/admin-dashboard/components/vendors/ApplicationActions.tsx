@@ -8,17 +8,17 @@ import {
   CheckCircle2, XCircle, AlertTriangle, Clock, Loader2,
   UserCheck, UserX, ArrowRightLeft, TriangleAlert,
 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
-import { Input } from "@repo/ui/components/input"
-import { Textarea } from "@repo/ui/components/textarea"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -26,7 +26,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import {
   rejectApplicationSchema,
   needsRevisionSchema,

@@ -9,8 +9,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
-import { Button } from "@repo/ui/components/button"
+} from "@/components/ui/table"
+import { Button } from "@/components/ui/button"
 import { adminFetch } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { getFilterableCountries } from "@/lib/countries/filterable-countries"

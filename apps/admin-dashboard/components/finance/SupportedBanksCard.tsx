@@ -3,10 +3,10 @@
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Loader2, Landmark, Building2, CheckCircle2, ChevronDown } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import {
   PaymentProviderCapability,
   type CountryProviderAccount,

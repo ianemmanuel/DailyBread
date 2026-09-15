@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Badge } from "@repo/ui/components/badge"
+import { Badge } from "@/components/ui/badge"
 import { TaxCategoryActions } from "./TaxCategoryActions"
 import type { TaxCategory } from "@/types/tax.types"
 

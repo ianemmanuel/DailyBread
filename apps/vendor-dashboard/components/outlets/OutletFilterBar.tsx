@@ -3,10 +3,10 @@
 import * as React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Search, X } from "lucide-react"
-import { Input } from "@repo/ui/components/input"
+import { Input } from "@/components/ui/input"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 
 /*
  * Search / status / city filters for the outlets list.

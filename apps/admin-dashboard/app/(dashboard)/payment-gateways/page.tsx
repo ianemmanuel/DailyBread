@@ -8,7 +8,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
+} from "@/components/ui/table"
 import { adminFetch } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { TableFilterBar, type FilterStatusOption } from "@/components/shared/TableFilterBar"

@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { Calculator } from "lucide-react"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { formatRateBps, type CountryTaxSettings } from "@/types/tax.types"
 
 /*

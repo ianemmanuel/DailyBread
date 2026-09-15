@@ -4,7 +4,7 @@ import * as React from "react"
 import { FileText, ExternalLink } from "lucide-react"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger,
-} from "@repo/ui/components/sheet"
+} from "@/components/ui/sheet"
 import type { AdminPayoutProofDocument } from "@repo/types/admin-app"
 
 /*

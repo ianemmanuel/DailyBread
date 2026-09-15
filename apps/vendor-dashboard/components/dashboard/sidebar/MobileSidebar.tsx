@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { Menu } from 'lucide-react'
-import { Button } from '@repo/ui/components/button'
+import { Button } from '@/components/ui/button'
 
 /*
  * The burger renders immediately; the Radix Sheet behind it mounts after

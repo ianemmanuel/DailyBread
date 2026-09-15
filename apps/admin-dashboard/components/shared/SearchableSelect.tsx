@@ -3,12 +3,12 @@
 import type { ComponentType } from "react"
 import { useState } from "react"
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
-} from "@repo/ui/components/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@repo/ui/components/popover"
-import { cn } from "@repo/ui/lib/utils"
+} from "@/components/ui/command"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 
 /**
  * The one searchable select in this app — a shadcn Command inside a Popover.

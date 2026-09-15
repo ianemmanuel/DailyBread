@@ -6,7 +6,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
+} from "@/components/ui/table"
 import { DocumentRow } from "@/components/vendors/DocumentRow"
 import type { Doc } from "@/types/vendor.types"
 

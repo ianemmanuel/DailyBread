@@ -5,9 +5,9 @@ import { TimezoneCombobox } from "./TimezoneCombobox"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Plus, MapPin } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 
 interface Props {
   countrySlug : string

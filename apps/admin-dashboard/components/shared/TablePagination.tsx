@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 
 interface Props {
   total: number

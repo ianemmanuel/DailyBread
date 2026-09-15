@@ -4,9 +4,9 @@ import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Tag, Plus, X, Search, Check } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Checkbox } from "@repo/ui/components/checkbox"
-import { Input } from "@repo/ui/components/input"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import {
   Sheet,
   SheetContent,
@@ -14,7 +14,7 @@ import {
   SheetTitle,
   SheetDescription,
   SheetFooter,
-} from "@repo/ui/components/sheet"
+} from "@/components/ui/sheet"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -22,7 +22,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import {
   Pagination,
   PaginationContent,
@@ -30,7 +30,7 @@ import {
   PaginationLink,
   PaginationPrevious,
   PaginationNext,
-} from "@repo/ui/components/pagination"
+} from "@/components/ui/pagination"
 import { EmptyState } from "@/components/shared/EmptyState"
 import type { VendorType, CountryVendorTypeLink } from "@/types/vendor-type.types"
 

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import { PermissionPicker } from "@/components/identity/PermissionPicker"
 
 interface Props {

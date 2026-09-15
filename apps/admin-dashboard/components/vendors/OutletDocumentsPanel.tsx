@@ -6,13 +6,13 @@ import { toast } from "sonner"
 import {
   Loader2, FileText, CheckCircle2, XCircle, Clock, AlertTriangle, ShieldAlert, Eye, Check, Undo2,
 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Textarea } from "@repo/ui/components/textarea"
-import { Label } from "@repo/ui/components/label"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import type { AdminOutletDocumentRow, VendorDocumentActionStatus } from "@/types"
 
 const STATUS: Record<VendorDocumentActionStatus, { label: string; cls: string; icon: typeof FileText }> = {

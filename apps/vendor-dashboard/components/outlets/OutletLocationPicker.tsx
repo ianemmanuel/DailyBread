@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import mapboxgl from "mapbox-gl"
 import "mapbox-gl/dist/mapbox-gl.css"
 import { Loader2, Search, LocateFixed, MapPin, X, Info } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import type { CityCoverage, OutletPlacement, ZoneBoundary } from "@repo/types/vendor-app"
 import {
   PLACEMENT_META, PLACEMENT_LEGEND_ORDER, placementColorExpression, CAPABILITY_LABELS,

@@ -4,12 +4,12 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Pencil, PauseCircle, PlayCircle, Loader2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import { TaxCategoryFormSheet } from "./TaxCategoryFormSheet"
 import type { TaxCategory } from "@/types/tax.types"
 

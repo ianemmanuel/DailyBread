@@ -7,13 +7,13 @@ import {
   Loader2, CheckCircle2, XCircle, ShieldCheck, Landmark, Wallet, ArrowDownToLine, ArrowUpFromLine,
   Plus, Plug, PlugZap,
 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
-import { Switch } from "@repo/ui/components/switch"
-import { Checkbox } from "@repo/ui/components/checkbox"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import {
   BUSINESS_PROVIDER_CAPABILITIES,
   INTEGRATION_PROVIDER_CAPABILITIES,

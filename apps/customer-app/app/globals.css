@@ -1,110 +1,235 @@
+@layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
 @import "@repo/ui/styles/tokens.css";
 @import "@repo/ui/styles/base.css";
 @import "tw-animate-css";
 
-/* ── Dark-mode variant: pinned to a class nothing ever sets ──────────────
+/* ── Dark-mode variant: pinned to a class nothing ever sets ──────────────────
    Tailwind v4's default `dark:` variant is the prefers-color-scheme MEDIA
-   QUERY, not a class. The vendored @repo/ui components ship `dark:` utilities,
-   so without this every one of them fires for any visitor whose OS is in dark
-   mode — dark badges and inputs painted onto a light page. Redefining the
-   variant as class-based makes them inert in one line.
-
-   Same decision and same fix as both dashboards. Recorded in CLAUDE.md. */
+   QUERY, not a class. The shadcn primitives in components/ui/ ship `dark:`
+   utilities as generated, so without this every one of them fires for any
+   visitor whose OS is in dark mode — dark inputs and sheets painted onto a
+   cream page. Redefining the variant as class-based makes them inert in one
+   line, instead of stripping `dark:` out of files a future `shadcn add` would
+   just regenerate. Same fix as both dashboards; recorded in CLAUDE.md. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ═══════════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════════════════
    DailyBread — customer storefront
+   PERSONALITY: Warm Editorial Marketplace
 
-   Same brand as the rest of the platform (warm amber, Playfair display,
-   Inter text) deliberately: a customer who later becomes a vendor should
-   recognise the same product.
+   This file is the customer app's entire visual identity. @repo/ui supplies
+   raw primitives (tokens.css) and the semantic vocabulary (base.css); every
+   value below either overrides one of those semantics or adds something only a
+   storefront needs. Nothing here belongs in @repo/ui — the ERP and the vendor
+   tool deliberately look different.
 
-   Where it diverges is EMPHASIS, not palette. This is the only surface in
-   the platform whose job is to make food look worth buying, so:
-     - the page ground is a warmer cream than the vendor tool's,
-     - cards are rounder and lift on hover rather than sitting flat,
-     - imagery gets more room and every photo has a warm placeholder
-       underneath it, so a slow image reveals as a tint rather than a
-       white hole.
-   ═══════════════════════════════════════════════════════════════════════ */
+   Every colour is sampled from public/design-reference/design.png and then
+   checked for contrast. Where the reference failed WCAG the hue is kept and the
+   lightness moved; those three cases are commented at the point of use.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 :root {
-  --background:        oklch(0.983 0.010 72);
-  --card:              oklch(0.999 0.002 80);
-  --muted:             oklch(0.960 0.014 70);
-  --border:            oklch(0.918 0.012 68);
+  /* ── Brand amber ──────────────────────────────────────────────────────────
+     Sampled from the reference: the "Get Started" button, the hero eyebrow and
+     the CTA band all resolve to #D99A1E — a GOLDEN amber at hue 78. Note this
+     is not @repo/ui's shared ramp, which sits at hue 48–62 and reads distinctly
+     more orange. The storefront is the only surface a customer ever sees, so it
+     takes the reference's amber; the dashboards keep the platform ramp.
+     Steps 500 and 100 round-trip to the reference's exact hex values. */
+  --db-amber-50:   oklch(0.977 0.022 80);   /* #fff6e7 */
+  --db-amber-100:  oklch(0.951 0.034 80);   /* #fbedd6 — the CTA band ground */
+  --db-amber-200:  oklch(0.905 0.072 80);   /* #f9dbaa */
+  --db-amber-300:  oklch(0.845 0.105 79);   /* #f1c47b */
+  --db-amber-400:  oklch(0.788 0.128 78);   /* #e7af51 */
+  --db-amber-500:  oklch(0.729 0.145 78);   /* #d99a1e — THE brand amber */
+  --db-amber-600:  oklch(0.660 0.140 76);   /* #c28400 — hover */
+  --db-amber-700:  oklch(0.558 0.130 72);   /* #a26400 — amber AS TEXT, 4.5:1 */
+  --db-amber-800:  oklch(0.440 0.095 68);   /* #744703 */
 
-  /* Rich espresso, for high-emphasis surfaces: the footer, the hero scrim,
-     the sticky basket bar. Shared name with the vendor app's `--deep` so the
-     two never drift into different browns. */
-  --deep:              oklch(0.255 0.042 46);
-  --deep-foreground:   oklch(0.985 0.008 80);
+  /* ── Warm neutrals ───────────────────────────────────────────────────────
+     A storefront alternates section grounds rather than sitting on one flat
+     colour — that banding is what makes the page read as editorial instead of
+     as a dashboard. All four are sampled from the reference. */
+  --db-cream:      oklch(0.977 0.006 75);   /* #faf7f3 — page + navbar ground */
+  --db-warm:       oklch(0.969 0.010 73);   /* #f9f4ee — alternating band */
+  --db-raised:     oklch(0.992 0.003 49);   /* #fefcfb — cards, inputs */
+  --db-ink:        oklch(0.215 0.012 65);   /* #1d1814 — headings */
+  --db-ink-deep:   oklch(0.184 0.011 80);   /* #15120d — the editorial band */
 
-  /* The tint that sits under every food photo while it loads. */
-  --image-placeholder: oklch(0.930 0.028 66);
+  /* ── Semantic overrides on @repo/ui/styles/base.css ──────────────────────── */
+  --background:             var(--db-cream);
+  --foreground:             var(--db-ink);
 
-  --shadow-card:       oklch(0.400 0.060 45 / 9%);
-  --shadow-card-lift:  oklch(0.380 0.070 45 / 16%);
+  --card:                   var(--db-raised);
+  --card-foreground:        var(--db-ink);
+  --popover:                var(--db-raised);
+  --popover-foreground:     var(--db-ink);
 
-  --radius: 0.875rem;
-}
+  --primary:                var(--db-amber-500);
+  --primary-hover:          var(--db-amber-600);
+  /* The reference sets white on amber. That is 2.44:1 — a clear WCAG failure
+     on the single most important control in the app. Ink on the same amber is
+     7.20:1, keeps the brand colour exactly, and on a warm gold reads as MORE
+     premium than white, not less. Deliberate, and the one real deviation from
+     the reference. */
+  --primary-foreground:     var(--db-ink);
+  --primary-subtle:         var(--db-amber-100);
+  --primary-subtle-fg:      var(--db-amber-700);
+  /* Amber used as TEXT on cream. The 500 step is only 2.29:1 and must never be
+     used for words — the eyebrow, links and inline accents all take this. */
+  --primary-text:           var(--db-amber-700);
 
-@theme {
-  --font-sans:    var(--font-inter);
-  --font-display: var(--font-playfair);
+  --secondary:              var(--db-warm);
+  --secondary-foreground:   var(--db-ink);
+  --accent:                 var(--db-warm);
+  --accent-foreground:      var(--db-ink);
 
-  --color-background:             var(--background);
-  --color-foreground:             var(--foreground);
-  --color-card:                   var(--card);
-  --color-card-foreground:        var(--card-foreground);
-  --color-popover:                var(--popover);
-  --color-popover-foreground:     var(--popover-foreground);
-  --color-primary:                var(--primary);
-  --color-primary-foreground:     var(--primary-foreground);
-  --color-primary-subtle:         var(--primary-subtle);
-  --color-primary-subtle-fg:      var(--primary-subtle-fg);
-  --color-secondary:              var(--secondary);
-  --color-secondary-foreground:   var(--secondary-foreground);
-  --color-muted:                  var(--muted);
-  --color-muted-foreground:       var(--muted-foreground);
-  --color-accent:                 var(--accent);
-  --color-accent-foreground:      var(--accent-foreground);
-  --color-deep:                   var(--deep);
-  --color-deep-foreground:        var(--deep-foreground);
-  --color-destructive:            var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border:                 var(--border);
-  --color-input:                  var(--input);
-  --color-ring:                   var(--ring);
-  --color-success:                var(--success);
-  --color-success-foreground:     var(--success-foreground);
-  --color-success-bg:             var(--success-bg);
-  --color-warning:                var(--warning);
-  --color-warning-foreground:     var(--warning-foreground);
-  --color-warning-bg:             var(--warning-bg);
-  --color-info:                   var(--info);
-  --color-info-bg:                var(--info-bg);
-  --color-destructive-bg:         var(--destructive-bg);
+  --muted:                  var(--db-warm);
+  /* The reference's body grey is #878580 (3.45:1) — below AA. Same hue, moved
+     down to 4.52:1. */
+  --muted-foreground:       oklch(0.552 0.010 75);   /* #76716c */
+  /* For small print that still has to be read: 7.03:1. */
+  --muted-foreground-strong: oklch(0.448 0.014 75);  /* #59544c */
 
-  --radius-sm:   calc(var(--radius) - 6px);
-  --radius-md:   var(--radius);
-  --radius-lg:   calc(var(--radius) + 4px);
-  --radius-xl:   calc(var(--radius) + 10px);
-  --radius-2xl:  calc(var(--radius) + 18px);
+  --border:                 oklch(0.918 0.008 72);
+  --border-strong:          oklch(0.865 0.010 72);
+  --input:                  var(--db-raised);
+  --input-border:           oklch(0.900 0.009 72);
+  --input-placeholder:      oklch(0.660 0.009 75);
+  --ring:                   var(--db-amber-500);
+
+  /* ── Storefront-only tokens ──────────────────────────────────────────────── */
+
+  /* The five section grounds, in the order the reference alternates them. */
+  --surface-cream:          var(--db-cream);
+  --surface-warm:           var(--db-warm);
+  --surface-raised:         var(--db-raised);
+  --surface-ink:            var(--db-ink-deep);
+  --surface-amber:          var(--db-amber-100);
+
+  /* High-emphasis dark surfaces: the editorial band, the footer, photo scrims.
+     Shares the name `--deep` with the vendor app so the two never drift into
+     different browns. */
+  --deep:                   var(--db-ink-deep);
+  --deep-foreground:        oklch(0.968 0.010 80);
+
+  /* The tint under every food photo while it loads. A food image arriving over
+     white leaves a hole; over this it reveals as a deepening tint. */
+  --image-placeholder:      oklch(0.930 0.028 66);
+
+  /* Text sitting directly on photography. Applied as a gradient, never a flat
+     wash — a flat scrim greys out the food it is protecting. */
+  --scrim-from:             oklch(0.184 0.011 80 / 78%);
+  --scrim-to:               oklch(0.184 0.011 80 / 0%);
+
+  /* Warm shadows. A neutral grey shadow on a cream ground reads as dirt. */
+  --shadow-card:            oklch(0.400 0.060 45 / 9%);
+  --shadow-card-lift:       oklch(0.380 0.070 45 / 16%);
+
+  /* One definition of the sticky navbar's height, so scroll-padding and any
+     `top-` offset below it can never drift apart. */
+  --nav-height:             4rem;
+
+  /* ── Radius ──────────────────────────────────────────────────────────────
+     Named so the shadcn defaults land where the reference puts them: Button
+     ships `rounded-md`, and the reference's buttons are an 8px rounded rect,
+     not a pill. Cards are visibly rounder, hence xl. */
+  --radius:      0.5rem;
+  --radius-sm:   0.375rem;
+  --radius-md:   0.5rem;
+  --radius-lg:   0.75rem;
+  --radius-xl:   1rem;
+  --radius-2xl:  1.5rem;
   --radius-full: 9999px;
 }
 
+/* ── Tailwind bridge ─────────────────────────────────────────────────────────
+   Exposes the semantic tokens above as real utilities — `text-muted-foreground`
+   rather than `text-[var(--muted-foreground)]`. Always use the utility: the
+   arbitrary-value form bypasses this map, so a token change stops propagating.
+   ──────────────────────────────────────────────────────────────────────────── */
+@media (min-width: 1024px) {
+  :root { --nav-height: 5rem; }
+}
+
+@theme inline {
+  --font-sans:    var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-playfair), ui-serif, Georgia, serif;
+
+  --color-background:              var(--background);
+  --color-foreground:              var(--foreground);
+  --color-card:                    var(--card);
+  --color-card-foreground:         var(--card-foreground);
+  --color-popover:                 var(--popover);
+  --color-popover-foreground:      var(--popover-foreground);
+
+  --color-primary:                 var(--primary);
+  --color-primary-hover:           var(--primary-hover);
+  --color-primary-foreground:      var(--primary-foreground);
+  --color-primary-subtle:          var(--primary-subtle);
+  --color-primary-subtle-fg:       var(--primary-subtle-fg);
+  --color-primary-text:            var(--primary-text);
+
+  --color-secondary:               var(--secondary);
+  --color-secondary-foreground:    var(--secondary-foreground);
+  --color-accent:                  var(--accent);
+  --color-accent-foreground:       var(--accent-foreground);
+  --color-muted:                   var(--muted);
+  --color-muted-foreground:        var(--muted-foreground);
+  --color-muted-foreground-strong: var(--muted-foreground-strong);
+
+  --color-border:                  var(--border);
+  --color-border-strong:           var(--border-strong);
+  --color-input:                   var(--input);
+  --color-ring:                    var(--ring);
+
+  --color-deep:                    var(--deep);
+  --color-deep-foreground:         var(--deep-foreground);
+
+  --color-surface-cream:           var(--surface-cream);
+  --color-surface-warm:            var(--surface-warm);
+  --color-surface-raised:          var(--surface-raised);
+  --color-surface-ink:             var(--surface-ink);
+  --color-surface-amber:           var(--surface-amber);
+
+  --color-success:                 var(--success);
+  --color-success-foreground:      var(--success-foreground);
+  --color-success-bg:              var(--success-bg);
+  --color-warning:                 var(--warning);
+  --color-warning-foreground:      var(--warning-foreground);
+  --color-warning-bg:              var(--warning-bg);
+  --color-info:                    var(--info);
+  --color-info-bg:                 var(--info-bg);
+  --color-destructive:             var(--destructive);
+  --color-destructive-foreground:  var(--destructive-foreground);
+  --color-destructive-bg:          var(--destructive-bg);
+
+  --spacing-nav: var(--nav-height);
+
+  /* The navbar's lift off the page. Two layers: a hairline that keeps the bar
+     defined while sitting on the hero's cream, and a wide soft one that only
+     becomes legible once content is scrolling underneath — which is the whole
+     point of it. Warm-tinted, because a neutral grey shadow on a cream ground
+     reads as dirt. */
+  --shadow-nav: 0 1px 2px oklch(0.400 0.060 45 / 5%),
+                0 8px 24px -8px oklch(0.380 0.070 45 / 14%);
+}
+
 @layer base {
-  /* Every scroll that lands on an anchor — the menu's section rail — stops
-     clear of the sticky header instead of underneath it. */
   html {
     scroll-behavior: smooth;
-    scroll-padding-top: 7.5rem;
+    /* Any in-page anchor stops clear of the sticky navbar rather than under it. */
+    scroll-padding-top: calc(var(--nav-height) + 1rem);
+    /* Stops iOS inflating type in landscape without disabling user zoom. */
+    -webkit-text-size-adjust: 100%;
   }
+
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     *, *::before, *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
   }
@@ -113,22 +238,49 @@
     background-color: var(--background);
     color: var(--foreground);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Every heading in this app is Playfair; opting the whole document into
+       proper kerning and common ligatures is what stops a large display serif
+       looking like letters placed next to each other. */
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "kern" 1, "liga" 1;
   }
 
-  /* Focus that is visible on a photo as well as on cream. */
+  /* Visible on cream AND on a photograph — an amber ring alone disappears
+     against a warm food image, so it is drawn over a light halo. */
   :focus-visible {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
     border-radius: var(--radius-sm);
   }
+
+  /* Headings default to the display face so a new section does not have to
+     remember to ask for it. */
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  ::selection {
+    background-color: var(--db-amber-200);
+    color: var(--db-ink);
+  }
 }
 
-/* ── Base primitives, as real utilities ──────────────────────────────────
-   `@utility` rather than a plain class inside @layer components, because
-   Tailwind v4's `@apply` only accepts actual utilities — applying a custom
-   component class fails the build with "Cannot apply unknown utility class".
-   Declaring these as utilities lets the composites below build on them AND
-   lets them be used directly in markup. */
+/* ── Primitives, declared as real utilities ──────────────────────────────────
+   `@utility` rather than a class in @layer components, because Tailwind v4's
+   `@apply` only accepts actual utilities — applying a plain component class
+   fails the build with "Cannot apply unknown utility class". Declaring them
+   here lets the composites below build on them AND lets markup use them
+   directly. */
+
+@utility shell {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 78rem;
+  /* 16px minimum gutter at every width, per the platform's responsive rule. */
+  padding-inline: 1rem;
+}
 
 @utility surface {
   border-radius: var(--radius-xl);
@@ -142,7 +294,7 @@
   align-items: center;
   gap: 0.375rem;
   border-radius: var(--radius-full);
-  padding: 0.25rem 0.625rem;
+  padding: 0.3125rem 0.6875rem;
   font-size: 0.75rem;
   line-height: 1rem;
   font-weight: 500;
@@ -150,10 +302,79 @@
 }
 
 @layer components {
-  /* ── Surfaces ─────────────────────────────────────────────────────── */
+  @media (min-width: 640px) { .shell { padding-inline: 1.5rem; } }
+  @media (min-width: 1024px) { .shell { padding-inline: 2rem; } }
 
-  /* A card you can click. The lift is the affordance — it is what tells you
-     the whole tile is the target, not just the title inside it. */
+  /* ── Section rhythm ──────────────────────────────────────────────────────
+     The reference is eight alternating full-bleed bands, not a single column
+     of cards. `.band` owns the vertical rhythm; the ground is a colour
+     utility (bg-surface-warm, bg-surface-ink…) so a section is one class plus
+     one background. */
+  .band { padding-block: 3.5rem; }
+  @media (min-width: 640px)  { .band { padding-block: 4.5rem; } }
+  @media (min-width: 1024px) { .band { padding-block: 5.5rem; } }
+  .band-tight { padding-block: 2.5rem; }
+  @media (min-width: 1024px) { .band-tight { padding-block: 3.5rem; } }
+
+  /* ── Type ────────────────────────────────────────────────────────────────
+     The reference sets its hero and CTA in UPPERCASE Playfair at a size that
+     fluidly fills the column. clamp() rather than breakpoint jumps, because a
+     display line that rewraps mid-drag looks broken. */
+  .heading-hero {
+    font-family: var(--font-display);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: clamp(2.25rem, 6.2vw, 4rem);
+    line-height: 0.98;
+    letter-spacing: -0.025em;
+  }
+  .heading-xl {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.75rem, 3.6vw, 2.5rem);
+    line-height: 1.1;
+    letter-spacing: -0.022em;
+  }
+  .heading-lg {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.375rem, 2.4vw, 1.75rem);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+  .heading-md {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.125rem;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+
+  /* The small amber line above a heading — "GOOD FOOD, MADE SIMPLE". */
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--primary-text);
+  }
+
+  .lede {
+    font-size: 1rem;
+    line-height: 1.65;
+    color: var(--muted-foreground);
+  }
+  @media (min-width: 640px) { .lede { font-size: 1.0625rem; } }
+
+  /* Prices are compared down a column, so they are tabular everywhere. */
+  .price { font-variant-numeric: tabular-nums; }
+
+  /* ── Surfaces ────────────────────────────────────────────────────────────
+     A card you can click. The lift is the affordance — it is what says the
+     whole tile is the target, not just the title inside it. */
   .surface-interactive {
     @apply surface;
     transition: box-shadow 200ms ease, transform 200ms ease;
@@ -164,87 +385,92 @@
   }
   .surface-interactive:active { transform: translateY(0); }
 
-  /* ── Imagery ──────────────────────────────────────────────────────── */
-
-  /* The warm tint under every photo. A food image loading over white leaves a
-     hole; over this it reveals as a deepening tint. */
+  /* ── Imagery ─────────────────────────────────────────────────────────── */
   .photo-frame {
     position: relative;
     overflow: hidden;
     background-color: var(--image-placeholder);
   }
-  .photo-zoom img {
-    transition: transform 500ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
+  .photo-zoom img { transition: transform 500ms cubic-bezier(0.16, 1, 0.3, 1); }
   .group:hover .photo-zoom img { transform: scale(1.045); }
 
-  /* ── Badges ───────────────────────────────────────────────────────── */
-
-  .chip-muted {
-    @apply chip;
-    background-color: var(--muted);
-    color: var(--muted-foreground);
-  }
-  .chip-brand {
-    @apply chip;
-    background-color: var(--primary-subtle);
-    color: var(--primary-subtle-fg);
-  }
-  .chip-offer {
-    @apply chip;
-    font-weight: 600;
-    background-color: var(--success-bg);
-    color: var(--success);
-  }
-  .chip-solid {
-    @apply chip;
-    font-weight: 600;
-    background-color: var(--deep);
-    color: var(--deep-foreground);
+  /* Bottom-up gradient for text laid over a photograph. */
+  .photo-scrim {
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(to top, var(--scrim-from), var(--scrim-to) 62%);
   }
 
-  /* ── Type ─────────────────────────────────────────────────────────── */
+  /* ── Badges ──────────────────────────────────────────────────────────── */
+  .chip-muted { @apply chip; background-color: var(--muted); color: var(--muted-foreground-strong); }
+  .chip-brand { @apply chip; background-color: var(--primary-subtle); color: var(--primary-subtle-fg); }
+  .chip-solid { @apply chip; font-weight: 600; background-color: var(--deep); color: var(--deep-foreground); }
+  .chip-offer { @apply chip; font-weight: 600; background-color: var(--success-bg); color: var(--success); }
 
-  .heading-xl { @apply font-display text-3xl font-semibold tracking-tight sm:text-4xl; }
-  .heading-lg { @apply font-display text-2xl font-semibold tracking-tight; }
-  .heading-md { @apply font-display text-lg font-semibold tracking-tight; }
+  /* ── Navigation ──────────────────────────────────────────────────────────
+     One definition of a top-level nav link, used by the desktop bar and the
+     mobile sheet, so the two can never describe a different hover. */
+  .nav-link {
+    position: relative;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--foreground);
+    transition: color 160ms ease;
+  }
+  .nav-link:hover { color: var(--primary-text); }
+  .nav-link::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -0.375rem;
+    height: 2px;
+    width: 100%;
+    border-radius: var(--radius-full);
+    background-color: var(--primary);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 200ms ease;
+  }
+  .nav-link:hover::after,
+  .nav-link[aria-current="page"]::after { transform: scaleX(1); }
+  .nav-link[aria-current="page"] { color: var(--primary-text); }
 
-  /* Prices are compared down a column, so they are tabular everywhere. */
-  .price { font-variant-numeric: tabular-nums; }
-
-  /* ── Layout ───────────────────────────────────────────────────────── */
-
-  /* One gutter definition. 16px minimum at every width, per the responsive
-     rule the rest of the platform follows. */
-  .shell { @apply mx-auto w-full max-w-[78rem] px-4 sm:px-6 lg:px-8; }
-
-  /* A horizontal rail that scrolls on a phone without a visible scrollbar and
+  /* ── Layout ──────────────────────────────────────────────────────────────
+     A horizontal rail that scrolls on a phone without a visible scrollbar and
      without ever making the page itself scroll sideways. */
   .rail {
     display: flex;
-    gap: 0.5rem;
+    gap: 0.75rem;
     overflow-x: auto;
+    scroll-snap-type: x proximity;
     padding-bottom: 0.25rem;
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
   .rail::-webkit-scrollbar { display: none; }
+  .rail > * { scroll-snap-align: start; }
 }
 
 @layer utilities {
-  /* Two- and three-line clamps, used on dish descriptions where the copy is
-     vendor-written and can be any length. */
+  /* Line clamps, for vendor-written copy that can be any length. */
   .clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
   .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
-  /* The shimmer under every skeleton. Deliberately slow and low-contrast —
-     a fast, bright shimmer reads as an error state. */
+  /* Breaks a section out of `.shell` to full viewport width — the editorial
+     photograph band and the amber CTA band both bleed edge to edge. */
+  .full-bleed {
+    width: 100vw;
+    margin-inline: calc(50% - 50vw);
+  }
+
+  /* The shimmer under every skeleton. Deliberately slow and low-contrast — a
+     fast, bright shimmer reads as an error state. */
   .shimmer {
     background: linear-gradient(
       90deg,
       var(--muted) 0%,
-      color-mix(in oklch, var(--muted) 60%, var(--card)) 50%,
+      color-mix(in oklch, var(--muted) 55%, var(--card)) 50%,
       var(--muted) 100%
     );
     background-size: 200% 100%;
@@ -254,4 +480,8 @@
     0%   { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
+
+  /* Visible only to a keyboard: the skip link, and any label a screen reader
+     needs but the design does not show. */
+  .focus-ring-inset:focus-visible { outline-offset: -2px; }
 }

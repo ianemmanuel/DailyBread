@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { CardContent } from '@repo/ui/components/card'
+import { CardContent } from '@/components/ui/card'
 import {
   TrendingUp,
   TrendingDown,
@@ -8,7 +8,7 @@ import {
   CalendarDays,
   Banknote,
 } from 'lucide-react'
-import { cn } from '@repo/ui/lib/utils'
+import { cn } from '@/lib/utils'
 
 const stats = [
   {

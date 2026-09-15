@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { ShieldAlert, Loader2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import { RoleCombobox } from "@/components/identity/RoleCombobox"
 import type { AdminRole } from "@/types"
 

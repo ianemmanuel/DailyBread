@@ -14,7 +14,7 @@ Turborepo monorepo for a multi-country, multi-vendor meal-delivery platform.
 | `apps/customer-app` | Next.js storefront (port 3003), Clerk |
 | `packages/database` | Prisma schema + seeds (`@repo/db`) |
 | `packages/types` | `domain/` · `backend/` (Express-dependent, never import in a frontend) · `frontend/` · `enums/`. Entry points: `@repo/types/backend`, `/admin-app`, `/vendor-app`, `/customer-app`, `/enums` |
-| `packages/ui` | shadcn-style shared components (`@repo/ui/components/*`) |
+| `packages/ui` | **Styling framework only** — design tokens + semantic mapping. No components, no TypeScript, no build step. See *Design system* |
 | `packages/geo` | Pure geometry + zone capabilities — no I/O, no `@repo/db` |
 
 Verify: `npx tsc --noEmit` per app, `npx vitest run` in `apps/backend` (**622 tests**). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
@@ -60,6 +60,8 @@ Verify: `npx tsc --noEmit` per app, `npx vitest run` in `apps/backend` (**622 te
 8. **Wall-clock reads must use the subject's timezone.** `"HH:mm"` columns (operating hours, happy-hour windows) are local to the *outlet*. `lib/time/localClock.ts` is the only place a clock is read; `City.timezone` is required so it is always knowable.
 9. **Tailwind v4**: `dark:` defaults to the media query — every app needs `@custom-variant dark (&:where(.dark, .dark *));` or vendored `dark:` utilities fire for dark-OS users. `@apply` accepts only real utilities, so shared component classes must be declared with `@utility`. Preflight drops the button pointer cursor — `cursor-pointer` is in the base Button class, but raw `<button>`s need it individually.
 10. **A feature is unreachable until `pnpm db:seed` runs.** New permissions live in seed data; `syncSuperAdminPermissions()` is what grants them to an existing super admin.
+11. **Compiler emit must never land next to sources.** `packages/ui` built with `tsc -b` and no `outDir`, littering `src/` with `.js` / `.d.ts` / `.d.ts.map`; a later sweep of those strays took the whole component directory with it and left all three frontends unable to resolve their imports — undetected because nothing typechecks a package with no TS. `.gitignore` now blocks `packages/*/src/**/*.js` and friends. Any new package that compiles needs an explicit `outDir`.
+12. **A stale `.next/dev/types` produces syntax errors in files you did not write.** `Unterminated template literal` / `Declaration or statement expected` pointing into `.next/dev/types/{routes.d.ts,validator.ts}` is a corrupt cache, not a real error: `rm -rf .next && next typegen`. Do not go looking for the bug in your own code.
 
 ---
 
@@ -85,6 +87,72 @@ Verify: `npx tsc --noEmit` per app, `npx vitest run` in `apps/backend` (**622 te
 
 ---
 
+## Design system
+
+**Three tiers. `@repo/ui` is the bottom two; personality is the app's.**
+
+```
+@repo/ui                    styles only — shipped as CSS, imported by every app
+├── styles/tokens.css       raw primitives: neutral scale, warm-amber brand ramp,
+│                           status + order-status colours, radii, shadows.
+│                           No UI meaning. Never add an app-specific value here.
+└── styles/base.css         primitives → semantic tokens (--primary, --card,
+                            --muted, --border, --ring …) + a minimal reset
+        │
+        ├── admin-dashboard/app/globals.css    neutral, dense, operational
+        ├── vendor-dashboard/app/globals.css   warm cream, hospitality
+        └── customer-app/app/globals.css       Warm Editorial Marketplace
+```
+
+Each app's `globals.css` imports the two shared sheets, **overrides semantic
+tokens** to set its personality, adds its own app-only tokens, and re-exports
+everything into Tailwind through its `@theme` block. The three apps are
+deliberately *not* meant to look alike — only to share the same brand ramp and
+the same token vocabulary.
+
+**shadcn components are per-app, never shared.** Every Next app owns
+`components/ui/*.tsx` and its own `cn()` in `lib/utils.ts`, installs its own
+Radix/cmdk/recharts dependencies, and has its own `components.json` (admin is
+`radix-nova`, vendor and customer are `new-york`). This is deliberate: a shared
+component library forces one app's variant decisions onto the other two, and
+divergence showed up almost immediately — admin's Button and vendor's Button
+had already drifted while both lived in `@repo/ui`. Because the primitives read
+semantic tokens (`var(--primary)`, `var(--radius)`), each app's override block
+re-skins them for free.
+
+- **Never** add `@repo/ui/components/*` or `@repo/ui/lib/*` back. `@repo/ui` has
+  no `.ts` files and no build script, on purpose.
+- To add a primitive, run shadcn **inside the app that needs it**. Copying one
+  in by hand is fine too — rewrite its imports to `@/components/ui/*` and
+  `@/lib/utils`, and add the Radix dep to *that app's* `package.json`.
+- Customer-specific visual semantics (display scale, photo ratios, section
+  grounds, scrims) live in `apps/customer-app`, not in `@repo/ui`.
+
+**The customer storefront's design language** lives entirely in
+`apps/customer-app/app/globals.css`. Every colour in it was sampled from
+`public/design-reference/design.png` and contrast-checked; the file comments say
+where a value was moved and why. Before inventing a class, check what is already
+there:
+
+| | |
+|---|---|
+| Brand | `--db-amber-50…800`. **Hue 78 (golden)** — deliberately *not* `@repo/ui`'s hue-48–62 ramp, which reads orange. 500 = `#d99a1e` is the reference's exact button amber |
+| Grounds | `--surface-cream` (page) · `-warm` (alternating band) · `-raised` (cards) · `-ink` (editorial band) · `-amber` (CTA band) |
+| Type | `.heading-hero` (uppercase, fluid clamp) · `.heading-xl/lg/md` · `.eyebrow` · `.lede` · `.price` |
+| Layout | `.shell` (gutter + max width) · `.band` / `.band-tight` (section rhythm) · `.full-bleed` · `.rail` · `h-nav` |
+| Surfaces | `.surface` · `.surface-interactive` · `.photo-frame` · `.photo-zoom` · `.photo-scrim` · `.chip-*` |
+
+Three contrast decisions are deliberate and must not be "corrected" back to the
+mock: `--primary-foreground` is **ink, not white** (white on the brand amber is
+2.44:1); `--muted-foreground` is darker than the mock's `#878580` (3.45:1); and
+amber-as-text uses `--primary-text` (the 700 step), never the 500.
+
+**Always use the mapped utility, never the arbitrary-value form.** `@theme
+inline` exposes every semantic token, so it is `text-muted-foreground`, not
+`text-[var(--muted-foreground)]`. The arbitrary form bypasses the map and a
+token change stops propagating — the pre-existing components had accumulated 217
+of them.
+
 ## Frontend conventions
 
 - Server Components fetch through the app's own `adminFetch` / `backendFetch` / `publicFetch`; client mutations go through `app/api/**` route handlers that proxy. The Clerk token never reaches client JS.
@@ -94,6 +162,23 @@ Verify: `npx tsc --noEmit` per app, `npx vitest run` in `apps/backend` (**622 te
 - Sidebar nav is permission-gated — links vanish rather than render-then-403. `isItemActive` needs a special case wherever a section "Home" href is a prefix of its siblings.
 - Link-based pagination on SSR list pages (no JS needed). **Rebuild the whole query string** — a bare `?page=2` drops active filters.
 - Mapbox is ~1.8 MB: always `next/dynamic` with `ssr: false`.
+
+**customer-app only** (public, anonymous-first, performance-critical):
+- `lib/api/server.ts` attaches a Clerk token **when one exists and never errors when it does not** — the mirror of the backend's `attachCustomerContext`. The dashboards' `backendFetch` throws instead; do not copy that here.
+- Anything carrying a token is `cache: "no-store"`. Only an explicitly `anonymous` read may opt into ISR — a cached response must not depend on who asked.
+- `proxy.ts` (Next 16's middleware) lists **protected** routes rather than exempting public ones, so a forgotten route stays public instead of leaking. Browsing, storefronts and cart pricing all work signed-out.
+- The visitor's location lives in a **cookie**, so the feed is a plain server render with no mount-fetch waterfall. It is untrusted input — `parseLocation` range-checks it, and a saved address travels as `addressId` so the server resolves the point itself.
+- Reads return a **state** (`no-location` / `ok` / `error`), never a bare throw or an empty array — see recurring bug class #4.
+- `lib/format/money.ts` is the only place minor units become a decimal, and it reads `currency.minorUnitDigits`.
+- Keep `"use client"` at the leaves. Today: `NavLinks`, `MobileNav`, `AuthActions`. The `Navbar` itself, cards, hero and menu are Server Components and must stay that way.
+
+**Customer auth is modal-only, and that is a deliberate pair of decisions.**
+- **No `/sign-in` or `/sign-up` route exists.** `AuthActions` uses Clerk's `<SignInButton mode="modal">` / `<SignUpButton mode="modal">`. Browsing, storefronts and cart pricing are all public, so someone signing in is *part-way through something* rather than stopped at a gate — a redirect loses their place, a modal returns it. Only orders, payments, subscriptions and order history will ever require an account.
+  > `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `_SIGN_UP_URL` in `.env` still point at those non-existent routes. Harmless for the modal flow, but `auth.protect()` and `redirectToSignIn()` would 404 — build the pages or drop the vars when route protection lands.
+- **`<ClerkProvider>` is NOT given `dynamic`.** It renders statically by default; passing `dynamic` resolves auth on the server and opts **every route** into dynamic rendering. So `<SignedIn>` / `<SignedOut>` resolve on the client, and `<ClerkLoading>` holds a same-size placeholder to stop the bar collapsing while Clerk boots. That is the right trade while visitors are mostly signed out. Verify with `next build` — `○ /`, never `ƒ /`.
+- `<ClerkProvider>` goes **inside `<body>`**, per current Clerk docs (older docs wrapped `<html>`).
+- Clerk's `appearance.variables` colours must be **literal hex, not `var(--token)`** — Clerk parses each one to derive its own shades and alpha variants and cannot do that with an unresolved custom property. `CLERK_APPEARANCE` in `app/layout.tsx` mirrors `globals.css` by hand and must be updated alongside it. `formButtonPrimary` is re-stated with our own classes because Clerk would otherwise put white on the brand amber (2.44:1).
+- Clerk clones its button child to attach its own `onClick`, so a handler passed to that child is not guaranteed to survive. To run something alongside it (the mobile sheet closing before the modal opens — mandatory, since the sheet is a Radix dialog that traps focus), put the handler on a **wrapping element** and let the click bubble.
 
 ---
 
@@ -121,7 +206,51 @@ Verify: `npx tsc --noEmit` per app, `npx vitest run` in `apps/backend` (**622 te
 
 Everything through the **customer backend module + customer frontend scaffold** is shipped and verified. Latest migration: `20260913120000_drop_outlet_cuisine_and_repair_city_timezones`.
 
-`apps/customer-app` exists and builds: discovery feed, storefront + menu, cart (client store + server pricing), Clerk sign-in/up, location-in-a-cookie so the feed is a real SSR render. **Awaiting the user's env values** (`BACKEND_API_URL`, a *separate* customer Clerk app, `CLERK_CUSTOMER_WEBHOOK_SECRET` on the backend → `<ngrok>/webhooks/clerk/customer`). `.env.example` documents each.
+Verified green as of this pass: `pnpm check-types` 5/5, backend `vitest run` 622/622, `next build` clean in `customer-app`.
+
+`apps/customer-app` builds and typechecks: discovery feed, storefront + menu, cart (client store + server pricing), Clerk sign-in/up, location-in-a-cookie so the feed is a real SSR render. **Awaiting the user's env values** (`BACKEND_API_URL`, a *separate* customer Clerk app, `CLERK_CUSTOMER_WEBHOOK_SECRET` on the backend → `<ngrok>/webhooks/clerk/customer`). `.env.example` documents each (placeholders — never commit a real key there).
+
+**Design-system migration is complete.** `@repo/ui` was reduced to the two
+stylesheets, and all 32 shadcn primitives now live per-app under
+`components/ui/` with ~370 imports rewritten to `@/components/ui/*`. See
+*Design system* for the rule and why. Every app typechecks against its own
+primitives.
+
+**The customer app was reset to a clean foundation** (explicit direction). Clerk,
+the react-query provider and every fetch were removed so the shell could be
+rebuilt properly; the discovery feed, storefront, cart, location picker and their
+`lib/` modules were deleted with them. **All of it is recoverable from commit
+`30facf5`** — recover rather than rewrite when those pages come back.
+
+What exists now: `app/layout.tsx` (no Dynamic APIs), `Navbar` + `NavLinks` +
+`MobileNav` + `AuthActions` + `Logo` under `components/layout/`, a blank
+`app/page.tsx`, and the full design language in `app/globals.css`. Kept
+deliberately: `lib/format/money.ts` (pure, encodes the minor-units rule) and the
+shadcn primitives.
+
+**Clerk is back, modal-only** — `proxy.ts` runs a bare `clerkMiddleware()` with
+no route matcher, because nothing is protected yet. See *Frontend conventions →
+Customer auth* for the two decisions that matter. Still unverified in a browser:
+the modal's themed appearance, and the mobile sheet closing cleanly as the modal
+opens.
+
+**`/` is static.** The root layout reads no cookies and no auth, which is the
+whole reason `next build` reports `○ /` instead of `ƒ /`. Anything added to the
+root layout that touches `cookies()`, `headers()` or `auth()` makes **every route
+in the app dynamic** — put it behind `<Suspense>` or in a route-group layout
+instead. Verify with the build output, not by inspection.
+
+**Next up on the customer app:** the eight landing bands from `design.png` (hero,
+craving rail, popular, editorial band, meal plans, neighbourhood, CTA band, full
+footer). Two decisions are still open — whether the feed moves to `/discover`
+with `(marketing)` / `(shop)` route groups, and whether landing sections are a
+fixed tree or a server-resolved block list (the latter is what the future
+CITY → COUNTRY → GLOBAL promo resolution needs; `Serviceability` already returns
+`cityId`/`cityName`).
+
+`next dev` (Next 16) writes `AGENTS.md` and a one-line `CLAUDE.md` into each app
+directory and re-creates them if deleted. They are framework notes, not project
+rules — this file is the rulebook. Commit them or set `agentRules: false`.
 
 **Data is entered by hand, not seeded** (explicit direction). Dev DB holds 1 vendor outlet, 1 dish, 0 consumers. Nairobi's two zones **do not tile the city** — an outlet placed outside them is correctly `AREA_NOT_LAUNCHED` and will not be discoverable.
 

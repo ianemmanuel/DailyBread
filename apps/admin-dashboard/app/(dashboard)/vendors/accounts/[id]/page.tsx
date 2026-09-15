@@ -9,7 +9,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
+} from "@/components/ui/table"
 import { adminFetch, ApiCallError } from "@/lib/api"
 import { getAdminSession }     from "@/lib/auth/session"
 import { getInitials }         from "@/lib/initials"

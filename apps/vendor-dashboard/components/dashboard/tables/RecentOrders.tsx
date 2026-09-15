@@ -2,16 +2,16 @@
 
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from '@repo/ui/components/card'
+} from '@/components/ui/card'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@repo/ui/components/table'
-import { Badge } from '@repo/ui/components/badge'
-import { Button } from '@repo/ui/components/button'
-import { Avatar, AvatarFallback } from '@repo/ui/components/avatar'
+} from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ArrowUpRight, Clock, CheckCircle, Truck, ChefHat, ShoppingBag } from 'lucide-react'
 import Link from 'next/link'
-import { cn } from '@repo/ui/lib/utils'
+import { cn } from '@/lib/utils'
 
 const orders = [
   { id: '#ORD-1234', customer: 'John Kamau',    category: 'meal' as const,      amount: 450,  status: 'delivered' as const,   time: '5 min ago'  },

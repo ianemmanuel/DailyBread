@@ -10,7 +10,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
+} from "@/components/ui/table"
 import {
   Pagination,
   PaginationContent,
@@ -18,7 +18,7 @@ import {
   PaginationLink,
   PaginationPrevious,
   PaginationNext,
-} from "@repo/ui/components/pagination"
+} from "@/components/ui/pagination"
 import { EmptyState } from "@/components/shared/EmptyState"
 import type { VendorTypeAdoptionResult } from "@/types/vendor-type.types"
 

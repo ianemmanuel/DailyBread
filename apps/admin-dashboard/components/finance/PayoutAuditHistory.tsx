@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import type { AdminPayoutAccountAuditEntry } from "@repo/types/admin-app"
 
 /*

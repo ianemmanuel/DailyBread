@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { Plus, Store, SearchX } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 
 /*
  * Two genuinely different empty states behind one component: a vendor with no

@@ -1,5 +1,5 @@
 import { PageHeaderProps } from "@/types"
-import { cn } from "@repo/ui/lib/utils"
+import { cn } from "@/lib/utils"
 
 export function PageHeader({
   title,

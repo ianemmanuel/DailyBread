@@ -4,16 +4,16 @@ import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Tag, Plus, X } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Label } from "@repo/ui/components/label"
-import { Switch } from "@repo/ui/components/switch"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@repo/ui/components/select"
+} from "@/components/ui/select"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogFooter,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 import { EmptyState } from "@/components/shared/EmptyState"
 import type { DocumentTypeVendorTypeLink } from "@/types/document-type.types"
 import type { VendorType } from "@/types/vendor-type.types"

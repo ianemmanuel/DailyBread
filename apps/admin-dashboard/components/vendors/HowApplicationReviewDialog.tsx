@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { HelpCircle, UserCheck, Clock, CheckCircle2, ArrowRightLeft, TriangleAlert } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -11,7 +11,7 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogCancel,
-} from "@repo/ui/components/alert-dialog"
+} from "@/components/ui/alert-dialog"
 
 const STEPS = [
   {

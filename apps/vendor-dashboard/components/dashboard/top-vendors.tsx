@@ -1,8 +1,8 @@
 'use client';
 
-import { Card, CardContent, CardHeader, CardTitle } from '@repo/ui/components/card';
-import { Avatar, AvatarFallback } from '@repo/ui/components/avatar';
-import { Badge } from '@repo/ui/components/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Star } from 'lucide-react';
 
 const vendors = [

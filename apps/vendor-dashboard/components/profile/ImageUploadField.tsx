@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { ImagePlus, Loader2, Trash2, AlertCircle } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
   uploadProfileImage, discardProfileImage, releasePreview, validateImage,

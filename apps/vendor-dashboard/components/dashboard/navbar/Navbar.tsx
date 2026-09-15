@@ -1,7 +1,7 @@
 'use client'
 
 import { SignedIn, SignedOut, SignInButton } from '@clerk/nextjs'
-import { Button } from '@repo/ui/components/button'
+import { Button } from '@/components/ui/button'
 import { MobileSidebar } from '@/components/dashboard/sidebar/MobileSidebar'
 import NavbarNotifications from './NavbarNotifications'
 import ProfileButton from './ProfileButton'

@@ -7,8 +7,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
-import { Button } from "@repo/ui/components/button"
+} from "@/components/ui/table"
+import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/shared/EmptyState"
 import { TablePagination } from "@/components/shared/TablePagination"
 import { VendorCategoryStatusBadge } from "./VendorCategoryStatusBadge"

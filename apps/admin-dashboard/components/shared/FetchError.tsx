@@ -1,5 +1,5 @@
 import { AlertTriangle, RefreshCw } from "lucide-react"
-import { cn } from "@repo/ui/lib/utils"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
 interface FetchErrorProps {

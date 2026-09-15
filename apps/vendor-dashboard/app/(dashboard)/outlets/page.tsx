@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { Plus, TrendingUp } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/dashboard/layout/PageHeader"
 import { PageGrid } from "@/components/dashboard/layout/DashboardShell"
 import { ListPagination } from "@/components/dashboard/layout/ListPagination"

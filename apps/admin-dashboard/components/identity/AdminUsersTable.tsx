@@ -6,7 +6,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@repo/ui/components/table"
+} from "@/components/ui/table"
 import { UserStatusBadge }  from "@/components/identity/UserStatusBadge"
 import { UserActionsMenu }  from "@/components/identity/UserActionsMenu"
 import { TablePagination } from "@/components/shared/TablePagination"
