@@ -20,7 +20,20 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        /* The brand fill. The lift-and-shadow on hover is what makes a pale
+           orange button feel raised on a near-white page, where its EDGE only
+           manages 1.94:1 against the ground — see globals.css. */
+        default:
+          "bg-primary text-primary-foreground shadow-xs hover:bg-primary-hover " +
+          "hover:shadow-md hover:-translate-y-px active:translate-y-0 active:shadow-xs",
+        /* Brand-outlined. Used for "Sign in" beside the filled "Get Started":
+           the pair reads as secondary-then-primary while both stay unmistakably
+           the brand. Hover fills with the subtle tint rather than the solid
+           orange, so it never competes with the real primary next to it. */
+        brand:
+          "border border-brand-400 bg-transparent text-primary-text " +
+          "hover:bg-primary-subtle hover:border-brand-500 " +
+          "hover:-translate-y-px active:translate-y-0 transition-all",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
         outline:

@@ -185,6 +185,20 @@ export const AdminPermissions = {
   FINANCE_TAX_READ  : "finance:tax:read",
   FINANCE_TAX_MANAGE: "finance:tax:manage",
 
+  // ── Marketing ─────────────────────────────────────────────────────────────
+  // Storefront hero promotions, scoped CITY -> COUNTRY -> GLOBAL. Its own
+  // namespace rather than borrowing a vendor or finance key: this is
+  // customer-facing merchandising, and the people who write it are not
+  // necessarily the people who approve vendors or set tax rates.
+  //
+  // Scope is enforced per call in the service, not by the permission:
+  //   - a GLOBAL promotion requires GLOBAL admin scope;
+  //   - a COUNTRY promotion requires that country, and refuses CITY tier;
+  //   - a CITY promotion requires that city.
+  MARKETING_PROMOTIONS_READ   : "marketing:promotions:read",
+  MARKETING_PROMOTIONS_MANAGE : "marketing:promotions:manage",
+  MARKETING_PROMOTIONS_PUBLISH: "marketing:promotions:publish",
+
   // ── Customers ─────────────────────────────────────────────────────────────
   CUSTOMERS_PROFILES_READ     : "customers:profiles:read",
   CUSTOMERS_ORDERS_READ       : "customers:orders:read",

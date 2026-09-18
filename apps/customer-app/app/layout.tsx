@@ -1,7 +1,10 @@
 import type { Metadata, Viewport } from "next"
 import { Inter, Playfair_Display } from "next/font/google"
-import { Navbar } from "@/components/layout/Navbar"
 import { ClerkProvider } from "@clerk/nextjs"
+import { shadcn } from "@clerk/ui/themes"
+import { Footer } from "@/components/layout/Footer"
+import { Navbar } from "@/components/layout/Navbar"
+import { ThemeProvider, ThemeScript } from "@/components/themes/theme-provider"
 import "./globals.css"
 
 const inter = Inter({
@@ -38,8 +41,12 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  // Matches --background, so the browser chrome blends into the page on mobile.
-  themeColor  : "#faf7f3",
+  // One entry per scheme, matching --background in each, so the phone's browser
+  // chrome never shows a light bar over a dark page.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f4f5f7" },
+    { media: "(prefers-color-scheme: dark)",  color: "#0a0b0d" },
+  ],
   width       : "device-width",
   initialScale: 1,
   // Deliberately zoomable. Pinning maximumScale is an accessibility failure on
@@ -47,8 +54,7 @@ export const viewport: Viewport = {
 }
 
 
-
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>){
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="en"
@@ -56,34 +62,34 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       suppressHydrationWarning
     >
       <body className="flex min-h-dvh flex-col bg-background font-sans text-foreground antialiased">
-        {/*
-          * Deliberately NOT `dynamic`. ClerkProvider renders statically by
-          * default, which is what keeps `/` a static route — passing `dynamic`
-          * resolves auth on the server and opts EVERY route into dynamic
-          * rendering. AuthActions explains the trade.
-          *
-          * Colours are literal hex, not var(--token): Clerk parses each one to
-          * derive its own shades and alpha variants, and cannot do that with an
-          * unresolved custom property. They mirror globals.css and must be
-          * updated alongside it.
-          */}
-        <ClerkProvider>
-          {/* A same-page fragment jump — the one thing a raw anchor is still the
-            right element for, since next/link would route for what the browser
-            already does natively. Invisible until focused. */}
-          <a
-            href="#main"
-            className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-60 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
+        {/* FIRST child of <body>, and rendered by this SERVER component. It
+            puts the `dark` class on <html> before anything paints, so there is
+            no flash of the wrong theme. Rendering it here rather than from
+            inside the client ThemeProvider is also what avoids React 19's
+            "script tag while rendering React component" warning. */}
+        <ThemeScript />
+
+        <ThemeProvider>
+
+          {/* Clerk's official shadcn theme reads our CSS variables, so its forms
+              and menus follow light/dark on their own. The one override is the
+              focus ring: the theme draws it at 50% opacity, too faint on white. */}
+          <ClerkProvider
+            appearance={{ theme: shadcn, variables: { colorRing: "var(--ring)" } }}
           >
-            Skip to content
-          </a>
+            <Navbar />
 
-          <Navbar />
+            {/* The page wrapper: `.shell` is the centred max-width with
+                responsive side gutters, so pages can return a fragment instead
+                of repeating a wrapper div. A section that must span the full
+                screen width uses the `.full-bleed` class to break out. */}
+            <main id="main" className="shell flex flex-1 flex-col">
+              {children}
+            </main>
 
-          <main id="main" className="flex-1">
-            {children}
-          </main>
-        </ClerkProvider>
+            <Footer />
+          </ClerkProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

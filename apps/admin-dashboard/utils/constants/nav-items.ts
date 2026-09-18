@@ -1,4 +1,5 @@
 import {
+  Megaphone,
   LayoutDashboard,
   ShoppingBag,
   Store,
@@ -228,6 +229,21 @@ export const navSections: NavSection[] = [
     items: [
       { label: "Countries",  href: "/tax/countries",  icon: Receipt, requiredPermission: AdminPermissions.FINANCE_TAX_READ },
       { label: "Categories", href: "/tax/categories", icon: Layers,  requiredPermission: AdminPermissions.FINANCE_TAX_READ },
+    ],
+  },
+  {
+    // Marketing is its own top-level section, mirroring the backend: it is its
+    // own module (apps/backend/src/modules/marketing) that owns HeroPromotion.
+    // It sits after Tax and before Insights because it is configuration an
+    // admin sets, not a report they read.
+    title: "Marketing",
+    items: [
+      {
+        label: "Hero promotions",
+        href: "/marketing",
+        icon: Megaphone,
+        requiredPermission: AdminPermissions.MARKETING_PROMOTIONS_READ,
+      },
     ],
   },
   {

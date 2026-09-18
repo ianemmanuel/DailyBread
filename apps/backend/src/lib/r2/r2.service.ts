@@ -155,6 +155,24 @@ export const R2Service = {
     )
   },
 
+  /**
+   * Reads an object's bytes.
+   *
+   * Only for objects this server must PROCESS — the marketing image pipeline
+   * fetches the admin's original here so it can be re-encoded. Never use it to
+   * proxy a file to a client: the single exit point for that is a signed URL
+   * (generateViewUrl), which keeps large downloads off the API process.
+   */
+  async getObjectBuffer(storageKey: string): Promise<Buffer> {
+    const result = await r2.send(
+      new GetObjectCommand({ Bucket: BUCKET, Key: storageKey }),
+    )
+    if (!result.Body) {
+      throw new Error(`Object has no body: ${storageKey}`)
+    }
+    return Buffer.from(await result.Body.transformToByteArray())
+  },
+
   async objectExists(storageKey: string) {
     try {
       await r2.send(
