@@ -47,6 +47,13 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     //* and food-tag catalogs.
     "finance:tax:read",
     "finance:tax:manage",
+    //* Storefront merchandising. operations_admin owns what a market looks
+    //* like once it is live, which is the same remit as the catalogs above.
+    //* PUBLISH is granted here too: at GLOBAL scope this role is already the
+    //* one trusted to change what every customer sees.
+    "marketing:promotions:read",
+    "marketing:promotions:manage",
+    "marketing:promotions:publish",
   ],
 
   finance: [

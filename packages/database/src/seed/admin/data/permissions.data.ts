@@ -290,6 +290,21 @@ export const PERMISSIONS = [
     description: "View the tax-category catalog and a country's tax position — how prices are quoted, who remits, and every rate on the books",
   },
   {
+    key        : "marketing:promotions:read",
+    module     : "marketing",
+    description: "View storefront hero promotions and their scheduling",
+  },
+  {
+    key        : "marketing:promotions:manage",
+    module     : "marketing",
+    description: "Create and edit storefront hero promotions, including their imagery, within your own scope",
+  },
+  {
+    key        : "marketing:promotions:publish",
+    module     : "marketing",
+    description: "Publish, schedule or withdraw a hero promotion — what customers actually see",
+  },
+  {
     key        : "finance:tax:manage",
     module     : "finance",
     description: "Set a country's tax position and rates (own country), and create/edit the global tax-category catalog (global scope only)",

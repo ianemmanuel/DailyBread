@@ -54,6 +54,29 @@ const envSchema = z.object({
   R2_UPLOAD_EXPIRY_SECONDS: z.coerce.number().int().positive(),
   R2_VIEW_EXPIRY_SECONDS: z.coerce.number().int().positive(),
 
+  /*
+   * PUBLIC object storage — a SECOND, separate bucket.
+   *
+   * R2 grants public access per BUCKET, never per prefix, and has no
+   * per-object public permission. Serving marketing images from a path inside
+   * the private bucket above would therefore mean publishing every payout
+   * proof and identity document in it. Hence two buckets, two API tokens: a
+   * leaked public-bucket token cannot read anything confidential.
+   *
+   * Every one of these is OPTIONAL and defaults to empty, deliberately: the
+   * bucket is provisioned by hand in Cloudflare, and nobody working on an
+   * unrelated module should be blocked by env they have no reason to hold.
+   * `publicStorage.assertConfigured()` is what fails — loudly, and only on the
+   * code path that actually needs it.
+   */
+  R2_PUBLIC_BUCKET_NAME: z.string().default(""),
+  R2_PUBLIC_ENDPOINT: z.union([z.string().url(), z.literal("")]).default(""),
+  R2_PUBLIC_ACCESS_KEY_ID: z.string().default(""),
+  R2_PUBLIC_SECRET_ACCESS_KEY: z.string().default(""),
+  /** The custom domain the public bucket is served from, e.g.
+   *  https://img.dailybread.com — NOT the S3 endpoint. */
+  R2_PUBLIC_CDN_URL: z.union([z.string().url(), z.literal("")]).default(""),
+
   //* Logging — required in production, optional in dev (checked below)
   LOGTAIL_SOURCE_TOKEN: z.string().optional(),
 

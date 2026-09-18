@@ -1,5 +1,6 @@
 import { Router } from "express"
 import discoveryRoutes from "./customer.discovery.routes"
+import marketingRoutes from "./customer.marketing.routes"
 import accountRoutes from "./customer.account.routes"
 
 /*
@@ -17,6 +18,10 @@ import accountRoutes from "./customer.account.routes"
  * update.
  */
 const v1Router: Router = Router()
+
+/* No identity at all — see the file's own note. Mounted first because it is
+ * the least privileged surface in the module. */
+v1Router.use(marketingRoutes)
 
 v1Router.use(discoveryRoutes)
 v1Router.use(accountRoutes)

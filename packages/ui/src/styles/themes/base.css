@@ -82,14 +82,20 @@
 }
 
 
-/* No .dark palette, deliberately. Both consuming apps (admin-dashboard,
- * vendor-dashboard) are light-only by product decision, so nothing ever
- * adds the class -- a dark palette here would be a complete, coherent
- * theme that could never activate. Each app's globals.css also pins
- * Tailwind's `dark:` variant to this class rather than the OS media
- * query, which is what actually stops shadcn's built-in dark utilities
- * firing for a user whose system is in dark mode. Reinstate both
- * together if a dark theme is ever wanted. */
+/* No .dark palette here, deliberately -- and this is NOT an oversight.
+ *
+ * admin-dashboard and vendor-dashboard are light-only by product decision,
+ * so neither ever adds the class. customer-app DOES have a dark theme, but
+ * it is a warm one built entirely from that app's own grounds, and it lives
+ * in apps/customer-app/app/globals.css. Hoisting it here would push the
+ * storefront's personality onto two apps that must not have it -- the exact
+ * coupling the three-tier split exists to prevent (CLAUDE.md > Design system).
+ *
+ * Every consuming app must still pin Tailwind's `dark:` variant to a class
+ * rather than leave it on the OS media query, or shadcn's built-in dark
+ * utilities fire for any visitor whose system is dark. The two dashboards
+ * point it at a class nothing sets, which makes those utilities inert;
+ * customer-app points it at the class next-themes actually toggles. */
 
 
 /* ── MINIMAL ELEMENT RESET ───────────────────────────────────── */

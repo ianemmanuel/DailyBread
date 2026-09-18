@@ -179,3 +179,58 @@ export {
   FINANCIAL_READINESS_REASON_LABELS,
 } from "../enums/finance"
 export type { FinancialReadinessReason, NormalizedWebhookEventType } from "../enums/finance"
+/* ── Marketing: storefront hero promotions ─────────────────────────────────
+ *
+ * What the ERP sends and receives. The IMAGE fields are read-only here on
+ * purpose: the server derives them from the original it processed, so a write
+ * payload has no way to name an object or claim a size.
+ */
+
+export type HeroPromotionScope = "CITY" | "COUNTRY" | "GLOBAL"
+export type HeroPromotionStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED"
+
+export interface HeroPromotionImage {
+  url: string
+  width: number | null
+  height: number | null
+  blurDataUrl: string | null
+  alt: string | null
+}
+
+export interface HeroPromotion {
+  id: string
+  scope: HeroPromotionScope
+  cityId: string | null
+  countryId: string | null
+  eyebrow: string | null
+  headline: string
+  subheadline: string | null
+  ctaLabel: string | null
+  ctaHref: string | null
+  image: HeroPromotionImage | null
+  imageWidth: number | null
+  imageHeight: number | null
+  imageBlurDataUrl: string | null
+  imageAlt: string | null
+  status: HeroPromotionStatus
+  priority: number
+  startsAt: string | null
+  endsAt: string | null
+  publishedAt: string | null
+  createdAt: string
+  updatedAt: string
+  city: { id: string; name: string; slug: string } | null
+  country: { id: string; name: string; slug: string } | null
+}
+
+export interface HeroPromotionList {
+  items: HeroPromotion[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export interface HeroPromotionPresignResponse {
+  uploadUrl: string
+  storageKey: string
+}

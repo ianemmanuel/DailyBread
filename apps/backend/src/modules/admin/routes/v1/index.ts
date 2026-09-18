@@ -21,6 +21,7 @@ import paymentMethodsRouter from "./admin.paymentMethod.routes"
 import financeRouter from "./admin.finance.routes"
 import { financeAdminRouter } from "@/modules/finance"
 import { taxAdminRouter } from "@/modules/tax"
+import { marketingAdminRouter } from "@/modules/marketing"
 
 const v1Router: Router = Router()
 
@@ -52,6 +53,12 @@ v1Router.use("/finance", financeRouter)
 v1Router.use("/finance", financeAdminRouter)
 //* Consumption tax — its own module, not nested under finance.
 v1Router.use("/tax", taxAdminRouter)
+/*
+ * Storefront merchandising — its own module, mounted here so it inherits the
+ * full adminAuthChain (token -> user -> active -> permissions -> scope) that
+ * adminRouter applies before `/v1`, exactly like tax and finance.
+ */
+v1Router.use("/marketing", marketingAdminRouter)
 v1Router.use("/kpis", kpiRouter)
 
 export default v1Router

@@ -354,6 +354,7 @@ model Country {
   providerAccounts CountryProviderAccount[]
   taxRates         CountryTaxRate[]
   taxConfig        CountryTaxConfig?
+  heroPromotions   HeroPromotion[]
 
   @@index([status])
   @@index([slug])
@@ -389,13 +390,14 @@ model City {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  country       Country              @relation(fields: [countryId], references: [id])
-  documentTypes DocumentTypeConfig[]
-  zones         Zone[]
-  marketSignals MarketSignal[]
-  serviceAreas  ServiceArea[]
-  deliveryZones DeliveryZone[]
-  adminScopes   AdminUserScope[]
+  country        Country              @relation(fields: [countryId], references: [id])
+  documentTypes  DocumentTypeConfig[]
+  zones          Zone[]
+  marketSignals  MarketSignal[]
+  serviceAreas   ServiceArea[]
+  deliveryZones  DeliveryZone[]
+  adminScopes    AdminUserScope[]
+  heroPromotions HeroPromotion[]
 
   @@unique([countryId, name])
   @@index([countryId])
@@ -3140,4 +3142,102 @@ enum MealPlanSubscriptionStatus {
   ACTIVE
   CANCELLED
   PAUSED
+}
+
+//* =========MARKETING — STOREFRONT HERO PROMOTIONS=============
+//
+// What the customer storefront shows in its hero card, chosen by where the
+// visitor is: CITY -> COUNTRY -> GLOBAL. Perth sees Perth's; with none,
+// Australia's; with none, the global default. Perth must never see Berlin's,
+// and two cities in one country may differ.
+//
+// Named HeroPromotion, not HeroOffer, deliberately. "Offer" already means
+// something precise here — a vendor-funded Discount with redemption rules and
+// caps. This is a MARKETING SLOT: an image, a line of copy and a link. Today
+// admins fill it; the planned next use is vendors paying to have a meal
+// featured, which is a promotion and not a discount.
+//
+// Extension point for that, when it lands: nullable vendorId / menuItemId plus
+// a funding column, alongside whatever the payments module needs. Nothing
+// speculative is modelled now.
+model HeroPromotion {
+  id String @id @default(uuid())
+
+  //* WHERE this applies. The scope and the ids must agree — a CITY row with no
+  //* city would never match, a GLOBAL row naming a country would match too
+  //* widely. assertScopeShape() in the marketing module is the one rule, and it
+  //* runs before every write.
+  scope     HeroPromotionScope
+  cityId    String?
+  countryId String?
+
+  //* Copy. Only the headline is required: a promotion with no image and no
+  //* call to action is still a legitimate seasonal message.
+  eyebrow     String?
+  headline    String
+  subheadline String?
+  ctaLabel    String?
+  ctaHref     String?
+
+  //* ── Imagery ─────────────────────────────────────────────────────────────
+  //* imageKey is a key in the PUBLIC bucket and names an object this server
+  //* produced — never the admin's file byte-for-byte. It is a KEY and not a
+  //* URL on purpose: the URL is built at one exit point, so changing storage
+  //* provider or CDN domain is a config change and not a data migration.
+  //*
+  //* originalImageKey points at the untouched upload in the PRIVATE bucket,
+  //* kept so the crop can be redone later without asking the admin to
+  //* re-upload. It must never be served.
+  //*
+  //* width/height prevent the page shifting while the image loads, and
+  //* imageBlurDataUrl is a ~20px placeholder — a remote image cannot be
+  //* statically imported, so this is the only way to blur up.
+  imageKey         String?
+  originalImageKey String?
+  imageWidth       Int?
+  imageHeight      Int?
+  imageBlurDataUrl String?
+  imageAlt         String?
+
+  status      HeroPromotionStatus @default(DRAFT)
+  //* Ties inside one scope: higher wins, then newest publishedAt.
+  priority    Int                 @default(0)
+  //* Optional run window. Null start = live as soon as published; null end =
+  //* until withdrawn. Resolution filters on these in SQL and the pure rule
+  //* re-checks the ordering, so the two cannot drift.
+  startsAt    DateTime?
+  endsAt      DateTime?
+  publishedAt DateTime?
+
+  createdByAdminId String?
+  updatedByAdminId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  //* Restrict, not Prisma's default SET NULL for an optional relation:
+  //* nulling a live CITY promotion's city would leave a row that resolves to
+  //* nothing rather than failing loudly. Geography is withdrawn by status in
+  //* this system and never deleted, so this should never fire.
+  city    City?    @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  country Country? @relation(fields: [countryId], references: [id], onDelete: Restrict)
+
+  //* Resolution reads "published, in window, for this city/country/global",
+  //* ordered by scope then priority then publishedAt.
+  @@index([status, scope, startsAt, endsAt])
+  @@index([cityId, status])
+  @@index([countryId, status])
+  @@index([deletedAt])
+}
+
+enum HeroPromotionScope {
+  CITY //* one city
+  COUNTRY //* every city in one country
+  GLOBAL //* the default when nothing more specific exists
+}
+
+enum HeroPromotionStatus {
+  DRAFT //* being written; never resolved to a visitor
+  PUBLISHED //* eligible, subject to its run window
+  ARCHIVED //* withdrawn, kept for history — the catalog pattern, no delete
 }
