@@ -41,6 +41,14 @@ export type { AdminRoleName } from "../enums/admin"
 export { AdminRoleNames } from "../enums/admin"
 export { AdminUserStatus } from "../enums/admin"
 export { AdminScopeType } from "../enums/admin"
+export {
+  HERO_PRIORITY_TIERS,
+  HeroPromotionPriority,
+  priorityForTier,
+  tierForPriority,
+  tierRequiresEndDate,
+} from "../enums/marketing"
+export type { HeroPromotionPriorityTier } from "../enums/marketing"
 export { VendorApplicationStatus } from "../enums/vendor"
 export { DocumentStatus } from "../enums/document"
 
@@ -186,6 +194,8 @@ export type { FinancialReadinessReason, NormalizedWebhookEventType } from "../en
  * payload has no way to name an object or claim a size.
  */
 
+import type { HeroPromotionPriorityTier } from "../enums/marketing"
+
 export type HeroPromotionScope = "CITY" | "COUNTRY" | "GLOBAL"
 export type HeroPromotionStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED"
 
@@ -213,7 +223,20 @@ export interface HeroPromotion {
   imageBlurDataUrl: string | null
   imageAlt: string | null
   status: HeroPromotionStatus
+  /** The stored ranking number. `priorityTier` is what an admin chooses. */
   priority: number
+  /** Derived from `priority` by the server, so the ERP never re-bands it. */
+  priorityTier: HeroPromotionPriorityTier
+  /**
+   * Whether THIS admin may write this promotion.
+   *
+   * Computed by the server from the same guard that would refuse the write, so
+   * the ERP shows a read-only view instead of a form that 403s — and cannot
+   * drift from the rule by re-deriving scope in the browser (principle 1).
+   * Reading is deliberately wider than writing: every promotion is visible to
+   * anyone with `marketing:promotions:read`.
+   */
+  canManage: boolean
   startsAt: string | null
   endsAt: string | null
   publishedAt: string | null
@@ -227,7 +250,17 @@ export interface HeroPromotionList {
   items: HeroPromotion[]
   page: number
   pageSize: number
+  /** Rows matching the CURRENT filters. */
   total: number
+  /** Across every promotion, ignoring the filters — so a forgotten draft is
+   *  visible from whichever view the admin happens to be looking at. */
+  statusCounts: { DRAFT: number; PUBLISHED: number; ARCHIVED: number }
+  /**
+   * What a visitor with no location sees right now, resolved through the same
+   * function the storefront calls. `null` means nothing is scheduled globally
+   * and the storefront is showing its own built-in hero.
+   */
+  globalFallback: { headline: string; hasImage: boolean } | null
 }
 
 export interface HeroPromotionPresignResponse {

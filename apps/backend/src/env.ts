@@ -70,12 +70,48 @@ const envSchema = z.object({
    * code path that actually needs it.
    */
   R2_PUBLIC_BUCKET_NAME: z.string().default(""),
-  R2_PUBLIC_ENDPOINT: z.union([z.string().url(), z.literal("")]).default(""),
+  /**
+   * The ACCOUNT-level S3 API endpoint, with no path:
+   * `https://<accountId>.r2.cloudflarestorage.com` — identical to R2_ENDPOINT,
+   * since both buckets live in one account.
+   *
+   * Cloudflare's bucket Settings page displays the S3 API value WITH the bucket
+   * name appended, and copying it verbatim is the natural mistake. The SDK
+   * already appends the bucket, so an endpoint carrying one writes every object
+   * to `<bucket>/<bucket>/<key>` — uploads appear to succeed and every public
+   * URL 404s. Refused here rather than discovered on the first upload.
+   */
+  R2_PUBLIC_ENDPOINT: z
+    .union([z.string().url(), z.literal("")])
+    .default("")
+    .refine((value) => value === "" || new URL(value).pathname === "/", {
+      message:
+        "R2_PUBLIC_ENDPOINT must be the account endpoint with NO path or bucket name " +
+        "(https://<accountId>.r2.cloudflarestorage.com). The SDK appends the bucket itself.",
+    }),
   R2_PUBLIC_ACCESS_KEY_ID: z.string().default(""),
   R2_PUBLIC_SECRET_ACCESS_KEY: z.string().default(""),
-  /** The custom domain the public bucket is served from, e.g.
-   *  https://img.dailybread.com — NOT the S3 endpoint. */
-  R2_PUBLIC_CDN_URL: z.union([z.string().url(), z.literal("")]).default(""),
+  /**
+   * The origin the public bucket is SERVED from — the r2.dev subdomain in
+   * development (https://pub-<hash>.r2.dev) or a custom domain in production
+   * (https://img.dailybread.com).
+   *
+   * Explicitly NOT the S3 API endpoint. Pasting R2_PUBLIC_ENDPOINT in here is
+   * the single easiest mistake to make — the two values sit next to each other
+   * in Cloudflare's UI, both are https URLs, and the failure is silent: keys
+   * are written correctly, rows look right, and every image 401s in the
+   * browser because the S3 endpoint requires a signature. Refused here so it
+   * fails at boot with a sentence instead of in production with a broken page.
+   */
+  R2_PUBLIC_CDN_URL: z
+    .union([z.string().url(), z.literal("")])
+    .default("")
+    .refine((value) => !value.includes(".r2.cloudflarestorage.com"), {
+      message:
+        "R2_PUBLIC_CDN_URL must be the bucket's PUBLIC origin (the r2.dev subdomain " +
+        "or a custom domain), not the S3 API endpoint. The r2.dev URL is on the " +
+        "bucket's Settings tab under Public access.",
+    }),
 
   //* Logging — required in production, optional in dev (checked below)
   LOGTAIL_SOURCE_TOKEN: z.string().optional(),
@@ -120,6 +156,22 @@ const envSchema = z.object({
   // Same idea for admin-facing emails (zone-change alerts link to the
   // city geography page). Optional — the email omits the CTA if unset.
   ADMIN_DASHBOARD_URL: z.string().url().optional(),
+
+  /*
+   * The customer storefront, and the shared secret for purging its cache.
+   *
+   * The storefront renders its landing page statically with a timed
+   * revalidate; this lets a publish show up at once instead of at the end of
+   * that window. Both OPTIONAL and checked together — a deployment with no
+   * storefront attached, or a developer working on another module, must not be
+   * blocked, and `revalidateStorefront` degrades to a debug log.
+   *
+   * STOREFRONT_REVALIDATE_SECRET must match the storefront's own copy. The
+   * storefront FAILS CLOSED without it, because an unauthenticated purge
+   * endpoint is a cheap way to push repeated re-renders onto this API.
+   */
+  CUSTOMER_APP_URL: z.string().url().optional(),
+  STOREFRONT_REVALIDATE_SECRET: z.string().min(32).optional(),
 })
 
 function loadEnv() {

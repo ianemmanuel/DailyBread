@@ -18,6 +18,20 @@ const buttonVariants = cva(
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20",
+        /*
+         * Status actions, following the destructive variant's shape exactly:
+         * a TINT rather than a solid fill. The ERP is dense and operational —
+         * a wall of saturated buttons stops any one of them meaning anything,
+         * so colour here marks the KIND of action, not its importance.
+         *
+         * warning = reversible and consequential (suspend, pause, withdraw).
+         * success = restores something (reactivate, resume, publish).
+         * destructive stays for what cannot be undone.
+         */
+        warning:
+          "bg-warning/10 text-warning hover:bg-warning/20 focus-visible:border-warning/40 focus-visible:ring-warning/20",
+        success:
+          "bg-success/10 text-success hover:bg-success/20 focus-visible:border-success/40 focus-visible:ring-success/20",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

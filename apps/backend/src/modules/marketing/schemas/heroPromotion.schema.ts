@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { HERO_PRIORITY_TIERS } from "@repo/types/enums"
+
 import { ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_BYTES } from "@/lib/images/transform"
 
 /*
@@ -42,7 +44,11 @@ const placement = {
 }
 
 const scheduling = {
-  priority: z.number().int().min(0).max(1000).optional(),
+  /* A NAMED TIER, never the raw number. The stored column stays an Int, but a
+   * free integer at the API boundary is how priority fields rot: somebody
+   * sends 999 "to be safe" and nothing can ever outrank it again. The service
+   * maps the tier to its number; see enums/marketing.ts. */
+  priorityTier: z.enum(HERO_PRIORITY_TIERS).optional(),
   startsAt: z.coerce.date().nullish(),
   endsAt: z.coerce.date().nullish(),
 }
@@ -73,6 +79,7 @@ export const updateHeroPromotionSchema = z
 export const listHeroPromotionsSchema = z
   .object({
     scope: HERO_SCOPE.optional(),
+    priorityTier: z.enum(HERO_PRIORITY_TIERS).optional(),
     status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
     cityRef: z.string().trim().min(1).optional(),
     countryRef: z.string().trim().min(1).optional(),

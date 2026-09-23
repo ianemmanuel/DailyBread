@@ -1,9 +1,10 @@
 import type { Metadata } from "next"
+import { cookies } from "next/headers"
 import { AdminSessionProvider } from "@/providers/admin-session-provider"
 import { Sidebar } from "@/components/dashboard/sidebar/Sidebar"
 import { Navbar } from "@/components/dashboard/navbar/Navbar"
 import { Footer } from "@/components/dashboard/layout/Footer"
-import { SidebarProvider } from "@/providers/sidebar-provider"
+import { SIDEBAR_COOKIE, SidebarProvider } from "@/providers/sidebar-provider"
 import { getAdminSession } from "@/lib/auth/session"
 
 export const metadata: Metadata = {
@@ -21,9 +22,21 @@ export default async function DashboardLayout({
 }) {
   const session = await getAdminSession()
 
+  /* Read here so the server renders the SAME tree the client will hydrate.
+   * The collapsed sidebar renders a Popover and a Tooltip per section, both of
+   * which call Radix's useId, so a server/client disagreement shifts generated
+   * ids across the whole page — see sidebar-provider.tsx. */
+  const collapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === "true"
+
   return (
       <AdminSessionProvider session={session}>
-        <SidebarProvider>
+        <SidebarProvider initialCollapsed={collapsed}>
+          {/* Seeds the layout offset before first paint, so a collapsed
+              sidebar no longer flashes at full width. The media query is what
+              keeps it desktop-only, and it cannot live in an inline style. */}
+          <style>{`@media (min-width:1024px){:root{--_sidebar-offset:${
+            collapsed ? "72px" : "240px"
+          }}}`}</style>
           <div className="relative min-h-screen bg-background">
             <Sidebar/>
 

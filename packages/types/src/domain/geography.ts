@@ -169,15 +169,21 @@ export interface ResolvedCapabilities extends ZoneCapabilityFlags {
 }
 
 export interface CreateZoneRequest {
-  name     : string
-  boundary : ZoneBoundary
+  //* OPERATIONAL name — how the team refers to this zone internally.
+  name       : string
+  //* CUSTOMER-FACING name. Required: the storefront names the areas it
+  //* covers, and an optional field with a fallback to `name` would silently
+  //* publish ops vocabulary, which is the failure this column exists to end.
+  publicName : string
+  boundary   : ZoneBoundary
   //* Defaults to REGISTRATION_ONLY server-side when omitted.
-  level?   : ZoneLevel
+  level?     : ZoneLevel
 }
 
 export interface UpdateZoneRequest {
-  name?     : string
-  boundary? : ZoneBoundary
+  name?       : string
+  publicName? : string
+  boundary?   : ZoneBoundary
 }
 
 export interface SetZoneLevelRequest {

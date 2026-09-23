@@ -143,6 +143,9 @@ export function CityGeographyWorkspace(props: Props) {
   // zone-create form (shown after a zone polygon is drawn)
   const [zoneDraft, setZoneDraft] = useState<Poly | null>(null)
   const [zoneName, setZoneName] = useState("")
+  /* The CUSTOMER-FACING name. Required by the backend, because the storefront
+   * now lists the areas we cover and `zoneName` is written for ops. */
+  const [zonePublicName, setZonePublicName] = useState("")
   const [zoneLevel, setZoneLevel] = useState<ZoneLevel>("REGISTRATION_ONLY")
 
   // ── layer management ──────────────────────────────────────────────────────
@@ -334,6 +337,7 @@ export function CityGeographyWorkspace(props: Props) {
     drawRef.current?.changeMode("simple_select")
     setZoneDraft(null)
     setZoneName("")
+    setZonePublicName("")
     setZoneLevel("REGISTRATION_ONLY")
     setMode("view")
   }, [])
@@ -516,13 +520,26 @@ export function CityGeographyWorkspace(props: Props) {
 
   async function createZone() {
     if (!zoneDraft) return
-    if (!zoneName.trim()) { toast.error("Give the zone a name"); return }
+    if (!zoneName.trim()) { toast.error("Give the zone an operational name"); return }
+    /* Checked here so the admin finds out before the round trip; the backend
+     * refuses it again, which is what actually decides. */
+    if (!zonePublicName.trim()) {
+      toast.error("Give the zone a customer-facing name", {
+        description: "Customers see this when we list the areas we deliver to.",
+      })
+      return
+    }
     setSaving(true)
     try {
       const res = await fetch(`/api/cities/${citySlug}/zones`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: zoneName.trim(), boundary: zoneDraft, level: zoneLevel }),
+        body: JSON.stringify({
+          name      : zoneName.trim(),
+          publicName: zonePublicName.trim(),
+          boundary  : zoneDraft,
+          level     : zoneLevel,
+        }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -642,9 +659,10 @@ export function CityGeographyWorkspace(props: Props) {
             <div className="absolute inset-x-3 bottom-3 space-y-2 rounded-xl border border-border bg-card/95 p-3 backdrop-blur">
               <div className="grid gap-2 sm:grid-cols-[1fr_180px]">
                 <div className="space-y-1">
-                  <Label className="text-xs" htmlFor="zone-name">Zone name</Label>
+                  <Label className="text-xs" htmlFor="zone-name">Operational name</Label>
                   <Input id="zone-name" value={zoneName} onChange={(e) => setZoneName(e.target.value)}
-                    placeholder="e.g. Central Business District" className="h-9 rounded-lg text-sm" />
+                    placeholder="e.g. NBO-CBD-01" className="h-9 rounded-lg text-sm" />
+                  <p className="text-[11px] text-muted-foreground">Internal only — never shown to customers.</p>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Capability level</Label>
@@ -659,6 +677,16 @@ export function CityGeographyWorkspace(props: Props) {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs" htmlFor="zone-public-name">Customer-facing name</Label>
+                <Input id="zone-public-name" value={zonePublicName}
+                  onChange={(e) => setZonePublicName(e.target.value)}
+                  placeholder="e.g. Westlands, Kileleshwa &amp; Runda" className="h-9 rounded-lg text-sm" />
+                <p className="text-[11px] text-muted-foreground">
+                  Shown in the storefront when we list the areas we deliver to. Write it the way a
+                  customer would describe where they live.
+                </p>
               </div>
               <p className="text-xs text-muted-foreground">{ZONE_LEVEL_META[zoneLevel].description}</p>
               <div className="flex items-center justify-end gap-2">

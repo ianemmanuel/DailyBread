@@ -51,6 +51,12 @@ export const handleListAddresses: RequestHandler = async (req, res, next) => {
 /** The fields a client may set on an address. Pulled out so create and update
  *  can never drift on which they accept — the same reason the vendor menu
  *  controller shares one mapper. */
+/*
+ * Field by field, never a spread (bug class #1). `countryId` is carried only so
+ * the service can CROSS-CHECK it against the pin and refuse a contradiction —
+ * the country that gets stored is derived from the coordinates, never from
+ * here, and the same is true of the city.
+ */
 function addressInputFrom(body: Record<string, unknown> | undefined) {
   return {
     label       : body?.label as string | null | undefined,
@@ -58,9 +64,9 @@ function addressInputFrom(body: Record<string, unknown> | undefined) {
     addressLine2: body?.addressLine2 as string | null | undefined,
     city        : body?.city as string,
     postalCode  : body?.postalCode as string | null | undefined,
-    countryId   : body?.countryId as string,
-    latitude    : body?.latitude as number | null | undefined,
-    longitude   : body?.longitude as number | null | undefined,
+    countryId   : body?.countryId as string | null | undefined,
+    latitude    : body?.latitude as number,
+    longitude   : body?.longitude as number,
     isDefault   : body?.isDefault === true,
   }
 }

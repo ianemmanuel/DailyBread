@@ -1,9 +1,10 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Loader2, Pencil, Globe2, Store, Check, Minus, Layers } from "lucide-react"
+import { Loader2, Pencil, Globe2, Store, Check, Minus, Layers, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { EmptyState } from "@/components/shared/EmptyState"
@@ -117,9 +118,34 @@ export function FoodTagsTable({
               return (
                 <tr key={tag.id} className="border-b border-border/40 last:border-0">
                   <td className="px-4 py-3">
-                    <p className="font-medium text-foreground">{tag.name}</p>
+                    {/* Cuisines have a details page because they carry imagery
+                        the storefront renders; dietary tags are badges with
+                        nothing extra to show, so their name stays plain rather
+                        than offering a link to an identical-looking screen. */}
+                    {kind === "cuisines" ? (
+                      <Link
+                        href={`/food-tags/cuisines/${tag.slug}`}
+                        className="font-medium text-foreground underline-offset-4 hover:underline"
+                      >
+                        {tag.name}
+                      </Link>
+                    ) : (
+                      <p className="font-medium text-foreground">{tag.name}</p>
+                    )}
                     {tag.description && (
                       <p className="mt-0.5 max-w-md text-xs text-muted-foreground">{tag.description}</p>
+                    )}
+                    {/* An EXPLICIT way in. The name being a link is invisible
+                        until you hover it, which is how a details page that
+                        exists reads as one that does not. */}
+                    {kind === "cuisines" && (
+                      <Link
+                        href={`/food-tags/cuisines/${tag.slug}`}
+                        className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
+                      >
+                        See more
+                        <ArrowRight className="size-3" />
+                      </Link>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -164,9 +190,21 @@ export function FoodTagsTable({
                   {canManageCatalog && (
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-xs" onClick={() => setEditing(tag)}>
-                          <Pencil className="size-3" />Edit
-                        </Button>
+                        {/* A cuisine also carries a photograph, which does not
+                            belong in a side panel — so it edits on its own
+                            page. A dietary tag is a name and a sentence, and
+                            the Sheet stays right for that. */}
+                        {kind === "cuisines" ? (
+                          <Button asChild variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-xs">
+                            <Link href={`/food-tags/cuisines/${tag.slug}/edit`}>
+                              <Pencil className="size-3" />Edit
+                            </Link>
+                          </Button>
+                        ) : (
+                          <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-xs" onClick={() => setEditing(tag)}>
+                            <Pencil className="size-3" />Edit
+                          </Button>
+                        )}
                         <FoodTagStatusActions kind={kind} tag={tag} singular={singular} />
                       </div>
                     </td>

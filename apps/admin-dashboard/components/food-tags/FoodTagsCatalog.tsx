@@ -1,5 +1,7 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
-import { Globe2, Store, Layers } from "lucide-react"
+import { Globe2, Store, Layers, Plus } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { adminFetch } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { AdminPermissions } from "@repo/types/admin-app"
@@ -118,7 +120,19 @@ export async function FoodTagsCatalog({ kind, searchParams }: Props) {
         description={meta.description}
         actions={
           canManageCatalog
-            ? <FoodTagFormSheet kind={kind} singular={meta.singular} withTrigger />
+            ? (
+                /* Cuisines create on their own page because the next step is
+                   uploading a picture; dietary tags keep the Sheet. */
+                kind === "cuisines"
+                  ? (
+                      <Button asChild size="sm" className="gap-2">
+                        <Link href="/food-tags/cuisines/new">
+                          <Plus className="size-4" />Add cuisine
+                        </Link>
+                      </Button>
+                    )
+                  : <FoodTagFormSheet kind={kind} singular={meta.singular} withTrigger />
+              )
             : undefined
         }
       />

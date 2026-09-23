@@ -34,16 +34,16 @@ const ADDRESS_SELECT = {
 type AddressRow = {
   id: string; label: string | null; addressLine1: string; addressLine2: string | null
   city: string; postalCode: string | null; countryId: string
-  latitude: number | null; longitude: number | null; isDefault: boolean; createdAt: Date
+  latitude: number; longitude: number; isDefault: boolean; createdAt: Date
 }
 
-/** Resolved at the response boundary. A pinned address gets a real answer; an
- *  unpinned one gets null, which is honestly "we cannot tell yet" rather than
- *  "we do not deliver". */
+/** Resolved at the response boundary, on every read. Every saved address has a
+ *  pin — that is what makes it a delivery destination — so there is always a
+ *  real answer to give. */
 async function present(row: AddressRow): Promise<CustomerAddress> {
-  const serviceability = row.latitude != null && row.longitude != null
-    ? (await resolveCustomerLocation({ latitude: row.latitude, longitude: row.longitude })).serviceability
-    : null
+  const { serviceability } = await resolveCustomerLocation({
+    latitude: row.latitude, longitude: row.longitude,
+  })
 
   return {
     id          : row.id,
@@ -213,21 +213,27 @@ async function assertOwned(customerId: string, addressId: string) {
   return row
 }
 
+/**
+ * What the client may say, and what the server decides.
+ *
+ * The client supplies the human-readable lines, a label, and the COORDINATES
+ * its location flow produced. Everything geographic is derived from those
+ * coordinates by the one existing resolver:
+ *
+ *   • the city is resolved by point-in-polygon and never read from `city`,
+ *     which is kept purely so the address prints the way its owner wrote it;
+ *   • the country comes off the RESOLVED city, so an address in Mombasa is a
+ *     Kenyan address whatever the caller claimed.
+ *
+ * A supplied `countryId` is treated as a cross-check and nothing more. When it
+ * disagrees with the pin the request is REFUSED rather than quietly corrected:
+ * the two statements cannot both be what the customer meant, and silently
+ * keeping one would save an address they never entered (the same reasoning as
+ * marketing's INVALID_SCOPE).
+ */
 async function validate(input: UpsertCustomerAddressRequest) {
   const addressLine1 = text(input.addressLine1, "addressLine1", 200, true)
   const city = text(input.city, "city", 100, true)
-
-  if (!input.countryId || typeof input.countryId !== "string") {
-    throw new ApiError(HttpStatus.BAD_REQUEST, "Choose a country.", "COUNTRY_REQUIRED")
-  }
-
-  const country = await prisma.country.findFirst({
-    where : { id: input.countryId, status: "ACTIVE" },
-    select: { id: true },
-  })
-  if (!country) {
-    throw new ApiError(HttpStatus.BAD_REQUEST, "We are not operating in that country.", "COUNTRY_UNAVAILABLE")
-  }
 
   const latitude  = coordinate(input.latitude, 90, "latitude")
   const longitude = coordinate(input.longitude, 180, "longitude")
@@ -242,13 +248,54 @@ async function validate(input: UpsertCustomerAddressRequest) {
     )
   }
 
+  // A delivery address without a point cannot take part in serviceability: it
+  // cannot be checked for coverage, cannot anchor a feed and cannot receive
+  // food. Saving one would leave the customer holding something that looks
+  // like an address and is not a destination.
+  if (latitude === null || longitude === null) {
+    throw new ApiError(
+      HttpStatus.BAD_REQUEST,
+      "Pick this address on the map so we know exactly where to deliver.",
+      "LOCATION_REQUIRED",
+    )
+  }
+
+  /* THE one geography resolver — the same call discovery and the serviceability
+   * endpoint make, so an address can never disagree with the feed rendered from
+   * it. */
+  const resolved = await resolveCustomerLocation({ latitude, longitude })
+
+  /* Outside every operating city there is no country to derive and no coverage
+   * to describe, now or later. This is the only place a save is refused on
+   * geography: a point INSIDE a city we know is saved whatever its zone says,
+   * because "not launched here yet" and "paused right now" are temporary and
+   * the address book reports them on every read. */
+  if (!resolved.city) {
+    throw new ApiError(
+      HttpStatus.BAD_REQUEST,
+      "We do not deliver anywhere near that spot yet, so it cannot be saved as a delivery address.",
+      "OUTSIDE_COVERAGE",
+    )
+  }
+
+  const countryId = resolved.city.countryId
+
+  const claimed = text(input.countryId, "countryId", 64, false)
+  if (claimed && claimed !== countryId) {
+    throw new ApiError(
+      HttpStatus.BAD_REQUEST,
+      "That map location is not in the country you chose.",
+      "COUNTRY_MISMATCH",
+    )
+  }
+
   return {
     label       : text(input.label, "label", 40, false),
     addressLine1,
     addressLine2: text(input.addressLine2, "addressLine2", 200, false),
     city,
     postalCode  : text(input.postalCode, "postalCode", 20, false),
-    countryId   : country.id,
+    countryId,
     latitude,
     longitude,
   }

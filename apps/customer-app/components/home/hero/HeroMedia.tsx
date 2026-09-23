@@ -1,11 +1,11 @@
 import Image from "next/image"
 import Link from "next/link"
-import { ArrowUpRight, Tag } from "lucide-react"
+import { ArrowUpRight } from "lucide-react"
 
-import type { HeroContent } from "@/constants/home/hero-content"
+import type { HeroContent } from "@/lib/data/hero"
 
 /*
- * The hero photograph and the offer card that floats over it.
+ * The hero photograph and the call-to-action card that floats over it.
  *
  * The photo is the landing page's largest element, so it loads eagerly at high
  * fetch priority. Not `preload`: on phones the photo sits below the text and
@@ -18,8 +18,8 @@ import type { HeroContent } from "@/constants/home/hero-content"
  */
 export function HeroMedia({
   image,
-  offer,
-}: Pick<HeroContent, "image" | "offer">) {
+  cta,
+}: Pick<HeroContent, "image" | "cta">) {
   return (
     <div className="relative isolate mx-auto w-full max-w-lg lg:max-w-none">
       {/* A soft brand-coloured glow behind the photo. */}
@@ -44,19 +44,33 @@ export function HeroMedia({
         />
       </div>
 
-      {offer && (
+      {/*
+        The promotion's call to action, floating over the lower edge of the
+        photograph — the shape design.png gives this slot.
+
+        It carries the admin's own label and nothing else. It used to render a
+        "Featured" kicker above the label, which was the storefront inventing a
+        word about content it did not write; the label already says what the
+        thing is. Keeping it to one line also means a long label truncates
+        instead of reflowing the card over the food.
+
+        Positioned bottom-left because the hero image spec reserves the bottom
+        left third for exactly this — see the image guidance in CLAUDE.md.
+      */}
+      {cta && (
         <Link
-          href={offer.href}
-          className="surface-interactive absolute right-4 bottom-4 left-4 flex items-center gap-3 p-3 sm:right-auto sm:max-w-xs lg:bottom-10 lg:-left-8"
+          href={cta.href}
+          className="surface-interactive absolute right-4 bottom-4 left-4 flex items-center gap-3 p-4 sm:right-auto sm:max-w-xs lg:bottom-10 lg:-left-8"
         >
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <Tag className="size-5" />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+            {cta.label}
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs font-medium text-muted-foreground">{offer.label}</span>
-            <span className="block truncate text-sm font-semibold text-foreground">{offer.title}</span>
+          <span
+            aria-hidden
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+          >
+            <ArrowUpRight className="size-4" />
           </span>
-          <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
         </Link>
       )}
     </div>

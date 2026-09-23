@@ -1,12 +1,20 @@
 import type { Metadata } from "next"
 
 import { HeroPromotionForm } from "@/components/marketing/HeroPromotionForm"
-import { loadPlaceOptions } from "../places"
+import { getAdminSession } from "@/lib/auth/session"
+import { getScopeTier } from "@/lib/auth/scope-tier"
+import { loadScopedCountries } from "../places"
 
 export const metadata: Metadata = { title: "New hero promotion" }
 
 export default async function NewHeroPromotionPage() {
-  const { countries, cities } = await loadPlaceOptions()
+  /* The tier decides which reaches the form offers. Both calls are deduped by
+   * Next within a render pass, so asking for the session here costs nothing
+   * beyond what the dashboard layout already fetched. */
+  const [session, countries] = await Promise.all([
+    getAdminSession(),
+    loadScopedCountries(),
+  ])
 
   return (
     <div className="space-y-5">
@@ -16,7 +24,7 @@ export default async function NewHeroPromotionPage() {
           Saved as a draft. Publishing it is a separate step.
         </p>
       </div>
-      <HeroPromotionForm countries={countries} cities={cities} />
+      <HeroPromotionForm countries={countries} tier={getScopeTier(session)} />
     </div>
   )
 }

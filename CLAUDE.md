@@ -29,7 +29,7 @@ Nothing a user uploaded is ever served byte for byte. `lib/storage/publicMedia.s
 is the only writer to the public bucket and `publicUrl()` is the only place a key
 becomes a URL.
 
-Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**666 tests**), and the smoke scripts in `apps/backend/scripts/smoke/` (`pnpm dlx tsx --env-file=.env scripts/smoke/<name>.ts`). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
+Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**680 tests**), and the smoke scripts in `apps/backend/scripts/smoke/` (`pnpm dlx tsx --env-file=.env scripts/smoke/<name>.ts`). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
 
 ---
 
@@ -73,7 +73,9 @@ Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**666 test
 9. **Tailwind v4**: `dark:` defaults to the media query — every app needs `@custom-variant dark (&:where(.dark, .dark *));` or vendored `dark:` utilities fire for dark-OS users. `@apply` accepts only real utilities, so shared component classes must be declared with `@utility`. Preflight drops the button pointer cursor — `cursor-pointer` is in the base Button class, but raw `<button>`s need it individually.
 10. **A feature is unreachable until `pnpm db:seed` runs.** New permissions live in seed data; `syncSuperAdminPermissions()` is what grants them to an existing super admin.
 11. **Compiler emit must never land next to sources.** `packages/ui` built with `tsc -b` and no `outDir`, littering `src/` with `.js` / `.d.ts` / `.d.ts.map`; a later sweep of those strays took the whole component directory with it and left all three frontends unable to resolve their imports — undetected because nothing typechecks a package with no TS. `.gitignore` now blocks `packages/*/src/**/*.js` and friends. Any new package that compiles needs an explicit `outDir`.
-12. **A stale `.next/dev/types` produces syntax errors in files you did not write.** `Unterminated template literal` / `Declaration or statement expected` pointing into `.next/dev/types/{routes.d.ts,validator.ts}` is a corrupt cache, not a real error: `rm -rf .next && next typegen`. Do not go looking for the bug in your own code.
+12. **Client-only state that changes the TREE SHAPE is a hydration bug, not a styling one.** The ERP sidebar stored its collapsed state in `localStorage`, and `SidebarNav` renders a `<Popover>` + `<Tooltip>` per section *only when collapsed* — both call Radix's `useId`. The server always rendered the expanded tree, the client switched after mount, and every generated id downstream shifted: it surfaced as `aria-controls` mismatching on the **mobile sheet's trigger**, a component with nothing to do with the sidebar's width. Fixed by moving the preference to a **cookie**, which travels with the request so the server renders what the client will hydrate (and which also killed a real flash of an expanded sidebar on every load). Rule: if a persisted preference changes *which components render*, it must reach the server — `localStorage` can only carry preferences that change CSS.
+13. **A stale `.next/dev/types` produces syntax errors in files you did not write.** `Unterminated template literal` / `Declaration or statement expected` pointing into `.next/dev/types/{routes.d.ts,validator.ts}` is a corrupt cache, not a real error: `rm -rf .next && next typegen`. Do not go looking for the bug in your own code.
+14. **`next build` run over a live `next dev` breaks the dev server — every route 404s.** They share the app's `.next` folder; the build rewrites it and the running dev server loses its compiled `server/` output from under it. It presented as "`/` is missing" while `app/page.tsx` was untouched — the tell is that plain static routes like `/meals` 404 too. Fix: stop the dev server, `rm -rf apps/<app>/.next`, restart. **Before building to verify anything, check the app's port is free** (`netstat -ano | grep LISTENING | grep :3003`); if it is not, verify with `tsc` only, or ask.
 
 ---
 
@@ -89,15 +91,133 @@ router, exactly like `taxAdminRouter`.
 
 **`HeroPromotion`, not `HeroOffer`.** "Offer" already means a funded `Discount`
 with redemption rules and caps. This is a marketing SLOT — image, copy, link.
-The planned next use is vendors paying to have a meal featured, which is a
-promotion, not a discount. Extension point when that lands: nullable
-`vendorId`/`menuItemId` plus a funding column. Nothing speculative is modelled.
+Nothing speculative is modelled.
 
 **Resolution is CITY → COUNTRY → GLOBAL**, most specific wins, ties broken by
 `priority` then newest `publishedAt`. `resolveHeroPromotion()` is the pure rule;
 the SQL pre-filter orders by the same columns, and the pure function is what
 makes that transcription testable (principle 4). Perth never sees Berlin's, and
 an unknown visitor location matches nothing city-scoped.
+
+**Every hero promotion promotes the PLATFORM**, at all three scopes (explicit
+direction). A promotion is DailyBread speaking — a seasonal message, a new-market
+announcement, an anniversary. The scope says WHERE it is seen and nothing else;
+there is no subject axis, and `HeroPromotion` has no vendor, meal or funding
+column anywhere.
+> **Vendor-funded featured placement is out of scope and deliberately
+> unmodelled** (explicit direction, superseding the earlier "vendors paying to
+> feature a meal" note). It is its own system — inventory, pricing, billing, and
+> fair rotation between vendors who all paid for the same city — and none of
+> this is shaped for it. Half-modelling it would leave dormant columns and
+> branches that mislead whoever reads this next. When it is real, the thing to
+> settle first is that `resolveHeroPromotion` returns a SINGLE winner: correct
+> for platform content, wrong for paid placement, where the loser of a priority
+> tie would silently never render while still being billed.
+
+**Ranking is PRIORITY first, then specificity, then newest** — and the order
+matters more than it looks. Specificity-first is a *routing* rule (CSS, DNS):
+right for a fallback, wrong for a campaign, because a national promotion could
+never reach a city that had one of its own, so the busiest markets were the
+only ones to miss it. Since `STANDARD` is **0** and every pre-existing row is
+0, they all tie on priority and fall through to specificity — the old rule is
+now the *default case*, not a replacement, so the change is backward-compatible
+by construction. A city keeps its own hero during a global takeover by matching
+its tier.
+> The SQL pre-filter **must** order by the same three keys in the same order.
+> It also applies a `take`, so a different ordering can truncate the true winner
+> away before `resolveHeroPromotion` ever sees it (principle 4).
+
+**Priority is exposed as NAMED TIERS, never a raw integer** —
+`STANDARD` 0 · `FEATURED` 100 · `TAKEOVER` 500, in
+`packages/types/src/enums/marketing.ts`, shared by the backend and the ERP so
+the mapping exists once. A free integer field rots predictably: someone sets
+999 "to be safe", the next person sets 1000, and the column ends up encoding an
+argument nobody remembers. Google Ad Manager's Sponsorship/Standard/House
+levels are the same answer to the same problem. The column stays `Int`, so
+ordering is still an indexed sort and finer values remain possible without a
+migration; the gaps between tiers leave room to insert one without renumbering.
+
+**Anything above STANDARD is a campaign, and a campaign MUST have an end date**
+(`assertPriorityWindow`, code `CAMPAIGN_NEEDS_END_DATE`). A takeover suppresses
+every ordinary promotion on the platform, so one published for Christmas with
+no end date is still running in May and nothing flags it — it is behaving
+exactly as configured. Enforced on create, on update (the tier can be raised
+later, which is exactly when the date starts being required) **and** on publish.
+`assertWindowNotElapsed` separately refuses publishing a window that has already
+closed: it could never be seen, but it reads as live in every list.
+
+**READING IS NOT SCOPED; writing is** (explicit direction). Every admin holding
+`marketing:promotions:read` sees every promotion at every reach — a hero
+promotion is public marketing copy any customer in that market can already see,
+so there is nothing to protect, and a marketing team that cannot see what other
+markets are running will duplicate and contradict them. `promotionScopeWhere`
+was deleted rather than widened to `{}`.
+> Two consequences. **Principle 6 does not apply here** — nothing is secret, so
+> a write refused for scope answers **403**, not a pretend 404. And
+> `updateHeroPromotion` now calls `assertPromotionScope` on the EXISTING row
+> explicitly: that check used to ride on the scoped `where` in
+> `findPromotionOr404`, and without re-adding it, being able to *see* every
+> promotion would have meant being able to *edit* every one.
+
+**`HeroPromotion.canManage` is computed by the server**, by running the very
+guard that would refuse the write (`canManagePromotion` calls
+`assertPromotionScope` in a try/catch). The ERP renders a read-only view for a
+promotion it cannot write and a "View" instead of "Edit" in the list. The
+browser deliberately does **not** re-derive this from scope rules — two
+implementations of one authorization rule always drift, and the failure would
+be a form that 403s on save, or one that hides an action the server allows.
+
+**The "default promotion" already exists — it is a GLOBAL, STANDARD promotion
+with no end date.** No second concept, no `isDefault` flag: `STANDARD` is the
+only tier that may run without an end date precisely so an evergreen fallback
+can exist, and a global TAKEOVER simply outranks it while its window is open,
+then falls back to it when the window closes. The gap was never the model, it
+was VISIBILITY — so the list returns `globalFallback`, resolved through the
+same `resolveHeroPromotionFor` the storefront calls, and the ERP says in
+so many words what a visitor with no location is seeing right now. `null` means
+the storefront has dropped to its own built-in hero.
+> **It belongs in the ERP, not hard-coded in customer-app.** Marketing owns the
+> copy and must be able to change it without a deploy. The customer app's
+> `FALLBACK_HERO` stays strictly as the *backend-unreachable* safety net — the
+> one case the ERP cannot help with.
+
+**`statusCounts` is deliberately unfiltered.** The failure it exists to catch
+is creating a promotion, navigating away, and never learning it is still a
+draft — a count that respected the current filters would hide exactly the row
+you forgot. The ERP surfaces drafts as a link into `?status=DRAFT`.
+
+**ERP routes: `/marketing/[id]` is READ-ONLY, `/marketing/[id]/edit` is the
+form.** A deliberate departure from this app's "Sheet for forms" convention,
+because the form is four sections plus an uploader — sheet-sized it becomes a
+scrolling column inside a scrolling page, and unusable on a phone. As separate
+routes, the common case (looking at a promotion) ships no form code, an admin
+who may read but not write is redirected rather than shown a disabled editor,
+and an edit survives a refresh. Every row in the list opens the details page;
+editing is a step from there, so a row never offers an action its viewer cannot
+take.
+
+**The ERP offers reaches by SCOPE TIER, and a city is always picked through its
+country.** `HeroPromotionPlacement` builds the reach list from `getScopeTier`:
+global tier gets all three, country tier gets country + city, city tier gets
+city only — the option is absent rather than present-and-rejected. A global
+admin picks a country first and the city list loads from it; when the admin's
+scope holds exactly one country it is shown as a fact, not a dropdown, and its
+cities load immediately. The country list is *already* the scope, because
+`/admin/v1/countries` is scope-filtered — the ERP never re-derives scope.
+`assertPromotionScope` remains the authority (principle 1).
+> **Visible ≠ writable.** A country lead SEES the global default in their list —
+> knowing what their market falls back to is part of the job, and
+> `promotionScopeWhere` returns it. Opening it renders a read-only notice
+> instead of the form (`canAuthorReach`): every write would 403 anyway, and a
+> `<select>` with no option matching the row's own scope silently shows its
+> first one, so the promotion would look re-aimed just from being opened.
+
+**The public-image pipeline is SHARED** — `lib/images/publicImage.ts` owns the
+upload → sanitise → publish round trip, and marketing and the cuisine catalogue
+both go through it. What stays with each caller is only its PREFIXES and its
+CROP, passed in, so hero code can never assert a cuisine key and vice versa.
+The prefix guard in particular is a security control, and two copies of a
+security control is one copy that will not get the next fix.
 
 **Images: re-encoding IS the sanitiser** (`lib/images/transform.ts`). Admins
 upload JPEG, PNG, WebP or AVIF — **never SVG**, which can carry script. The
@@ -134,14 +254,30 @@ customers see, or withdraw it). Geographic scope is enforced per call in the
 SERVICE, never in the router — a route cannot know whether the body names a
 city the caller holds.
 
-**A GLOBAL promotion that names a place is refused, not silently stripped.**
-Found by the smoke test: `countryRef` on a global promotion was being ignored,
-which would have handed the caller a reach they did not ask for. Same class as
-a request field that never reaches its mapper.
+**A promotion that names a place its reach cannot use is refused, not silently
+stripped.** Found by the smoke test: `countryRef` on a global promotion was
+being ignored, which would have handed the caller a reach they did not ask for.
+All three combinations now fail with `INVALID_SCOPE` — global + any place,
+country + city, and city + country (a city row *does* store a country, but it is
+derived from the city, so a supplied one is redundant or contradictory). Same
+class as a request field that never reaches its mapper (bug class #1).
 
 **`presentHeroPromotion` degrades rather than throws** when the public bucket is
 unconfigured. A read crashing over a deployment concern is far worse than a
 missing picture; it logs a warning naming the exact cause.
+
+**The public endpoint has its OWN presenter, and that is a security boundary.**
+`presentPublicHeroPromotion` is a six-field allowlist — eyebrow, headline,
+subheadline, ctaLabel, ctaHref, image — built on top of `presentHeroPromotion`
+so the imageKey → URL rule stays in one place. The admin presenter was
+originally wired straight to the anonymous route, handing the world `status`,
+`priority`, the run window, `publishedAt`/`createdAt`/`updatedAt`, the row id
+and the resolved city/country. The risk is not that those fields are secret —
+it is the DEFAULT: every column added to the table later would have been
+published automatically, and nobody making that change would think to check.
+The smoke test asserts the exact KEY SET for this reason, so widening it has to
+be deliberate. `resolveHeroPromotionFor` therefore returns no id, and the smoke
+test identifies rows by headline.
 
 **The customer endpoint takes no identity at all** — not even
 `attachCustomerContext`. `GET /api/customer/v1/hero-promotion?cityId&countryId`
@@ -152,40 +288,114 @@ it is not. Both ids are shape-checked; an unrecognised one simply matches
 nothing and falls through to the global default.
 
 **`getHeroContent()` passes `anonymous: true`, and that is load-bearing.** It
-skips the Clerk lookup, which is what keeps `/` a STATIC route (`○ /` with a
-5-minute revalidate). Reading auth or cookies in that path would make **every**
-page in the app dynamic. When city/country scoping lands, the location must
-come from somewhere that does not force a dynamic render, or `/` changes class —
-decide that deliberately.
+skips the Clerk lookup, which is what keeps `/` a STATIC route (`○ /`, 60s
+revalidate). Reading auth or cookies in that path would make **every** page in
+the app dynamic. It takes an optional `location`, which is how ONE component
+serves both pages: `/` passes nothing and gets the global promotion,
+`/city/[citySlug]` passes its ids and gets whatever the backend ranks highest
+there. The component cannot tell which scope it was handed and does not need
+to (principle 1).
+> **That was the "decide deliberately" moment, and it was decided by keeping
+> the location OUT of `/`** — the scoped hero lives on the city pages, which
+> are statically generated per market, rather than making the landing page
+> dynamic for everybody.
 
 > **The customer app's `BACKEND_API_URL` has NO `/api` suffix; the ERP's does.**
 > So customer-app paths are written `/api/customer/v1/…` and ERP paths
 > `/admin/v1/…`. Getting this wrong fails as a 404 wrapped in a generic
 > "Something went wrong".
 
-**The hero falls back to a built-in default** when nothing is scheduled, when the
-promotion has no usable image, or when the backend is unreachable — and logs the
-reason in the last case. That is a real default, not a hidden error: a landing
-page with no hero is broken, and unlike a list of results a marketing slot has a
+**The hero's fallback is per-PART, not all-or-nothing.** Copy and image fall
+back independently: a published promotion always has a headline (the column is
+required) but may carry no image — which the schema calls a legitimate seasonal
+message, and which is also what every promotion looks like before the public
+bucket is provisioned. So a promotion's copy is used whenever a promotion
+exists, and the built-in photograph stands in only when that promotion has no
+image of its own. **The built-in hero entire** is used only when nothing is
+scheduled anywhere, or the backend is unreachable — and the reason is logged in
+the last case. That is a real default, not a hidden error: a landing page with
+no hero is broken, and unlike a list of results a marketing slot has a
 meaningful "nothing scheduled" answer. The fallback's invented figures are
-dropped the moment a real promotion renders.
+dropped the moment ANY real promotion renders (principle 11).
+> Falling back wholesale on a missing image was the earlier behaviour and was
+> wrong: it replaced real admin-authored copy with invented marketing.
+
+**Cache freshness is TWO mechanisms, and both are needed.**
+`POST /api/revalidate` on the storefront (shared secret, tag allowlist) is
+called by the BACKEND on publish, archive, and edits to an already-published
+promotion — so an admin sees their change at once instead of waiting out a
+revalidate window. The timed 60-second revalidate **stays**: a promotion can go
+live or expire with no request and no event at all, which is exactly what
+`startsAt`/`endsAt` do, and nothing fires a webhook at midnight.
+
+  | | |
+  |---|---|
+  | on-demand | somebody DID something — instant, event-driven |
+  | timed | the CLOCK crossed a boundary — bounded lag, no event exists |
+
+> **The purge is driven by the backend, not the ERP.** `revalidateTag` only
+> reaches the calling process's cache, so the ERP's own
+> `revalidateTag("hero-promotions")` purges its list view and can never touch
+> the storefront. The backend is also the only place every write goes through.
+> `revalidateStorefront` NEVER throws and never blocks: a failed purge must not
+> turn a successful publish into an error, since the worst case is the
+> staleness you would have had anyway.
+>
+> **Stale-while-revalidate means the FIRST request after a purge still serves
+> the old copy** while regenerating; the next one is fresh. Verified by
+> observation, not assumption — do not read a single stale response as a broken
+> purge.
+>
+> The storefront route **fails closed** when `STOREFRONT_REVALIDATE_SECRET` is
+> unset: an open purge endpoint is a cheap way to force repeated re-renders and
+> push load onto the API. The tag allowlist exists for the same reason.
+
+**A visitor with no location sees the GLOBAL promotion**, and that is the
+landing page's default state rather than a special case — `getHeroContent()`
+sends no `cityId`/`countryId`, which matches nothing city- or country-scoped and
+falls through to global.
 
 **Processing is synchronous, deliberately.** There is no queue in this project
 (no Redis, no BullMQ). Two crops of one photo is 1–3 s and an admin gets a
 finished image instead of a pending state to poll. Add a queue when thousands of
 vendor photos need it, not for this.
 
-> **Setting up the public bucket** (one-time, by hand in Cloudflare):
+> **Setting up the public bucket** (one-time, by hand in Cloudflare). Each value's
+> exact source and shape is documented inline in `apps/backend/.env`:
 > 1. R2 → Create bucket, e.g. `dailybread-public`, same region as the private one.
-> 2. Settings → **Public access** → connect a custom domain (e.g. `img.dailybread.com`).
->    Use a real domain, **not** the `r2.dev` subdomain — it is rate-limited and not for production.
-> 3. Manage API tokens → a token scoped to **this bucket only**, Object Read & Write.
-> 4. Fill the blank `R2_PUBLIC_*` values in `apps/backend/.env`. `R2_PUBLIC_CDN_URL`
->    is the custom domain, **not** the S3 endpoint.
-> 5. Add that host to `remotePatterns` in `apps/customer-app/next.config.js`.
+> 2. Bucket → Settings → **Public access** → **R2.dev subdomain** → Allow Access.
+>    Cloudflare returns `https://pub-<32 hex>.r2.dev` — that is `R2_PUBLIC_CDN_URL`.
+> 3. R2 → API → Manage API tokens → a token scoped to **this bucket only**,
+>    Object Read & Write. A separate token from the private bucket's, which is the
+>    entire point of two buckets.
+> 4. `R2_PUBLIC_ENDPOINT` is the **account-level** S3 endpoint
+>    (`https://<accountId>.r2.cloudflarestorage.com`) — identical to `R2_ENDPOINT`,
+>    because both buckets live in one account.
+> 5. Set `NEXT_PUBLIC_MEDIA_HOST` to that origin's **hostname** (no scheme, no
+>    trailing slash) in `apps/admin-dashboard/.env` and `apps/customer-app/.env`.
+>    customer-app also wildcards `**.r2.dev`; the ERP does not, so without this
+>    the ERP throws *"hostname is not configured under images"* the moment a
+>    promotion has a picture. `next.config.js` reads it at **boot**, so it needs
+>    a dev-server restart, not a page reload.
 > 6. On the PRIVATE bucket, add a lifecycle rule deleting `marketing/hero-originals/`
 >    objects older than N days **only if** you decide not to keep originals for re-crops;
 >    otherwise add one for abandoned uploads once the upload flow exists.
+>
+> **`r2.dev` is the DEVELOPMENT origin, on explicit direction** — a custom domain
+> comes when the backend is deployed. Cloudflare rate-limits `r2.dev` and does not
+> support it for production traffic, and it cannot be purged. The swap is one env
+> value plus `NEXT_PUBLIC_MEDIA_HOST`, because nothing but `publicUrl()` builds a
+> URL and the database stores keys, never URLs.
+>
+> **Two env traps, both guarded at boot in `env.ts` because both fail silently.**
+> `R2_PUBLIC_ENDPOINT` is the **account** endpoint with NO path — Cloudflare's
+> bucket Settings page shows the S3 API value *with the bucket name appended*,
+> and the SDK appends the bucket itself, so copying it verbatim writes every
+> object to `<bucket>/<bucket>/<key>`: uploads report success and every public
+> URL 404s. And `R2_PUBLIC_CDN_URL` is the origin the bucket is **served** from,
+> never the S3 API endpoint. The two sit next to each other in Cloudflare's UI, both are https
+> URLs, and confusing them fails silently — every image 401s because the S3
+> endpoint wants a signature. `env.ts` refuses it at boot for that reason.
 >
 > Every `R2_PUBLIC_*` var is optional and defaults to empty on purpose, so nobody
 > working on another module is blocked. `publicMediaStorage.assertConfigured()`
@@ -407,15 +617,66 @@ of them.
   cannot use a static import, so that LQIP is the only way to get
   `placeholder="blur"` on hero imagery.
 - Shared: `TableFilterBar` (extend via the generic `extraFilters`, never a new prop trio), `TablePagination`, `SearchableSelect`, `EmptyState`. `AlertDialog` for confirmations, `Sheet` for forms.
+- **Action colour is SEMANTIC, and it is a Button variant, never a className.**
+  The ERP's house style is a TINT (`bg-X/10 text-X hover:bg-X/20`), not a solid
+  fill: this app is dense and operational, and a wall of saturated buttons
+  stops any one of them meaning anything.
+
+  | variant | meaning |
+  |---|---|
+  | `default` | the one primary action on a screen |
+  | `warning` | reversible and consequential — suspend, pause, withdraw |
+  | `success` | restores something — reactivate, resume, publish |
+  | `destructive` | cannot be undone. Kept rare so it still lands |
+
+  A status action rendered in a TABLE colours only its label and takes its tint
+  on hover; the same component rendered on a DETAILS page takes the full tint.
+  One component, a `presentation` prop, no fork — see `FoodTagStatusActions`.
+- **A button is named for what its destination actually does.** "Edit image"
+  was accurate when that route only held an uploader and became a lie the day
+  it grew a name field; an admin reading it would never have found the rest.
+  Re-read action labels whenever the page behind them grows.
 - Sidebar nav is permission-gated — links vanish rather than render-then-403. `isItemActive` needs a special case wherever a section "Home" href is a prefix of its siblings.
+- **An `app/api/**` proxy must forward the caller's query string**, and a client
+  picker must send an explicit `pageSize`. `/api/countries/[countryRef]/cities`
+  dropped it for months: the backend defaults to `pageSize=10`, so every city
+  picker in the ERP silently offered a country's first ten cities alphabetically
+  and simply had no row for the eleventh. Nothing errored — same shape as bug
+  class #4, a truncated list that reads as a complete one.
 - Link-based pagination on SSR list pages (no JS needed). **Rebuild the whole query string** — a bare `?page=2` drops active filters.
 - Mapbox is ~1.8 MB: always `next/dynamic` with `ssr: false`.
 
 **customer-app only** (public, anonymous-first, performance-critical):
+
+> **WHERE A FETCH GOES — three folders, and the split is not stylistic.**
+>
+> | Who needs it | Mechanism | Where |
+> |---|---|---|
+> | a Server Component render | direct `backendFetch` + `revalidate`/`tags` | `lib/data/*` |
+> | a CLIENT component | route handler → `backendFetch` server-side | `app/api/**` |
+> | nobody — it is display copy | plain export, no I/O | `constants/**` |
+>
+> `constants/` is for data with **no I/O**. `getHeroContent()` lived there and
+> was a lie; it is now `lib/data/hero.ts`, and only `FALLBACK_HERO` — genuinely
+> static copy — stayed behind in `constants/home/hero-fallback.ts`.
+>
+> **A Server Component must NOT fetch this app's own route handler.** Next's
+> docs say to fetch directly, and here it costs three things: a second network
+> hop to our own server, a second invocation, and — because a Server Component
+> needs an ABSOLUTE url to call itself, which means reading headers — the
+> static render. `/` is `○` only because nothing in its tree touches a Dynamic
+> API. Route handlers exist for the **browser**, so the Clerk token never
+> reaches client JS; that is their whole job.
+
 - `lib/api/server.ts` attaches a Clerk token **when one exists and never errors when it does not** — the mirror of the backend's `attachCustomerContext`. The dashboards' `backendFetch` throws instead; do not copy that here.
 - Anything carrying a token is `cache: "no-store"`. Only an explicitly `anonymous` read may opt into ISR — a cached response must not depend on who asked.
 - `proxy.ts` (Next 16's middleware) lists **protected** routes rather than exempting public ones, so a forgotten route stays public instead of leaking. Browsing, storefronts and cart pricing all work signed-out.
 - The visitor's location lives in a **cookie**, so the feed is a plain server render with no mount-fetch waterfall. It is untrusted input — `parseLocation` range-checks it, and a saved address travels as `addressId` so the server resolves the point itself.
+  > `lib/location/cookie.ts` holds the PARSER and no `next/headers` import, so
+  > the browser and the server share one definition of what a malformed value
+  > means. `lib/location/server.ts` is the `cookies()` half — **importing it
+  > makes a route dynamic**, which is why neither `/` nor `/city/[citySlug]`
+  > does.
 - Reads return a **state** (`no-location` / `ok` / `error`), never a bare throw or an empty array — see recurring bug class #4.
 - `lib/format/money.ts` is the only place minor units become a decimal, and it reads `currency.minorUnitDigits`.
 - Keep `"use client"` at the leaves. Today: `Navbar`, `NavLinks`, `MobileNav`, `ThemeToggle`. Cards, hero and menu are Server Components and must stay that way. `Navbar` is the one deliberate exception — see *Customer auth*.
@@ -459,7 +720,24 @@ of them.
 
 Everything through the **customer backend module + customer frontend scaffold** is shipped and verified. Latest migration: `20260913120000_drop_outlet_cuisine_and_repair_city_timezones`.
 
-Verified green as of this pass: `pnpm check-types` 5/5, backend `vitest run` 622/622, `next build` clean in `customer-app`.
+Verified green as of this pass: `pnpm check-types` 5/5, backend `vitest run`
+680/680, five smoke tests (40/40 promotions, 16/16 the real-R2 hero image,
+32/32 markets + areas + point resolution, 37/37 cuisine imagery/create/
+pagination incl. a real R2 round trip and the prefix guard, **39/39 the saved
+delivery-address contract**), and `next build` clean in `customer-app`
+and `admin-dashboard`. The prerendered HTML was checked directly for the
+customer-facing area names, for the ABSENCE of every `ZoneLevel` string and of
+the operational zone names, and for the live cuisine tiles.
+> Latest migration: `20260923090000_consumer_address_requires_pin`.
+> **The geography/address foundation pass is done** — saved addresses require a
+> pin and derive their geography from it, a selected address can no longer fall
+> back to unrelated coordinates, country readiness gates point resolution, and
+> customer-facing serviceability names zones by `publicName`. See *Location and
+> markets*. The customer city/location UX is built ON this; do not re-litigate
+> the model when building it.
+> **`next build` caches fetches in `.next/cache`**, so a backend change can be
+> invisible to a rebuild — `rm -rf .next/cache` before trusting prerendered
+> output after a data-shape change.
 
 `apps/customer-app` builds and typechecks: discovery feed, storefront + menu, cart (client store + server pricing), Clerk sign-in/up, location-in-a-cookie so the feed is a real SSR render. **Awaiting the user's env values** (`BACKEND_API_URL`, a *separate* customer Clerk app, `CLERK_CUSTOMER_WEBHOOK_SECRET` on the backend → `<ngrok>/webhooks/clerk/customer`). `.env.example` documents each (placeholders — never commit a real key there).
 
@@ -533,7 +811,7 @@ The mobile sheet is: header (logo + close) → "Menu" links with icons → an
 "Appearance" Light/Dark/System segmented control (a dropdown inside a dialog is
 awkward on a phone) → a footer with the auth actions.
 
-**Verified this pass:** `pnpm check-types` 5/5, backend `vitest run` 622/622,
+**Verified in the design pass:** `pnpm check-types` 5/5, backend `vitest run`,
 `next build` clean with pages static, and the compiled CSS checked directly for
 layer order (`theme → base → clerk → components → utilities`), for the `.dark`
 block landing after `:root`, and for `rounded-md` resolving through `--radius`.
@@ -547,7 +825,88 @@ root layout that touches `cookies()`, `headers()` or `auth()` makes **every rout
 in the app dynamic** — put it behind `<Suspense>` instead. Verify with the build
 output, not by inspection.
 
-**Next:** make each landing section live, one at a time, starting with the hero.
+**The image round trip is PROVEN against real R2.**
+`scripts/smoke/marketing.heroImage.smoke.ts` does what the ERP does — presign,
+`PUT` the bytes over HTTPS, let the server re-encode and publish the
+derivative — then **fetches the public URL anonymously** and checks the bytes
+decode as a 1600×1600 WebP served `immutable`. That last step is the point:
+every earlier step can succeed while the object is still unreachable, and the
+failure would only ever show up as a broken image in a browser.
+> **What it cannot cover: the browser's CORS preflight on the presigned PUT.**
+> Node sends none. Hero originals go to the PRIVATE bucket — the same one
+> vendor menu photos already use — so if vendor uploads work in a browser, so
+> will these. If the ERP upload fails while this smoke test passes, the
+> bucket's CORS policy is the thing to fix.
+
+**The hero renders every part as optional.** Only the headline and the photo are
+guaranteed; an absent eyebrow, lede or CTA removes its line rather than leaving
+a hole, and **nothing substitutes invented copy for a field an admin left
+blank** — a storefront-written eyebrow above marketing-written copy is worse
+than no eyebrow. The fallback hero's "20% off your first meal plan" and
+"10,000+ happy food lovers" are **gone**, not hidden: there is no discount and
+there are no customers yet (principle 11).
+
+**The hero is LIVE on both `/` and `/city/[citySlug]`.** `/` is still `○`
+static and `/city/nairobi-ke` builds as `●` SSG, both on a 60s revalidate —
+verified by building and reading the prerendered HTML, not by inspection: the
+published promotion's copy appears in both, the city page carries its own
+`We deliver in Nairobi` band, and the invented placeholder figures appear in
+neither. A visitor with no location gets the global promotion, which is the
+landing page's ordinary default.
+
+> **MODULARITY — read this before building the next section.** Editorial Band,
+> Categories, PopularDishes and the rest will repeat most of this shape, and
+> almost none of it should be re-invented. Already generic and reusable as-is:
+> `lib/images/transform.ts` (any square crop), `publicMedia.storage.ts`,
+> `revalidateStorefront` (add a tag to the storefront's allowlist), the priority
+> tiers in `packages/types/src/enums/marketing.ts`, `TableFilterBar` and
+> `SearchableSelect`. What is hero-SPECIFIC and would need generalising: the
+> `HeroPromotion` table itself, `HERO_CROP` (a non-square section needs its own
+> spec and possibly two crops), the key prefixes, and `resolveHeroPromotion`'s
+> assumption of ONE winner — a section showing a row of cards resolves to a
+> LIST, which is a different function, not a parameter. Decide deliberately
+> whether the next section is a second table or a `section` discriminator on a
+> shared one; do NOT default to copying the module.
+
+**`/discover` is built** — recovered from `30facf5` (where it was the home
+page), not rewritten: `lib/data/discovery.ts` (`getFeed`, returns a
+`no-location | ok | error` STATE), `components/discovery/*`, `app/discover/page.tsx`.
+Verified against the real backend in all three states: no cookie → the picker;
+a Westlands point → Manu's Kitchen; a point at 0,0 → "We are not here yet".
+> **A POINT lands on `/discover`; a MARKET lands on `/city/[slug]`.** The
+> picker used to push a serviceable point to the city page — which, pressed ON
+> the city page, reloaded the page you were already on. "Continue" in the
+> picker also goes to the feed now.
+>
+> **Cuisine tiles link with the cuisine ID, not the slug.** The feed forwards
+> `?cuisine=` to the backend as `cuisineId`; a slug there silently matches
+> nothing, so every tile would have opened an empty feed.
+>
+> `robots: noindex` — the feed is per-location, and an indexed copy would be a
+> crawler's "where are we delivering?" state. The city pages are the SEO surface.
+
+**Next:** the **storefront** — `/store/[outletId]`, which every feed card links
+to and which currently 404s. Recover from `30facf5`
+(`app/store/[outletId]/*`, `components/storefront/*`, and the cart it opens:
+`components/cart/*`, `lib/cart/*`, `app/api/cart/price`). The imports and the
+arbitrary `text-[var(--x)]` forms need the same adaptation `/discover` got.
+`PopularDishes` / `NeighbourhoodKitchens` still sit on `/` with invented data;
+`/discover` supersedes the kitchens band with real outlets, and popular dishes
+needs a dishes read that does not exist yet.
+> The city-scoped browse feed stays **deferred**: picking a city already lands
+> somewhere real.
+
+**VENDOR-CREATED CATEGORIES ARE REFUSED** (explicit direction, after analysis).
+A controlled vocabulary is what filters, facets and analytics run on — the same
+reason vendor-created dietary tags were refused. `MenuSection` already IS
+vendor-authored categorisation of a vendor's own menu, so the half that matters
+exists. If a platform-wide merchandising axis is ever added (Breakfast,
+Healthy, Family Size — orthogonal to culinary origin, and the only genuinely
+missing piece is meal-plan taxonomy), vendors ASSIGN from it and never extend
+it; expressive freedom belongs in search keywords, not navigable categories.
+Gating category creation behind a subscription tier was considered and
+rejected: it monetises the one thing that most degrades the taxonomy. Sell
+placement, not vocabulary.
 
 `public/design-reference/` now holds three files: `design.png` (the light
 landing page), `dark-theme.jpg` (the dark palette's source — near-neutral
@@ -565,25 +924,272 @@ rules — this file is the rulebook. Commit them or set `agentRules: false`.
 
 **Data is entered by hand, not seeded** (explicit direction). Dev DB holds 1 vendor outlet, 1 dish, 0 consumers. Nairobi's two zones **do not tile the city** — an outlet placed outside them is correctly `AREA_NOT_LAUNCHED` and will not be discoverable.
 
-### Hero offers — the shape to build toward
-The hero is **offer content resolved per location**, not a fixed image. Admins
-set offers in the ERP and resolution is a **CITY → COUNTRY → GLOBAL** fallback:
-show the city's offer; if there is none, the country's; if none, the global
-default. A visitor in Perth must never see Berlin's offer, and Perth and Sydney
-can differ within the same country.
+### Location and markets
 
-Build order (explicit direction): **static image first, then global defaults,
-then the scoped resolution.** `Serviceability` already returns
-`cityId`/`cityName`, which is the input the resolver needs.
+**MARKET and DELIVERY POINT are two different things, and collapsing them is
+the trap this design exists to avoid.**
 
-Notes for when it lands:
-- It is the **LCP element**. `priority`, a correct `sizes`, and no layout shift.
-- A remote signed URL cannot use a static import, so width/height and
-  `blurDataURL` must come from the offer record — store them at upload time.
-- Resolution happens on the SERVER (principle 1). The client renders what came
-  back; it never picks between city and country itself.
-- Art direction: a wide desktop crop and a taller mobile crop are different
-  images, not one image at two sizes. Budget for both fields on the offer.
+| | | |
+|---|---|---|
+| **Market** | country + city | coarse, cacheable, drives *merchandising* — which promotion, which city page |
+| **Point** | latitude + longitude | precise, and the ONLY thing that can drive a feed, a fee, an ETA or an order |
+
+`resolveCustomerLocation(point)` is the sole chokepoint for a customer
+location and resolves by **point-in-polygon against city boundaries**, so a
+`cityId` cannot drive discovery: the feed filters by city AND a bounding box
+around the point AND each outlet's radius from it. A city is a market, not a
+location.
+
+> **Do NOT substitute `City.latitude/longitude` for a missing point.** The
+> column is commented "centroid — Mapbox fly-to only" and it is wrong twice
+> over: Nairobi's zones **do not tile the city**, so the centroid can land
+> outside every zone and report `AREA_NOT_LAUNCHED` for a city we plainly
+> serve; and any fee or ETA measured from it is a number we cannot stand
+> behind (principle 11). The city page asks for an address instead.
+
+**`GET /customer/v1/geo/markets` — no auth at all**, the same posture as the
+hero endpoint and for the same reason: "which cities do you deliver to" is
+asked before anyone has a reason to have an account, and the answer is
+identical for everyone. Two filters, both of which fail silently if dropped:
+the country must be **`readyForCustomerOperations`** (`status: ACTIVE` is set
+when vendors can onboard, months before a customer can buy anything), and the
+city must have a **usable boundary** (`findCityForPoint` skips a city with no
+geometry, so listing one offers a choice that resolves to nothing — bug class
+#4 in a different hat). Built on the CACHED city geometry, so the heavy
+boundary JSON is read at most once a minute however often the picker opens.
+It exposes names and slugs only; geometry is operational detail.
+
+**`Serviceability` carries `citySlug` and `countryId`**, attached in `withCity`
+and **derived from the resolved city, never from the caller** — a
+client-supplied country would let a visitor ask for another market's
+promotions. Before this, country-scoped hero promotions were unreachable from
+the frontend no matter how well they were modelled: nothing ever handed it a
+countryId.
+
+**Detection is on a CLICK, never on load.** Browsers penalise unprompted
+geolocation prompts and visitors resent them. `LocationPicker` is a client
+leaf so the hero's copy and LCP image never wait on it, and it loads the city
+list when it is **opened**, not when it mounts. The city dropdown is the
+shadcn **Select** (grouped by country via `SelectGroup`/`SelectLabel`) — on
+the unified `radix-ui` package the app already depends on, so it added nothing.
+> A native `<select>` is still the better *mobile* control, and that trade was
+> made knowingly for visual consistency. When the city count passes ~15 the
+> right move is neither: a **Combobox** (Popover + Command) with search —
+> `cmdk` is already a dependency.
+
+**A refusal always comes with somewhere to go** (explicit direction).
+`GET /customer/v1/geo/cities/:citySlug` returns the city plus the **named
+areas** we operate in, and the picker fetches it when a point lands inside a
+city we know but cannot serve. "Not at your address, but here, here and here"
+beats making someone guess. A point outside every city has no city to
+describe, so the city list opens instead.
+
+> **`areas` is NAMES ONLY, and that is a security boundary, not a shortcut.**
+> Published: the zone's name. Withheld: its `level`, its `operationalStatus`,
+> its geometry, and whether the platform or the vendor carries the food. The
+> coverage footprint itself is not a secret — every competitor publishes
+> theirs and it is discoverable by typing addresses — but `ZoneLevel` is
+> internal vocabulary that maps out delivery capability and expansion plans,
+> and the polygons would hand over the footprint exactly rather than roughly.
+> This extends the existing rule that `Serviceability` exposes `zoneName` but
+> never `level`.
+>
+> **Which zones become an area:** `ZONE_CAPABILITIES[level].canListOnDemand`,
+> read through the capability map and never as `level >= X`.
+> `REGISTRATION_ONLY` is therefore excluded — vendors may sign up there and
+> nobody may sell, so naming it would advertise coverage that does not exist.
+> `operationalStatus` is deliberately **not** consulted: level is structural
+> and status is temporal, the two are modelled as orthogonal, and this list
+> answers the durable question. Someone standing in a suspended zone learns
+> that from their own serviceability verdict, which is the right place for it.
+>
+> **`Zone.publicName` is a REQUIRED second name, and required is the point.**
+> `Zone.name` is written by and for operations — the dev database held
+> `"Karen-Langata-SouthC-Upperhill Area"` — and the storefront now names the
+> areas it covers, so those strings would ship verbatim. An OPTIONAL column
+> with a fallback to `name` looks safe and fails silently: nobody fills it in
+> and ops vocabulary reaches customers anyway. The migration backfilled every
+> row from `name` and then narrowed the column to NOT NULL, so a pre-existing
+> zone carries a placeholder that reads like ops until someone edits it —
+> visible and fixable, unlike a silent fallback.
+>
+> `getCityDetail` maps `zone.publicName` and **never** `zone.name`; the smoke
+> gives every fixture a different value in each column so that can never pass
+> by accident. Prettifying `name` by splitting on punctuation was considered
+> and refused: it is string surgery on admin data and it mangles
+> "Dar-es-Salaam".
+
+**Picking a city sets NO cookie.** It navigates to `/city/[citySlug]`. Only a
+real point — from the browser, checked for coverage — is stored. `POST
+/api/location` does the check, writes the cookie and returns the verdict in one
+round trip; the **verdict is never stored**, because coverage changes when an
+admin edits a zone and a cached answer would quietly start contradicting the
+pages rendered from it.
+
+**A SAVED ADDRESS IS THE DURABLE DELIVERY DESTINATION — and `ConsumerAddress`
+is the only model that holds one.** No second location table, and no
+`currentAddressId` column: WHICH address is selected right now is per-DEVICE
+state (the cookie's `addressId`), while `isDefault` is the durable preference,
+and the two are allowed to differ. The three concepts stay separate on purpose:
+
+| | | |
+|---|---|---|
+| marketplace city | URL (`/city/[slug]`) | merchandising only, never a destination |
+| selected address | cookie `addressId` (per device) | authoritative when present |
+| default address | `ConsumerAddress.isDefault` | durable, changes only when asked |
+
+> **The pin decides the geography; the request does not.** `latitude` and
+> `longitude` are **required** (NOT NULL as of
+> `20260923090000_consumer_address_requires_pin`) — an address with no pin
+> cannot take part in serviceability, so it is not a destination and this model
+> does not store one. `countryId` is **derived from the resolved city**, and a
+> supplied one that disagrees is refused with `COUNTRY_MISMATCH` rather than
+> silently corrected (the `INVALID_SCOPE` rule again). The typed `city` column
+> survives as PRINT COPY and decides nothing — it may legitimately disagree
+> with `serviceability.cityName`. **No stored `cityId` and no stored `zoneId`:**
+> both are re-resolved on every read, because a boundary redraw would make a
+> cached one wrong with nothing to refresh it (principle 4).
+>
+> A save is refused on geography in exactly one case — a point inside **no**
+> operating city (`OUTSIDE_COVERAGE`). Inside a city we know, the address saves
+> whatever its zone says: "not launched yet" and "paused" are temporary and are
+> re-answered on every read, while "nowhere near a market" will not change.
+>
+> Addresses span cities and countries freely. **`ConsumerAccount.countryId` is
+> a home-market hint** adopted from the FIRST address and never overwritten —
+> it must never become delivery authority, and nothing filters on it.
+
+**A SELECTED ADDRESS IS AUTHORITATIVE, or the request fails.** When
+`addressId` is sent, its coordinates are NOT sent with it: the backend resolves
+the point from the row after checking it belongs to the caller. The frontend
+used to retry with the cookie's raw coordinates when that failed — so the
+header said "Delivering to Home" while the feed was ranked around somewhere
+else entirely, and every fee and ETA on screen was computed for a place the
+customer had not chosen. That fallback is gone: `getFeed` returns
+`address-unusable`, which asks for a delivery address instead. **A wrong answer
+presented as the right one is worse than no answer.**
+
+**Country readiness gates POINT RESOLUTION, not just the city list.**
+`getOperatingCities` filters on `country.readyForCustomerOperations`, so a
+country that is ACTIVE for vendor onboarding but not open to customers resolves
+to **no city** — previously a visitor who supplied coordinates could be told a
+market was serviceable and shown its outlets while that same market was
+deliberately absent from every list offered to them.
+
+**Customer-facing serviceability names a zone by `publicName`.**
+`resolveCapabilities` lives in `@repo/geo`, is shared with vendor and admin, and
+rightly returns the OPERATIONAL `zone.name`; `withCity` in
+`customer.geo.service.ts` is the single boundary where the customer's copy is
+chosen, and it swaps in `publicName` for every customer-facing serviceability
+there is. Before this, the cookie label and the `/discover` header could read
+`"Karen-Langata-SouthC-Upperhill Area, Nairobi"`.
+
+**The three routes, and why each has the render mode it does:**
+
+| | | |
+|---|---|---|
+| `/` | `○` static | marketing. GLOBAL promotion. Reads no cookie, no auth |
+| `/city/[citySlug]` | `●` SSG + ISR | per-market. CITY/COUNTRY promotion, named areas. The SEO surface |
+| `/discover` | `ƒ` dynamic | the located feed. Reads the location COOKIE — which is exactly why it is its own route |
+
+`/` deliberately stays location-free: a first-time visitor has no cookie
+anyway, so personalising it would pay a per-request render to serve the global
+promotion almost every time. **No middleware redirect from `/` to a located
+page** — the cookie is not `httpOnly` precisely so the picker can read it in
+the browser and offer "Continue to Nairobi" instead. Revisit when returning
+traffic dominates; it is one middleware line.
+
+City slugs are **globally unique**, so no country segment is needed. The route
+is `/city/[citySlug]` rather than a bare `/[citySlug]` on purpose: a
+root-level dynamic segment would catch every future route, and a city named
+"orders" would break the app. An unknown slug resolves from the shared market
+cache and 404s, so a bot probing paths costs one cached read.
+
+**Landing bands split by whether they need a point.** `Hero`, `Categories`,
+`EditorialBand`, `MealPlans` and `CtaBand` do not and render on both `/` and
+`/city/*`. `PopularDishes` and `NeighbourhoodKitchens` do, carry invented
+ratings and prices, and belong on `/discover` — they are deliberately absent
+from the city page and still sit on `/` only until `/discover` exists to
+receive them.
+
+### Cuisines — the storefront taxonomy
+
+**Three states, and only one of them belongs on a filter chip.**
+
+| | | |
+|---|---|---|
+| CATALOGUED | the `Cuisine` row exists | global catalog |
+| ENABLED | an admin switched it on for a country | `CuisineCountry` |
+| AVAILABLE | a sellable outlet actually carries it in a city | derived, stored nowhere |
+
+`GET /customer/v1/catalog/cuisines?countryId=&limit=` answers the first two and
+**deliberately not the third**: availability is a property of a PLACE and this
+read is cached per market, so mixing them would make a cached answer depend on
+live supply. The feed already computes real availability from its own result
+set, and that is the right home for it — a filter chip returning nothing is a
+dead end, a marketing tile is an invitation.
+
+- **`/` passes no country** and gets the global catalogue. A landing page has
+  no location and cannot honestly narrow anything.
+- **`/city/[citySlug]` passes its country id** and gets what that market has
+  switched on.
+- Ordering is `imageKey asc, name asc` — cuisines WITH a picture first (Postgres
+  sorts NULLs last), alphabetical within each group so the row is stable
+  between renders instead of shuffling as imagery is added.
+
+**The band removes itself when there is nothing to show.** It does not fall
+back to invented cuisines: a taxonomy the platform does not have is exactly the
+fabrication principle 11 refuses, and a tile leading to a cuisine nobody cooks
+is worse than no tile. A cuisine with no picture renders a tinted initial, so
+one missing image does not leave a hole in the row.
+
+**Imagery is CUISINE-ONLY.** `Cuisine` and `DietaryTag` are otherwise
+column-for-column identical and `admin.foodTag.service.ts` is written once and
+dispatched across both — but a cuisine tile is a photograph and a dietary tag
+is a badge. Giving `DietaryTag` dormant image columns to preserve the symmetry
+would mislead whoever reads it next, so imagery lives in its own narrow
+`admin.cuisineImage.service.ts` and the shared `CatalogDelegate` (structural,
+selecting only the common fields) keeps working untouched.
+
+**The crop is 512px square, not the ~150 the tile needs.** This is a MASTER
+that `next/image` resizes per width; storing exactly today's tile size would
+mean re-uploading every picture the first time a design shows a cuisine larger.
+512 WebP is ~30-60 KB, so the headroom is nearly free. `MIN_SOURCE_EDGE` (900)
+still applies even though the output is smaller — it stops a thumbnail someone
+found being passed off as artwork.
+
+**Catalogue imagery needs GLOBAL scope**, the same rule the catalogue's name
+and description already follow. A country lead curates which cuisines their
+market offers; they do not re-photograph the platform's vocabulary.
+
+**ERP routes mirror marketing exactly**: `/food-tags/cuisines/new`,
+`/food-tags/cuisines/[slug]` (read-only, ships no uploader) and
+`/food-tags/cuisines/[slug]/edit` (details + picture). **Cuisines use pages;
+dietary tags keep the Sheet** — a dietary tag is a name and a sentence, which
+is what a Sheet is for, while a cuisine also carries a photograph to upload,
+preview and replace, and an upload that dies when a sheet is dismissed is a
+bad trade.
+
+> **The picture saves on its own**, separately from name and description.
+> Nothing here has to change together, and an upload that only landed when
+> some other form was submitted would be lost by a navigation.
+>
+> **Creating lands on `/edit`, not on the details page** — so the picture gets
+> added while the admin is still thinking about that cuisine, instead of
+> leaving a catalogue entry that renders a blank tile until somebody notices.
+> That redirect depends on `createFoodTag` RETURNING THE SLUG; the smoke
+> asserts it, because if it ever stopped the page would navigate to `/edit` on
+> an empty segment and 404, which no type would catch.
+>
+> **A details page reached only by a hover underline reads as a page that does
+> not exist.** The cuisine name was a link and nothing said so, and it was
+> reported as missing. Rows now carry an explicit "See more". Worth
+> generalising: a row that has somewhere to go should say so in words.
+
+**Pagination is server-side at 10 a page** (`FoodTagsCatalog` PAGE_SIZE, the
+backend's `page`/`pageSize`/`totalPages`). Asserted in the smoke by checking
+page 2 shares no row with page 1 — a client-side slice of one over-fetched
+list would pass every other check.
 
 ### Next up
 1. **The `Order` model** — the single largest schema decision left, and the blocker for: discount redemption and cap enforcement, commission actually charged, `resolvePayoutDestination` having somewhere to send money, `getOutletMealPlanReadiness` gating anything, and the vendor order feed. Design it deliberately *with* the Payments boundary rather than incidentally as whatever checkout needs.

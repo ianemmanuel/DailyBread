@@ -44,10 +44,20 @@ export const handleCreateZone: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
     const { cityRef } = req.params as { cityRef: string }
-    const { name, boundary, level } = req.body
+    /* Field by field, never spread, and every new field added here
+     * DELIBERATELY — a field that never reaches this mapper is silently
+     * dropped, which has bitten this codebase four times (bug class #1). */
+    const { name, publicName, boundary, level } = req.body
 
     if (!name?.trim() || !boundary) {
       throw new ApiError(400, "name and boundary are required", "MISSING_FIELDS")
+    }
+    if (!publicName?.trim()) {
+      throw new ApiError(
+        400,
+        "A customer-facing name is required — this is what visitors see when we list the areas we cover.",
+        "MISSING_PUBLIC_NAME",
+      )
     }
     if (level != null && !VALID_LEVELS.includes(level)) {
       throw new ApiError(400, `level must be one of: ${VALID_LEVELS.join(", ")}`, "INVALID_LEVEL")
@@ -55,7 +65,12 @@ export const handleCreateZone: RequestHandler = async (req, res, next) => {
 
     const data = await createZone(
       cityRef,
-      { name: name.trim(), boundary, ...(level != null ? { level } : {}) },
+      {
+        name       : name.trim(),
+        publicName : publicName.trim(),
+        boundary,
+        ...(level != null ? { level } : {}),
+      },
       adminUser.id,
       adminScope,
     )
@@ -67,12 +82,23 @@ export const handleUpdateZone: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
     const { zoneId } = req.params as { zoneId: string }
-    const { name, boundary } = req.body
+    const { name, publicName, boundary } = req.body
+
+    /* An explicitly EMPTY publicName is refused rather than stored. The column
+     * is required, and blanking it would put an empty chip on the storefront. */
+    if (publicName !== undefined && !String(publicName).trim()) {
+      throw new ApiError(
+        400,
+        "A customer-facing name is required — this is what visitors see when we list the areas we cover.",
+        "MISSING_PUBLIC_NAME",
+      )
+    }
 
     const data = await updateZone(
       zoneId,
       {
         ...(name !== undefined ? { name: String(name).trim() } : {}),
+        ...(publicName !== undefined ? { publicName: String(publicName).trim() } : {}),
         ...(boundary !== undefined ? { boundary } : {}),
       },
       adminUser.id,
