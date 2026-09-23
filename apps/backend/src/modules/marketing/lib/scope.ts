@@ -90,21 +90,48 @@ export function assertPromotionScope(
 }
 
 /**
- * Narrows a LIST query to what the caller may see.
+ * Whether the caller may WRITE this promotion.
  *
- * Returns a Prisma `where` fragment rather than filtering in memory: a scope
- * filter that runs after the query is one that pages wrongly and leaks counts.
- * Fail-closed — an admin with neither global scope nor any country rows sees
- * only global promotions, never everything.
+ * Deliberately implemented by running the very guard that would refuse the
+ * write, rather than by restating its conditions. Two expressions of one
+ * authorization rule always drift, and the failure mode here is the worst kind
+ * — a UI that offers an action the server then refuses, or worse, hides one it
+ * would have allowed. This cannot disagree with `assertPromotionScope` because
+ * it IS `assertPromotionScope`.
+ *
+ * Used to tell the ERP which promotions to render as editable. It is a UI
+ * affordance, never the enforcement: every write path still calls the assert.
  */
-export function promotionScopeWhere(scope: AdminScopeContext) {
-  if (scope.isGlobal) return {}
-
-  return {
-    OR: [
-      { scope: "GLOBAL" as const },
-      ...(scope.countryIds.length ? [{ countryId: { in: scope.countryIds } }] : []),
-      ...(scope.cityIds.length ? [{ cityId: { in: scope.cityIds } }] : []),
-    ],
+export function canManagePromotion(
+  scope: AdminScopeContext,
+  promotionScope: HeroScope,
+  target: { cityId: string | null; countryId: string | null },
+): boolean {
+  try {
+    assertPromotionScope(scope, promotionScope, target)
+    return true
+  } catch {
+    return false
   }
 }
+
+/*
+ * READING IS NOT SCOPED, and that is a deliberate product decision (explicit
+ * direction).
+ *
+ * Every admin holding `marketing:promotions:read` sees every promotion at
+ * every scope. A hero promotion is PUBLIC marketing copy — any customer in the
+ * target market can see it simply by opening the app — so there is nothing to
+ * protect, and a marketing team that cannot see what the other markets are
+ * running will duplicate and contradict them.
+ *
+ * This is why principle 6 ("opaque ids 404, never 403") does not apply here:
+ * that rule exists to stop an id space being probed for the existence of
+ * things a caller should not know about. Nothing here is secret, so a write
+ * refused for scope now answers 403 — the honest answer — instead of
+ * pretending the row does not exist.
+ *
+ * There was previously a `promotionScopeWhere` narrowing every list and read.
+ * It was removed rather than widened: a filter that returns everything is a
+ * filter the next reader has to prove is a no-op.
+ */

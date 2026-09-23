@@ -4,29 +4,37 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Archive, Loader2, Send } from "lucide-react"
 import { toast } from "sonner"
+import { AdminPermissions } from "@repo/types/enums"
 import type { HeroPromotion } from "@repo/types/admin-app"
 
 import { Button } from "@/components/ui/button"
+import { useHasPermission } from "@/providers/admin-session-provider"
 
 /*
  * Publish and withdraw.
  *
  * Their own control, separate from the edit form, because they are their own
  * permission: editing a draft is one kind of trust, changing what customers
- * see is another. An admin without `marketing:promotions:publish` still gets
- * the form — the backend refuses the action and this button is hidden.
+ * see is another.
+ *
+ * TWO INDEPENDENT QUESTIONS, and both must be yes:
+ *
+ *   PERMISSION — may this admin publish anything at all? Read from the session
+ *                here rather than passed in, so no caller can get it wrong and
+ *                every call site gets the same answer.
+ *   SCOPE      — may they publish THIS promotion? That is
+ *                `promotion.canManage`, computed by the server from the guard
+ *                that would refuse the write, never re-derived in the browser.
+ *
+ * Hiding the buttons is an affordance, not enforcement: the backend refuses
+ * the action regardless.
  */
-export function HeroPromotionActions({
-  promotion,
-  canPublish,
-}: {
-  promotion: HeroPromotion
-  canPublish: boolean
-}) {
+export function HeroPromotionActions({ promotion }: { promotion: HeroPromotion }) {
   const router = useRouter()
   const [busy, setBusy] = useState<string | null>(null)
+  const hasPermission = useHasPermission(AdminPermissions.MARKETING_PROMOTIONS_PUBLISH)
 
-  if (!canPublish) return null
+  if (!hasPermission || !promotion.canManage) return null
 
   async function run(action: "publish" | "archive") {
     setBusy(action)

@@ -23,16 +23,17 @@
  * Scope: this module is marketing PLACEMENT — what appears in a merchandising
  * slot and where. It is NOT discounts. A Discount is vendor-funded money with
  * redemption rules and caps and lives in the vendor module; a HeroPromotion is
- * an image, a line of copy and a link. When vendors start paying to have a
- * meal featured, that is a promotion with a funding source, and it belongs
- * here, next to the placement it buys — not in the discount engine.
+ * an image, a line of copy and a link.
  *
- * Shipped: the pure rules and their tests, the Prisma-backed service, the admin
- * router (list, read, create, update, image upload, publish, archive), the ERP
- * screens, and the customer-facing resolution the storefront hero reads.
+ * EVERY promotion here promotes the PLATFORM, at whichever scope it is aimed.
+ * Vendor-funded featured placement is not part of this module and is not
+ * modelled anywhere (explicit direction) — it is its own system, needing
+ * inventory, pricing, billing and fair rotation between vendors who all paid.
  *
- * Not yet: vendor-funded featured placements — see the note above for where
- * they belong.
+ * Shipped in full: the pure rules and their tests, the Prisma-backed service,
+ * the admin router (list, read, create, update, image upload, publish,
+ * archive), the ERP screens, and the customer-facing resolution the storefront
+ * hero reads.
  */
 
 export { default as marketingAdminRouter } from "./routes/admin.routes"

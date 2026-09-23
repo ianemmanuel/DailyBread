@@ -1,6 +1,14 @@
-import crypto from "node:crypto"
+import {
+  type HeroPromotionPriorityTier,
+  tierRequiresEndDate,
+} from "@repo/types/enums"
 
 import { ApiError } from "@/errors/ApiError"
+import {
+  assertKeyUnderPrefix,
+  buildOriginalKey,
+  buildPublicKey,
+} from "@/lib/images/publicImage"
 import type { SquareCropSpec } from "@/lib/images/transform"
 
 /*
@@ -43,58 +51,30 @@ export const HERO_PUBLIC_PREFIX = "marketing/hero"
  * the permission plus the prefix check below, not the path.
  */
 export function buildHeroOriginalKey(extension: string): string {
-  const ext = extension.replace(/^\.+/, "")
-  return `${HERO_ORIGINAL_PREFIX}/${crypto.randomUUID()}${ext ? `.${ext}` : ""}`
+  return buildOriginalKey(HERO_ORIGINAL_PREFIX, extension)
 }
 
 /**
  * The public key for a processed square.
  *
- * `marketing/hero/<uuid>.webp`
- *
  * A fresh uuid per processed image, never a name derived from the promotion
  * id. That is what makes the object IMMUTABLE: replacing a promotion's image
  * writes a new key, so the year-long cache header is safe and no CDN purge is
- * ever needed. It also means the old object is still there to be deleted
- * deliberately rather than overwritten out from under a cached page.
+ * ever needed.
  */
 export function buildHeroPublicKey(): string {
-  return `${HERO_PUBLIC_PREFIX}/${crypto.randomUUID()}.webp`
+  return buildPublicKey(HERO_PUBLIC_PREFIX)
 }
 
 /*
  * Proves a key is one of ours before anything is done with it.
  *
- * Same job as assertOwnedProfileMediaKey: without it, "process this key" and
- * "delete this key" are read-anything and delete-anything primitives — an
- * admin could pass a payout proof's key and have its contents copied into the
- * PUBLIC bucket. That is the worst outcome available in this module, so the
- * check is exact: the expected prefix, one path segment after it, no
- * traversal, and no prefix collision.
+ * The rule itself lives in lib/images/publicImage.ts and is shared with every
+ * other public-image caller — it is a security control, and two copies of a
+ * security control is one copy that will not get the next fix. These two
+ * wrappers exist so the PREFIX cannot be passed in by a caller: hero code can
+ * only ever assert hero keys.
  */
-function assertKeyUnderPrefix(storageKey: unknown, prefix: string): string {
-  if (typeof storageKey !== "string" || !storageKey) {
-    throw new ApiError(400, "storageKey is required", "MISSING_FIELDS")
-  }
-  if (storageKey.includes("..") || storageKey.includes("//")) {
-    throw new ApiError(400, "Invalid storage key", "INVALID_STORAGE_KEY")
-  }
-
-  const expected = `${prefix}/`
-  if (!storageKey.startsWith(expected)) {
-    throw new ApiError(400, "Invalid storage key", "INVALID_STORAGE_KEY")
-  }
-
-  /* Exactly one segment after the prefix. `marketing/hero-originals/a/b.jpg`
-   * is refused — a nested path is not something this module ever produces. */
-  const rest = storageKey.slice(expected.length)
-  if (!rest || rest.includes("/")) {
-    throw new ApiError(400, "Invalid storage key", "INVALID_STORAGE_KEY")
-  }
-
-  return storageKey
-}
-
 export function assertHeroOriginalKey(storageKey: unknown): string {
   return assertKeyUnderPrefix(storageKey, HERO_ORIGINAL_PREFIX)
 }
@@ -105,16 +85,53 @@ export function assertHeroPublicKey(storageKey: unknown): string {
 
 /* ── Scope resolution ──────────────────────────────────────────────────────
  *
- * A visitor sees the most specific promotion that applies to them:
+ * Two questions, answered in this order:
  *
- *   CITY  ->  COUNTRY  ->  GLOBAL
+ *   1. WHICH PROMOTIONS APPLY HERE?  Targeting/eligibility. A city promotion
+ *      applies only in that city, a country one only in that country, a global
+ *      one everywhere. Perth never sees Berlin's, and an unknown location
+ *      matches nothing city-scoped.
+ *   2. OF THOSE, WHICH WINS?  Ranking: PRIORITY first, then specificity
+ *      (CITY -> COUNTRY -> GLOBAL), then newest.
  *
- * Someone in Perth sees Perth's promotion; with none, Australia's; with none,
- * the global default. Perth and Sydney can differ inside one country, and
- * Perth must never see Berlin's.
+ * PRIORITY RANKS BEFORE SPECIFICITY, and that ordering is the whole design.
+ *
+ * Specificity-first is a routing rule — the same shape as CSS specificity or
+ * DNS. It is exactly right for a FALLBACK ("what do we show if nothing better
+ * exists") and exactly wrong for a CAMPAIGN. Under specificity-first, a
+ * national anniversary could never appear in any city that happened to have an
+ * ordinary promotion of its own — the busiest markets would be the only ones
+ * to miss it, and the only fix would be re-uploading the campaign city by
+ * city.
+ *
+ * Because STANDARD is 0 and every promotion authored before this existed is 0,
+ * they all tie on priority and fall through to specificity. Specificity-first
+ * is therefore not replaced, it becomes the DEFAULT CASE — behaviour changes
+ * only when somebody deliberately raises a tier.
+ *
+ * The escape hatch is symmetrical: a city that must keep its own promotion
+ * during a global takeover raises its own tier above it.
+ *
+ * The SQL pre-filter in the service orders by the SAME three columns in the
+ * same order; it has to, because it also applies a LIMIT — ordering the
+ * database differently from this function would let the true winner be
+ * truncated away before this function ever sees it.
  *
  * This runs on the SERVER and returns one row (principle 1: the client renders
  * what it is given and never picks between candidates itself).
+ *
+ * ── EVERY HERO PROMOTION PROMOTES THE PLATFORM ────────────────────────────
+ *
+ * At all three scopes. A promotion is DailyBread speaking — a seasonal message,
+ * a new-market announcement, an anniversary — never a vendor, a meal or a meal
+ * plan. The scope says WHERE it is seen and nothing else; there is no second
+ * axis and no notion of a subject.
+ *
+ * Vendor-funded featured placement is explicitly NOT part of this (explicit
+ * direction): it needs its own system — inventory, pricing, billing, fair
+ * rotation between vendors who all paid — and nothing here is shaped for it.
+ * Deliberately unmodelled rather than half-modelled, so there is no dormant
+ * column or branch to mislead the next person reading this.
  */
 export const HERO_SCOPES = ["CITY", "COUNTRY", "GLOBAL"] as const
 export type HeroScope = (typeof HERO_SCOPES)[number]
@@ -169,17 +186,65 @@ export function resolveHeroPromotion<T extends ScopedCandidate>(
   if (applicable.length === 0) return null
 
   return applicable.reduce((best, candidate) => {
-    const byScope = HERO_SCOPE_RANK[candidate.scope] - HERO_SCOPE_RANK[best.scope]
-    if (byScope !== 0) return byScope < 0 ? candidate : best
-
+    /* 1. PRIORITY. A campaign outranks ordinary merchandising at any reach. */
     if (candidate.priority !== best.priority) {
       return candidate.priority > best.priority ? candidate : best
     }
 
+    /* 2. SPECIFICITY. Equal priority means neither is a deliberate override,
+     *    so the most local one wins — the fallback rule, unchanged. */
+    const byScope = HERO_SCOPE_RANK[candidate.scope] - HERO_SCOPE_RANK[best.scope]
+    if (byScope !== 0) return byScope < 0 ? candidate : best
+
+    /* 3. NEWEST. Two equally-ranked promotions for the same place: the later
+     *    decision is the current one. */
     const candidateAt = candidate.publishedAt?.getTime() ?? 0
     const bestAt = best.publishedAt?.getTime() ?? 0
     return candidateAt > bestAt ? candidate : best
   })
+}
+
+/**
+ * A promotion ranked above STANDARD must say when it ends.
+ *
+ * This is the point of the tiers, not a formality. A takeover suppresses every
+ * ordinary promotion on the platform, so one published for Christmas with no
+ * end date is still running in May — and nothing about the system would flag
+ * it, because it is behaving exactly as configured. An ordinary STANDARD hero
+ * has no such blast radius and may legitimately run until it is replaced.
+ *
+ * Checked on write AND on publish: a draft can be edited into a takeover after
+ * it was created, and publish is the moment it reaches customers.
+ */
+export function assertPriorityWindow(
+  tier: HeroPromotionPriorityTier,
+  endsAt: Date | null,
+): void {
+  if (tierRequiresEndDate(tier) && !endsAt) {
+    throw new ApiError(
+      400,
+      `A ${tier.toLowerCase()} promotion must have an end date — it outranks ordinary promotions until it stops.`,
+      "CAMPAIGN_NEEDS_END_DATE",
+    )
+  }
+}
+
+/**
+ * Refuses a run window that is already over.
+ *
+ * Publishing something whose end date has passed is always a mistake: it can
+ * never be seen, and it looks published in every list. Separate from
+ * assertWindow (start-before-end) because that one is about coherence and this
+ * one is about the clock.
+ */
+export function assertWindowNotElapsed(endsAt: Date | null, now: Date = new Date()): void {
+  if (endsAt && endsAt.getTime() <= now.getTime()) {
+    throw new ApiError(
+      400,
+      "That end date has already passed, so the promotion would never be seen.",
+      "WINDOW_ELAPSED",
+    )
+  }
 }
 
 /**

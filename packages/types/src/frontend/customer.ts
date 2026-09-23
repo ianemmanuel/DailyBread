@@ -19,6 +19,14 @@ export type {
   Serviceability,
   CheckServiceabilityRequest,
 
+  // Markets — where we operate, for the city picker and the city pages
+  Market,
+  MarketCity,
+  MarketsResult,
+  CityMarket,
+  CustomerCuisine,
+  CustomerCuisinesResult,
+
   // Money
   CustomerCurrency,
   PriceBreakdown,

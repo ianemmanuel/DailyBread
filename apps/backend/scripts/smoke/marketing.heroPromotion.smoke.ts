@@ -142,6 +142,32 @@ async function main() {
         GLOBAL_SCOPE,
       ),
     )
+    /* The country IS stored on a city row, but it is derived from the city —
+     * so sending one was previously accepted and then ignored. */
+    await expectFailure("city promotion naming a country", "INVALID_SCOPE", () =>
+      createHeroPromotion(
+        {
+          scope: "CITY",
+          cityRef: city.slug,
+          countryRef: country.slug,
+          headline: `${MARKER} bad`,
+        },
+        ACTOR,
+        GLOBAL_SCOPE,
+      ),
+    )
+    await expectFailure("country promotion naming a city", "INVALID_SCOPE", () =>
+      createHeroPromotion(
+        {
+          scope: "COUNTRY",
+          countryRef: country.slug,
+          cityRef: city.slug,
+          headline: `${MARKER} bad`,
+        },
+        ACTOR,
+        GLOBAL_SCOPE,
+      ),
+    )
     await expectFailure("run window that ends before it starts", "INVALID_WINDOW", () =>
       createHeroPromotion(
         {
@@ -174,11 +200,12 @@ async function main() {
     /* ── update ─────────────────────────────────────────────────────────── */
     const renamed = await updateHeroPromotion(
       globalPromo.id,
-      { headline: `${MARKER} global renamed`, priority: 7 },
+      { headline: `${MARKER} global renamed` },
       ACTOR,
       GLOBAL_SCOPE,
     )
-    check("updates copy and priority", renamed.headline.endsWith("renamed") && renamed.priority === 7)
+    check("updates copy", renamed.headline.endsWith("renamed"))
+    check("an untouched promotion stays STANDARD", renamed.priorityTier === "STANDARD")
 
     /* ── scope enforcement ──────────────────────────────────────────────── */
     const cityTier: AdminScopeContext = {
@@ -210,15 +237,33 @@ async function main() {
       )
     }
 
-    /* A scoped read must 404 out-of-scope rows the same as missing ones. */
+    /* READING IS OPEN across every scope — a marketing admin anywhere may look
+     * at what any market is running. What they may not do is WRITE it, and
+     * `canManage` is how the ERP knows which is which. */
     const foreignScope: AdminScopeContext = {
       isGlobal: false,
       countryIds: ["00000000-0000-0000-0000-000000000000"],
       cityIds: [],
       tier: "COUNTRY",
     }
-    await expectFailure("reading a promotion outside your scope", "NOT_FOUND", () =>
-      getHeroPromotion(cityPromo.id, foreignScope),
+    const foreignRead = await getHeroPromotion(cityPromo.id, foreignScope)
+    check("an out-of-scope admin can READ any promotion", foreignRead.id === cityPromo.id)
+    check("...but is told they cannot manage it", foreignRead.canManage === false)
+
+    const ownRead = await getHeroPromotion(cityPromo.id, GLOBAL_SCOPE)
+    check("a global admin is told they CAN manage it", ownRead.canManage === true)
+
+    /* The write is still refused — and now with 403 rather than a pretend 404,
+     * because the row's existence stopped being a secret. */
+    await expectFailure(
+      "an out-of-scope admin still cannot edit it",
+      "MARKETING_SCOPE_FORBIDDEN",
+      () => updateHeroPromotion(cityPromo.id, { headline: `${MARKER} hijack` }, ACTOR, foreignScope),
+    )
+    await expectFailure(
+      "an out-of-scope admin still cannot archive it",
+      "MARKETING_SCOPE_FORBIDDEN",
+      () => archiveHeroPromotion(cityPromo.id, ACTOR, foreignScope),
     )
 
     /* ── list ───────────────────────────────────────────────────────────── */
@@ -233,12 +278,82 @@ async function main() {
 
     const cityScoped = await listHeroPromotions({ page: 1, pageSize: 100 }, cityTier)
     check(
-      "a city admin never sees another country's promotions",
-      cityScoped.items.every(
-        (item) =>
-          item.scope === "GLOBAL" || item.cityId === city.id || item.countryId === city.countryId,
+      "a city admin sees every promotion, including ones they cannot write",
+      created.every((id) => cityScoped.items.some((item) => item.id === id)),
+    )
+    check(
+      "...and each carries whether THEY may manage it",
+      cityScoped.items.some((item) => item.canManage) &&
+        cityScoped.items.some((item) => !item.canManage),
+    )
+
+    /* ── priority tiers and the campaign window ─────────────────────────── */
+    await expectFailure(
+      "a FEATURED promotion with no end date",
+      "CAMPAIGN_NEEDS_END_DATE",
+      () =>
+        createHeroPromotion(
+          { scope: "GLOBAL", headline: `${MARKER} bad`, priorityTier: "FEATURED" },
+          ACTOR,
+          GLOBAL_SCOPE,
+        ),
+    )
+    await expectFailure(
+      "a TAKEOVER promotion with no end date",
+      "CAMPAIGN_NEEDS_END_DATE",
+      () =>
+        createHeroPromotion(
+          { scope: "GLOBAL", headline: `${MARKER} bad`, priorityTier: "TAKEOVER" },
+          ACTOR,
+          GLOBAL_SCOPE,
+        ),
+    )
+    await expectFailure("an end date that has already passed", "WINDOW_ELAPSED", () =>
+      createHeroPromotion(
+        {
+          scope: "GLOBAL",
+          headline: `${MARKER} bad`,
+          priorityTier: "FEATURED",
+          endsAt: new Date("2020-01-01"),
+        },
+        ACTOR,
+        GLOBAL_SCOPE,
       ),
     )
+    /* Promoting an existing STANDARD draft to a campaign is the same rule —
+     * the tier can change after creation, and that is when the end date
+     * starts being required. */
+    await expectFailure(
+      "raising a promotion to FEATURED without giving it an end date",
+      "CAMPAIGN_NEEDS_END_DATE",
+      () => updateHeroPromotion(globalPromo.id, { priorityTier: "FEATURED" }, ACTOR, GLOBAL_SCOPE),
+    )
+
+    const endsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    /* Deliberately aimed at the CITY'S OWN country — `country` above is merely
+     * the first row in the table and need not be the one the test city sits
+     * in. Getting that wrong makes the campaign inapplicable in the city and
+     * the ranking assertion below vacuous. */
+    const campaign = await createHeroPromotion(
+      {
+        scope: "COUNTRY",
+        countryRef: ownCountry.slug,
+        headline: `${MARKER} national campaign`,
+        priorityTier: "FEATURED",
+        endsAt,
+      },
+      ACTOR,
+      GLOBAL_SCOPE,
+    )
+    created.push(campaign.id)
+    /* Created after the bulk image assignment above, so it needs its own —
+     * publish refuses a promotion with no image, deliberately. */
+    await prisma.heroPromotion.update({
+      where: { id: campaign.id },
+      data: { imageKey: "marketing/hero/smoke.webp", imageWidth: 1600, imageHeight: 1600 },
+    })
+    check("a FEATURED campaign with an end date is accepted", campaign.priorityTier === "FEATURED")
+    check("the tier maps to its stored number", campaign.priority === 100)
 
     /* ── publish and resolve ────────────────────────────────────────────── */
     await publishHeroPromotion(globalPromo.id, {}, ACTOR, GLOBAL_SCOPE)
@@ -246,20 +361,71 @@ async function main() {
     await publishHeroPromotion(cityPromo.id, {}, ACTOR, GLOBAL_SCOPE)
 
     const inCity = await resolveHeroPromotionFor({ cityId: city.id, countryId: city.countryId })
-    check("a visitor in the city gets the city promotion", inCity?.id === cityPromo.id)
+    check(
+      "a visitor in the city gets the city promotion",
+      inCity?.headline === cityPromo.headline,
+    )
+
+    /* THE CASE THE TIERS EXIST FOR. Under specificity-first ranking a national
+     * campaign could never reach a city that had any promotion of its own — so
+     * the busiest markets were the only ones to miss it. */
+    await publishHeroPromotion(campaign.id, {}, ACTOR, GLOBAL_SCOPE)
+    const duringCampaign = await resolveHeroPromotionFor({
+      cityId: city.id,
+      countryId: city.countryId,
+    })
+    check(
+      "a FEATURED country campaign reaches a city that has its own promotion",
+      duringCampaign?.headline === campaign.headline,
+    )
+
+    /* And withdrawing it hands the city straight back to its own promotion. */
+    await archiveHeroPromotion(campaign.id, ACTOR, GLOBAL_SCOPE)
+    const afterCampaign = await resolveHeroPromotionFor({
+      cityId: city.id,
+      countryId: city.countryId,
+    })
+    check(
+      "once the campaign ends, the city promotion wins again",
+      afterCampaign?.headline === cityPromo.headline,
+    )
 
     const inCountry = await resolveHeroPromotionFor({ cityId: null, countryId: country.id })
-    check("elsewhere in the country, the country promotion", inCountry?.id === countryPromo.id)
+    check(
+      "elsewhere in the country, the country promotion",
+      inCountry?.headline === countryPromo.headline,
+    )
 
+    /* Compared by HEADLINE, because the public payload carries no id — and
+     * against `renamed`, not `globalPromo`, whose captured headline went stale
+     * the moment the update above changed it. */
     const unknown = await resolveHeroPromotionFor({ cityId: null, countryId: null })
-    check("an unknown location gets the global default", unknown?.id === globalPromo.id)
+    /* The public payload is an allowlist, not the admin record. Asserted by
+     * KEY SET so that a column added to the table later fails here rather than
+     * being published to anonymous visitors unnoticed. */
+    check(
+      "the public payload exposes only the fields the hero renders",
+      unknown !== null &&
+        JSON.stringify(Object.keys(unknown).sort()) ===
+          JSON.stringify(
+            ["ctaHref", "ctaLabel", "eyebrow", "headline", "image", "subheadline"],
+          ),
+      unknown ? Object.keys(unknown).sort() : unknown,
+    )
+    check(
+      "an unknown location gets the global default",
+      unknown?.headline === renamed.headline,
+    )
 
     if (otherCity) {
       const elsewhere = await resolveHeroPromotionFor({
         cityId: otherCity.id,
         countryId: "00000000-0000-0000-0000-000000000000",
       })
-      check("another city never sees this city's promotion", elsewhere?.id === globalPromo.id)
+      check(
+        "another city never sees this city's promotion",
+        elsewhere?.headline === renamed.headline,
+      )
     }
 
     /* A run window that has not opened yet must not resolve. */
@@ -271,7 +437,10 @@ async function main() {
       cityId: city.id,
       countryId: city.countryId,
     })
-    check("a promotion whose window has not opened does not show", beforeWindow?.id !== cityPromo.id)
+    check(
+      "a promotion whose window has not opened does not show",
+      beforeWindow?.headline !== cityPromo.headline,
+    )
 
     /* ── archive ────────────────────────────────────────────────────────── */
     const archived = await archiveHeroPromotion(countryPromo.id, ACTOR, GLOBAL_SCOPE)
@@ -281,7 +450,10 @@ async function main() {
       (await prisma.heroPromotion.count({ where: { id: countryPromo.id } })) === 1,
     )
     const afterArchive = await resolveHeroPromotionFor({ cityId: null, countryId: country.id })
-    check("an archived promotion stops resolving", afterArchive?.id !== countryPromo.id)
+    check(
+      "an archived promotion stops resolving",
+      afterArchive?.headline !== countryPromo.headline,
+    )
   } finally {
     const { count } = await prisma.heroPromotion.deleteMany({
       where: { headline: { startsWith: MARKER } },

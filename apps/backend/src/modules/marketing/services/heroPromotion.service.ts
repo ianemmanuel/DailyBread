@@ -1,24 +1,37 @@
 import { HeroPromotionScope, HeroPromotionStatus, prisma } from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
+import {
+  type HeroPromotionPriorityTier,
+  priorityForTier,
+  tierForPriority,
+} from "@repo/types/enums"
 
 import { UUID_RE } from "@/constants/system"
 import { ApiError } from "@/errors/ApiError"
-import { ImageRejected, normaliseSquareImage } from "@/lib/images/transform"
+import {
+  discardPublicImage,
+  presignOriginalUpload,
+  processPublicSquareImage,
+} from "@/lib/images/publicImage"
 import { logger } from "@/lib/pino/logger"
 import { R2Service } from "@/lib/r2/r2.service"
 import { publicMediaStorage } from "@/lib/storage/publicMedia.storage"
+import { revalidateStorefront } from "@/lib/storefront/revalidate"
 import { resolveCountryIdInScope } from "@/modules/admin/lib/scope/resolve-country-id"
 import { auditService } from "@/services/audit"
 import {
   HERO_CROP,
-  assertHeroOriginalKey,
+  HERO_ORIGINAL_PREFIX,
+  HERO_PUBLIC_PREFIX,
+  assertPriorityWindow,
   assertScopeShape,
+  assertWindowNotElapsed,
   buildHeroOriginalKey,
   buildHeroPublicKey,
   resolveHeroPromotion,
   type HeroScope,
 } from "../lib/heroPromotion.rules"
-import { assertPromotionScope, promotionScopeWhere } from "../lib/scope"
+import { assertPromotionScope, canManagePromotion } from "../lib/scope"
 import type {
   CreateHeroPromotionInput,
   ListHeroPromotionsInput,
@@ -36,10 +49,16 @@ const serviceLog = logger.child({ module: "marketing-hero-promotion-service" })
  * The heavy lifting lives here; controllers only map and delegate. Three
  * things this service owns that nothing above it may decide:
  *
- *   1. SCOPE. Both which promotions a caller may see (promotionScopeWhere) and
- *      which they may write (assertPromotionScope). A filter never widens
- *      access, and a reference that resolves outside the caller's scope 404s
- *      exactly like one that does not exist (principle 6).
+ *   1. SCOPE — of WRITES only. Reading is deliberately unscoped: everyone with
+ *      `marketing:promotions:read` sees every promotion at every reach, because
+ *      a hero promotion is public marketing copy with nothing to protect
+ *      (lib/scope.ts sets this out). Every write path calls
+ *      assertPromotionScope against the promotion's OWN reach, and a write
+ *      refused for scope answers 403, not 404 — the row's existence is not a
+ *      secret, so principle 6's reason for hiding it does not apply here.
+ *
+ *   1b. PRIORITY. The API takes a named tier; the column stores its number.
+ *      Anything above STANDARD is a campaign and must carry an end date.
  *
  *   2. IMAGERY. The admin uploads an original to the PRIVATE bucket; this
  *      service fetches it, re-encodes it, and writes the derivative to the
@@ -86,7 +105,7 @@ type PromotionRow = Awaited<ReturnType<typeof findPromotionOr404>>
  * presentVendorProfile. The database never holds a URL, so changing CDN domain
  * or storage provider is a config change rather than a data migration.
  */
-export function presentHeroPromotion(row: PromotionRow) {
+export function presentHeroPromotion(row: PromotionRow, scope?: AdminScopeContext) {
   const { imageKey, ...rest } = row
 
   /* A read must never fail because the public bucket has not been provisioned
@@ -102,6 +121,17 @@ export function presentHeroPromotion(row: PromotionRow) {
 
   return {
     ...rest,
+    /* Derived here, never stored: the band is a presentation of the number and
+     * the ERP must not re-compute it (one definition, principle 1). */
+    priorityTier: tierForPriority(row.priority),
+    /* Omitted (false) for a caller with no scope context — only the admin
+     * surface passes one, and the public presenter drops the field entirely. */
+    canManage: scope
+      ? canManagePromotion(scope, row.scope as HeroScope, {
+          cityId: row.cityId,
+          countryId: row.countryId,
+        })
+      : false,
     image:
       imageKey && publicMediaStorage.isConfigured()
       ? {
@@ -115,13 +145,43 @@ export function presentHeroPromotion(row: PromotionRow) {
   }
 }
 
-async function findPromotionOr404(promotionId: string, scope: AdminScopeContext) {
+/**
+ * The PUBLIC shape — what an anonymous visitor on the storefront receives.
+ *
+ * Deliberately NOT presentHeroPromotion. That one is the ADMIN record: status,
+ * priority, the run window, publishedAt/createdAt/updatedAt, the row id and the
+ * resolved city/country. None of it is rendered by the hero, and all of it was
+ * being handed to an unauthenticated endpoint.
+ *
+ * The risk is not that today's fields are secret — they are not. It is the
+ * DEFAULT: with the admin presenter wired to a public route, every column added
+ * to this table in future is published to the world automatically, and nobody
+ * making that change would think to check. A narrow allowlist inverts that, so
+ * exposing something new has to be a deliberate edit to this function.
+ *
+ * Built on top of presentHeroPromotion rather than beside it, so the imageKey →
+ * URL rule and its unconfigured-bucket guard live in exactly one place.
+ */
+export function presentPublicHeroPromotion(row: PromotionRow) {
+  const { eyebrow, headline, subheadline, ctaLabel, ctaHref, image } =
+    presentHeroPromotion(row)
+
+  return { eyebrow, headline, subheadline, ctaLabel, ctaHref, image }
+}
+
+/**
+ * Finds a promotion, or 404s because it genuinely is not there.
+ *
+ * NOT scope-filtered: every admin with :read may see every promotion (see
+ * lib/scope.ts for why that is safe here). A caller who may see but not write
+ * is refused by `assertPromotionScope` at the write itself, with a 403 — the
+ * honest answer, since the row's existence is not a secret.
+ */
+async function findPromotionOr404(promotionId: string) {
   const promotion = await prisma.heroPromotion.findFirst({
-    where: { id: promotionId, deletedAt: null, ...promotionScopeWhere(scope) },
+    where: { id: promotionId, deletedAt: null },
     select: PROMOTION_SELECT,
   })
-  /* Out of scope and non-existent are the same answer, deliberately —
-   * otherwise the id space is probeable (principle 6). */
   if (!promotion) throw new ApiError(404, "Promotion not found", "NOT_FOUND")
   return promotion
 }
@@ -153,6 +213,36 @@ async function resolveCityInScope(
   return { cityId: city.id, countryId: city.countryId }
 }
 
+/*
+ * Reference resolvers for LIST FILTERS.
+ *
+ * Separate from resolveCityInScope / resolveCountryIdInScope on purpose, and
+ * the difference is the whole point: those two are WRITE guards and must 404
+ * a place the caller cannot reach. A filter is a view, and reading is not
+ * scoped here, so narrowing it would make "show me Australia's promotions"
+ * fail for an admin who is perfectly entitled to look.
+ *
+ * They still resolve a real row or 404 — an unknown ref is an error, not an
+ * empty filter that silently returns everything.
+ */
+async function resolveCountryIdForFilter(ref: string): Promise<string> {
+  const country = await prisma.country.findFirst({
+    where: UUID_RE.test(ref) ? { id: ref } : { slug: ref },
+    select: { id: true },
+  })
+  if (!country) throw new ApiError(404, "Country not found", "NOT_FOUND")
+  return country.id
+}
+
+async function resolveCityIdForFilter(ref: string): Promise<string> {
+  const city = await prisma.city.findFirst({
+    where: UUID_RE.test(ref) ? { id: ref } : { slug: ref },
+    select: { id: true },
+  })
+  if (!city) throw new ApiError(404, "City not found", "NOT_FOUND")
+  return city.id
+}
+
 /**
  * Works out where a promotion applies, from the refs the caller sent, and
  * proves they are allowed to write there.
@@ -181,6 +271,18 @@ async function resolvePlacement(
   /* Likewise a country promotion that also names a city. */
   if (input.scope === "COUNTRY" && input.cityRef) {
     throw new ApiError(400, "A country promotion cannot also name a city.", "INVALID_SCOPE")
+  }
+  /* And a city promotion that also names a country. The row DOES store a
+   * country, but it is derived from the city below — so a countryRef here is
+   * either redundant or contradicts the city, and in both cases it was being
+   * accepted and then silently ignored. Same class as the GLOBAL case above
+   * (recurring bug class #1): a field a caller can send and never see applied. */
+  if (input.scope === "CITY" && input.countryRef) {
+    throw new ApiError(
+      400,
+      "A city promotion takes its country from the city; do not send one.",
+      "INVALID_SCOPE",
+    )
   }
 
   if (input.scope === "CITY") {
@@ -218,7 +320,7 @@ function mapCopy(input: Partial<UpdateHeroPromotionInput>) {
   if (input.subheadline !== undefined) data.subheadline = input.subheadline || null
   if (input.ctaLabel !== undefined) data.ctaLabel = input.ctaLabel || null
   if (input.ctaHref !== undefined) data.ctaHref = input.ctaHref || null
-  if (input.priority !== undefined) data.priority = input.priority
+  if (input.priorityTier !== undefined) data.priority = priorityForTier(input.priorityTier)
   if (input.startsAt !== undefined) data.startsAt = input.startsAt ?? null
   if (input.endsAt !== undefined) data.endsAt = input.endsAt ?? null
   if (input.imageAlt !== undefined) data.imageAlt = input.imageAlt || null
@@ -242,10 +344,10 @@ function assertWindow(startsAt: Date | null, endsAt: Date | null): void {
  * saved, because a declared type is only a claim.
  */
 export async function presignHeroImageUpload(input: PresignHeroImageInput) {
-  const extension = input.contentType.split("/")[1] ?? "bin"
-  const storageKey = buildHeroOriginalKey(extension === "jpeg" ? "jpg" : extension)
-  const uploadUrl = await R2Service.generateUploadUrl(storageKey, input.contentType)
-  return { uploadUrl, storageKey }
+  return presignOriginalUpload({
+    prefix: HERO_ORIGINAL_PREFIX,
+    contentType: input.contentType,
+  })
 }
 
 /**
@@ -257,51 +359,17 @@ export async function presignHeroImageUpload(input: PresignHeroImageInput) {
  * one — not for a handful of admin uploads.
  */
 async function processHeroImage(originalKey: string) {
-  publicMediaStorage.assertConfigured()
-  assertHeroOriginalKey(originalKey)
-
-  let original: Buffer
-  try {
-    original = await R2Service.getObjectBuffer(originalKey)
-  } catch {
-    throw new ApiError(
-      400,
-      "That upload could not be found. Try uploading the image again.",
-      "UPLOAD_NOT_FOUND",
-    )
-  }
-
-  let derived
-  try {
-    derived = await normaliseSquareImage(original, HERO_CROP)
-  } catch (err) {
-    /* Surface WHICH rule the image broke — "too small", "not an image" — so
-     * the admin can fix it, rather than a generic failure. */
-    if (err instanceof ImageRejected) throw new ApiError(400, err.message, err.code)
-    throw err
-  }
-
-  const publicKey = buildHeroPublicKey()
-  await publicMediaStorage.put(publicKey, derived.buffer, derived.contentType)
-
-  return {
-    imageKey: publicKey,
-    imageWidth: derived.width,
-    imageHeight: derived.height,
-    imageBlurDataUrl: derived.blurDataUrl,
-    originalImageKey: originalKey,
-  }
+  return processPublicSquareImage({
+    originalKey,
+    originalPrefix: HERO_ORIGINAL_PREFIX,
+    publicPrefix: HERO_PUBLIC_PREFIX,
+    crop: HERO_CROP,
+  })
 }
 
-/** Best-effort cleanup of an image a promotion no longer points at. A failure
- *  here must never fail the admin's save — the row is already correct. */
-async function discardPublicImage(imageKey: string | null): Promise<void> {
-  if (!imageKey) return
-  try {
-    await publicMediaStorage.delete(imageKey)
-  } catch (err) {
-    serviceLog.warn({ err, imageKey }, "Could not delete a replaced hero image")
-  }
+/** Best-effort cleanup of an image a promotion no longer points at. */
+async function discardHeroImage(imageKey: string | null): Promise<void> {
+  return discardPublicImage(imageKey, "hero-promotion")
 }
 
 /* ── Admin operations ───────────────────────────────────────────────────── */
@@ -310,40 +378,72 @@ export async function listHeroPromotions(
   filters: ListHeroPromotionsInput,
   scope: AdminScopeContext,
 ) {
+  /* No scope narrowing: every admin with :read sees every promotion, at every
+   * reach (lib/scope.ts explains why that is safe and wanted). The filters
+   * below are the admin's own choice of view, not a permission. */
   const where = {
     deletedAt: null,
-    ...promotionScopeWhere(scope),
     ...(filters.scope ? { scope: filters.scope as HeroPromotionScope } : {}),
     ...(filters.status ? { status: filters.status as HeroPromotionStatus } : {}),
-    ...(filters.countryRef
-      ? { countryId: await resolveCountryIdInScope(filters.countryRef, scope) }
-      : {}),
-    ...(filters.cityRef ? { cityId: (await resolveCityInScope(filters.cityRef, scope)).cityId } : {}),
+    ...(filters.priorityTier ? { priority: priorityForTier(filters.priorityTier) } : {}),
+    ...(filters.countryRef ? { countryId: await resolveCountryIdForFilter(filters.countryRef) } : {}),
+    ...(filters.cityRef ? { cityId: await resolveCityIdForFilter(filters.cityRef) } : {}),
   }
 
-  const [rows, total] = await Promise.all([
+  const [rows, total, byStatus, fallback] = await Promise.all([
     prisma.heroPromotion.findMany({
       where,
-      /* Same ordering the resolver applies, so the list reads in the order a
-       * visitor would actually get them. */
-      orderBy: [{ scope: "asc" }, { priority: "desc" }, { publishedAt: "desc" }],
+      /* The SAME three keys, in the same order, as resolveHeroPromotion —
+       * priority, then specificity, then newest. The list therefore reads in
+       * the order a visitor would actually get them. */
+      orderBy: [{ priority: "desc" }, { scope: "asc" }, { publishedAt: "desc" }],
       skip: (filters.page - 1) * filters.pageSize,
       take: filters.pageSize,
       select: PROMOTION_SELECT,
     }),
     prisma.heroPromotion.count({ where }),
+    /* Counts across ALL promotions, not the filtered view — the whole point is
+     * to surface the drafts you are not currently looking at. One grouped
+     * query, not three counts. */
+    prisma.heroPromotion.groupBy({
+      by: ["status"],
+      where: { deletedAt: null },
+      _count: { _all: true },
+    }),
+    resolveHeroPromotionFor({ cityId: null, countryId: null }),
   ])
 
+  const statusCounts = { DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 }
+  for (const group of byStatus) {
+    statusCounts[group.status as keyof typeof statusCounts] = group._count._all
+  }
+
   return {
-    items: rows.map(presentHeroPromotion),
+    items: rows.map((row) => presentHeroPromotion(row, scope)),
     page: filters.page,
     pageSize: filters.pageSize,
     total,
+    /* Unfiltered, so a draft nobody published is visible from every view. It
+     * is far too easy to create a promotion, navigate away, and never learn
+     * that it is still sitting in DRAFT. */
+    statusCounts,
+    /*
+     * WHAT A VISITOR WITH NO LOCATION SEES RIGHT NOW — resolved through the
+     * exact function the storefront calls, never a re-implementation.
+     *
+     * `null` is the state worth shouting about: nothing is scheduled globally,
+     * so the storefront is falling back to its own built-in hero. That is the
+     * answer to "what happens when a promotion expires", and until now it was
+     * invisible from the ERP.
+     */
+    globalFallback: fallback
+      ? { headline: fallback.headline, hasImage: Boolean(fallback.image) }
+      : null,
   }
 }
 
 export async function getHeroPromotion(promotionId: string, scope: AdminScopeContext) {
-  return presentHeroPromotion(await findPromotionOr404(promotionId, scope))
+  return presentHeroPromotion(await findPromotionOr404(promotionId), scope)
 }
 
 export async function createHeroPromotion(
@@ -352,7 +452,13 @@ export async function createHeroPromotion(
   scope: AdminScopeContext,
 ) {
   const placement = await resolvePlacement(input, scope)
-  assertWindow(input.startsAt ?? null, input.endsAt ?? null)
+  const endsAt = input.endsAt ?? null
+  assertWindow(input.startsAt ?? null, endsAt)
+  /* A campaign must end. Checked on CREATE as well as publish, so a draft
+   * cannot quietly sit in the table missing the one field that stops it
+   * running forever once somebody presses publish. */
+  assertPriorityWindow(input.priorityTier ?? "STANDARD", endsAt)
+  if (input.endsAt) assertWindowNotElapsed(endsAt)
 
   const imagery = input.originalImageKey ? await processHeroImage(input.originalImageKey) : {}
 
@@ -382,7 +488,7 @@ export async function createHeroPromotion(
     changes: { after: { scope: promotion.scope, headline: promotion.headline } },
   })
 
-  return presentHeroPromotion(promotion)
+  return presentHeroPromotion(promotion, scope)
 }
 
 export async function updateHeroPromotion(
@@ -391,11 +497,17 @@ export async function updateHeroPromotion(
   actorId: string,
   scope: AdminScopeContext,
 ) {
-  const existing = await findPromotionOr404(promotionId, scope)
+  const existing = await findPromotionOr404(promotionId)
 
   /* Moving a promotion between reaches is a scope decision in BOTH places:
-   * the caller must hold the old reach (proved by findPromotionOr404's scoped
-   * where) and the new one. */
+   * the caller must hold the OLD reach and the new one.
+   *
+   * The old-reach check is explicit now. It used to ride on
+   * findPromotionOr404's scoped `where`, which stopped being true when reads
+   * were opened up to the whole marketing team — without this line, being able
+   * to SEE every promotion would have meant being able to EDIT every one. */
+  assertPromotionScope(scope, existing.scope as HeroScope, existing)
+
   const placement = input.scope
     ? await resolvePlacement(
         { scope: input.scope, cityRef: input.cityRef, countryRef: input.countryRef },
@@ -403,10 +515,16 @@ export async function updateHeroPromotion(
       )
     : null
 
+  const endsAt = input.endsAt !== undefined ? (input.endsAt ?? null) : existing.endsAt
   assertWindow(
     input.startsAt !== undefined ? (input.startsAt ?? null) : existing.startsAt,
-    input.endsAt !== undefined ? (input.endsAt ?? null) : existing.endsAt,
+    endsAt,
   )
+  /* Against the EFFECTIVE tier: an ordinary draft can be promoted to a
+   * campaign by this very call, and that is exactly when the end date starts
+   * being required. */
+  assertPriorityWindow(input.priorityTier ?? tierForPriority(existing.priority), endsAt)
+  if (input.endsAt) assertWindowNotElapsed(endsAt)
 
   const replacingImage =
     Boolean(input.originalImageKey) && input.originalImageKey !== existing.imageKey
@@ -431,9 +549,15 @@ export async function updateHeroPromotion(
 
   /* Only after the row is committed — deleting first would leave a live
    * promotion pointing at an object that no longer exists. */
-  if (replacingImage) await discardPublicImage(existing.imageKey)
+  if (replacingImage) await discardHeroImage(existing.imageKey)
 
   serviceLog.info({ actorId, promotionId }, "Hero promotion updated")
+  /* Only when the edit changed something a visitor can actually see. Editing a
+   * DRAFT changes nothing on the storefront, and purging its cache for every
+   * keystroke-level save would push pointless re-renders onto this API. */
+  if (promotion.status === HeroPromotionStatus.PUBLISHED) {
+    void revalidateStorefront("hero-promotion")
+  }
   auditService.log({
     adminUserId: actorId,
     action: "hero_promotion.updated",
@@ -442,7 +566,7 @@ export async function updateHeroPromotion(
     changes: { before: { headline: existing.headline }, after: { headline: promotion.headline } },
   })
 
-  return presentHeroPromotion(promotion)
+  return presentHeroPromotion(promotion, scope)
 }
 
 /**
@@ -459,7 +583,7 @@ export async function publishHeroPromotion(
   actorId: string,
   scope: AdminScopeContext,
 ) {
-  const existing = await findPromotionOr404(promotionId, scope)
+  const existing = await findPromotionOr404(promotionId)
   assertPromotionScope(scope, existing.scope as HeroScope, existing)
 
   if (!existing.imageKey) {
@@ -472,7 +596,15 @@ export async function publishHeroPromotion(
 
   const startsAt = input.startsAt !== undefined ? (input.startsAt ?? null) : existing.startsAt
   const endsAt = input.endsAt !== undefined ? (input.endsAt ?? null) : existing.endsAt
+  const tier = input.priorityTier ?? tierForPriority(existing.priority)
+
   assertWindow(startsAt, endsAt)
+  /* The moment content reaches customers is the last place to catch a campaign
+   * with no end date — after this, nothing stops it running. */
+  assertPriorityWindow(tier, endsAt)
+  /* And publishing something whose window already closed is always a mistake:
+   * it can never be seen, but it reads as live in every list. */
+  assertWindowNotElapsed(endsAt)
 
   const promotion = await prisma.heroPromotion.update({
     where: { id: promotionId },
@@ -484,13 +616,19 @@ export async function publishHeroPromotion(
       publishedAt: existing.publishedAt ?? new Date(),
       startsAt,
       endsAt,
-      ...(input.priority !== undefined ? { priority: input.priority } : {}),
+      ...(input.priorityTier !== undefined
+        ? { priority: priorityForTier(input.priorityTier) }
+        : {}),
       updatedByAdminId: actorId,
     },
     select: PROMOTION_SELECT,
   })
 
   serviceLog.info({ actorId, promotionId }, "Hero promotion published")
+  /* The storefront caches its landing page; tell it now rather than leaving the
+   * admin to wait out a revalidate window. Never throws — a failed purge does
+   * not un-publish anything, it just means the usual timed refresh applies. */
+  void revalidateStorefront("hero-promotion")
   auditService.log({
     adminUserId: actorId,
     action: "hero_promotion.published",
@@ -499,7 +637,7 @@ export async function publishHeroPromotion(
     changes: { after: { status: promotion.status, startsAt, endsAt } },
   })
 
-  return presentHeroPromotion(promotion)
+  return presentHeroPromotion(promotion, scope)
 }
 
 /**
@@ -515,7 +653,7 @@ export async function archiveHeroPromotion(
   actorId: string,
   scope: AdminScopeContext,
 ) {
-  const existing = await findPromotionOr404(promotionId, scope)
+  const existing = await findPromotionOr404(promotionId)
   assertPromotionScope(scope, existing.scope as HeroScope, existing)
 
   const promotion = await prisma.heroPromotion.update({
@@ -525,6 +663,9 @@ export async function archiveHeroPromotion(
   })
 
   serviceLog.info({ actorId, promotionId }, "Hero promotion archived")
+  /* Withdrawing matters MORE urgently than publishing: until the storefront
+   * refreshes it is still showing content somebody decided to pull. */
+  void revalidateStorefront("hero-promotion")
   auditService.log({
     adminUserId: actorId,
     action: "hero_promotion.archived",
@@ -533,7 +674,7 @@ export async function archiveHeroPromotion(
     changes: { before: { status: existing.status }, after: { status: promotion.status } },
   })
 
-  return presentHeroPromotion(promotion)
+  return presentHeroPromotion(promotion, scope)
 }
 
 /* ── Resolution (the module's public surface) ───────────────────────────── */
@@ -577,7 +718,10 @@ export async function resolveHeroPromotionFor(target: {
         },
       ],
     },
-    orderBy: [{ scope: "asc" }, { priority: "desc" }, { publishedAt: "desc" }],
+    /* MUST match resolveHeroPromotion's comparison, because of the `take`
+     * below: ordering differently here can truncate the true winner away
+     * before the pure function ever sees it. */
+    orderBy: [{ priority: "desc" }, { scope: "asc" }, { publishedAt: "desc" }],
     take: 25,
     select: PROMOTION_SELECT,
   })
@@ -587,5 +731,7 @@ export async function resolveHeroPromotionFor(target: {
     target,
   )
 
-  return winner ? presentHeroPromotion(winner) : null
+  /* The PUBLIC presenter: this function is the customer storefront's entry
+   * point, and it is reached with no authentication at all. */
+  return winner ? presentPublicHeroPromotion(winner) : null
 }

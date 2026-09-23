@@ -4,9 +4,17 @@ import { NextRequest, NextResponse } from "next/server"
 
 const BACKEND = process.env.BACKEND_API_URL
 
-/** GET /api/countries/[countryRef]/cities — used client-side by ScopeSelector */
+/**
+ * GET /api/countries/[countryRef]/cities — the client-side city picker, used by
+ * ScopeSelector and by the marketing promotion form.
+ *
+ * The caller's query string is FORWARDED. It used not to be, and the effect was
+ * silent: the backend defaults to pageSize=10, so every city picker in the app
+ * offered the first ten cities of a country alphabetically and simply had no
+ * row for the eleventh. Nothing errored — the city just wasn't there.
+ */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ countryRef: string }> },
 ) {
   try {
@@ -16,7 +24,7 @@ export async function GET(
 
     if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
 
-    const res = await fetch(`${BACKEND}/admin/v1/countries/${countryRef}/cities`, {
+    const res = await fetch(`${BACKEND}/admin/v1/countries/${countryRef}/cities${req.nextUrl.search}`, {
       headers: { Authorization: `Bearer ${token}` },
       next: { revalidate: 300 },
     })

@@ -9,11 +9,27 @@ import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
 } from "@/components/ui/alert-dialog"
-import type { FoodTagKind, FoodTagRow } from "@/types/food-tag.types"
+import type { FoodTagKind, TaxonomyStatus } from "@/types/food-tag.types"
 
 /*
  * Suspend / reactivate a catalog entry. AlertDialog, not Sheet — a short
  * confirmation, matching the convention CountryActions set.
+ *
+ * ── One component, two densities ───────────────────────────────────────────
+ *
+ * The table renders dozens of rows, so there it stays a compact ghost button:
+ * a wall of tinted buttons is a wall of noise and none of them would read as
+ * meaning anything. A details page has exactly one subject and room for a
+ * real toolbar, so there it takes the tinted `warning` / `success` variant.
+ * Same component, same confirmation copy, same request — only the chrome
+ * differs, passed in rather than forked.
+ *
+ * ── The prop is the MINIMUM it needs ───────────────────────────────────────
+ *
+ * Not `FoodTagRow`: the details endpoint returns a different, richer shape and
+ * would otherwise have to be bent into a list row's type. Four fields are what
+ * this actually reads, and `FoodTagRow` satisfies them structurally, so the
+ * table needed no change.
  *
  * There is deliberately no delete. Vendor profiles reference these rows
  * (onDelete: Restrict in the schema), and a customer-facing tag that vanished
@@ -25,15 +41,24 @@ import type { FoodTagKind, FoodTagRow } from "@/types/food-tag.types"
 
 interface Props {
   kind    : FoodTagKind
-  tag     : FoodTagRow
+  tag     : {
+    id    : string
+    name  : string
+    status: TaxonomyStatus
+    /** Vendor profiles already carrying it — what makes this a real decision. */
+    vendorCount: number
+  }
   singular: string
+  /** "compact" for a table row, "prominent" for a details-page toolbar. */
+  presentation?: "compact" | "prominent"
 }
 
-export function FoodTagStatusActions({ kind, tag, singular }: Props) {
+export function FoodTagStatusActions({ kind, tag, singular, presentation = "compact" }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  const prominent = presentation === "prominent"
   const suspending = tag.status === "ACTIVE"
   const nextStatus = suspending ? "SUSPENDED" : "ACTIVE"
 
@@ -61,12 +86,28 @@ export function FoodTagStatusActions({ kind, tag, singular }: Props) {
   return (
     <>
       <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 gap-1.5 px-2 text-xs"
+        /* Suspending is WARNING, not destructive: it is reversible and nothing
+         * is deleted. Reactivating restores, so it reads as success. Keeping
+         * destructive for what cannot be undone is what lets destructive mean
+         * something when it does appear. */
+        variant={prominent ? (suspending ? "warning" : "success") : "ghost"}
+        size={prominent ? "lg" : "sm"}
+        /* Compact keeps a transparent ground but COLOURS THE LABEL, so the
+         * action still reads at a glance without turning a long table into a
+         * wall of tinted blocks. The tint arrives on hover, where it confirms
+         * the target rather than competing for attention. */
+        className={
+          prominent
+            ? "gap-1.5"
+            : suspending
+              ? "h-8 gap-1.5 px-2 text-xs text-warning hover:bg-warning/10 hover:text-warning"
+              : "h-8 gap-1.5 px-2 text-xs text-success hover:bg-success/10 hover:text-success"
+        }
         onClick={() => setOpen(true)}
       >
-        {suspending ? <PauseCircle className="size-3" /> : <PlayCircle className="size-3" />}
+        {suspending
+          ? <PauseCircle className={prominent ? "size-4" : "size-3"} />
+          : <PlayCircle className={prominent ? "size-4" : "size-3"} />}
         {suspending ? "Suspend" : "Reactivate"}
       </Button>
 
@@ -104,7 +145,11 @@ export function FoodTagStatusActions({ kind, tag, singular }: Props) {
             <AlertDialogAction
               onClick={(e) => { e.preventDefault(); apply() }}
               disabled={saving}
-              className="gap-2"
+              className={
+                suspending
+                  ? "gap-2 bg-warning text-white hover:bg-warning/90"
+                  : "gap-2 bg-success text-white hover:bg-success/90"
+              }
             >
               {saving && <Loader2 className="size-4 animate-spin" />}
               {suspending ? "Suspend" : "Reactivate"}

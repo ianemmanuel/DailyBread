@@ -36,28 +36,34 @@ export interface CustomerAddress {
   label       : string | null
   addressLine1: string
   addressLine2: string | null
+  /** As the customer typed it, for printing. The city that DECIDES anything is
+   *  `serviceability.cityName`, resolved from the pin. */
   city        : string
   postalCode  : string | null
+  /** Derived from the pin by the server, never echoed back from the request. */
   countryId   : string
-  latitude    : number | null
-  longitude   : number | null
+  latitude    : number
+  longitude   : number
   isDefault   : boolean
   createdAt   : string
-  /** Resolved when the address was saved: which of the platform's cities this
-   *  point falls in, and whether we serve it. Null latitude/longitude means it
-   *  was never pinned, so nothing could be resolved. */
-  serviceability: Serviceability | null
+  /** Resolved on every READ, never stored: coverage changes when an admin
+   *  edits a zone, so a saved verdict would go quietly stale. Always present,
+   *  because an address without a pin can no longer be saved. */
+  serviceability: Serviceability
 }
 
 export interface UpsertCustomerAddressRequest {
   label?       : string | null
   addressLine1 : string
   addressLine2?: string | null
+  /** For printing only; it does not decide the address's geography. */
   city         : string
   postalCode?  : string | null
-  countryId    : string
-  latitude?    : number | null
-  longitude?   : number | null
+  /** OPTIONAL, and only ever a cross-check. The server derives the country
+   *  from the coordinates; a supplied id that disagrees is rejected. */
+  countryId?   : string | null
+  latitude     : number
+  longitude    : number
   isDefault?   : boolean
 }
 
@@ -74,11 +80,98 @@ export interface Serviceability {
    *  outside every operating city. */
   cityId              : string | null
   cityName            : string | null
+  /** The city's URL slug, so a resolved point can be sent straight to that
+   *  city's page without a second lookup. */
+  citySlug            : string | null
+  /** The country the resolved city belongs to. Needed by the storefront to ask
+   *  for a COUNTRY-scoped hero promotion: without it, country scoping is
+   *  unreachable from the frontend no matter how well it is modelled. */
+  countryId           : string | null
 }
 
 export interface CheckServiceabilityRequest {
   latitude : number
   longitude: number
+}
+
+// ─── Markets ─────────────────────────────────────────────────────────────────
+
+/*
+ * Where the platform operates, as a visitor is allowed to see it.
+ *
+ * This is the MARKET dimension — coarse, cacheable, and identical for everyone.
+ * It drives merchandising (which promotion, which city page) and the city
+ * picker. It is NOT a delivery location: ordering needs a point, because
+ * coverage is resolved by point-in-polygon against a city boundary and a city
+ * id is not a point.
+ */
+export interface MarketCity {
+  id      : string
+  name    : string
+  slug    : string
+  timezone: string
+}
+
+export interface Market {
+  countryId  : string
+  countryName: string
+  countrySlug: string
+  countryCode: string
+  cities     : MarketCity[]
+}
+
+export interface MarketsResult {
+  markets: Market[]
+}
+
+/**
+ * One city, with the named areas the platform operates in.
+ *
+ * `areas` is NAMES ONLY, and that is a boundary rather than a shortcut. It
+ * deliberately carries no zone level, no operational status, no geometry and
+ * no delivery mode: a customer needs to know whether we reach them, not how
+ * the operation is arranged behind that. Whether a courier or the kitchen
+ * itself brings the food is our business, and `ZoneLevel` is internal
+ * vocabulary that would also map out where the platform is expanding.
+ *
+ * An area appears when the zone can be LISTED to customers at all
+ * (`canListOnDemand`). A zone that is merely paused stays listed — a pause is
+ * temporary and measured in hours, while this list answers the durable
+ * question of where we operate. Someone standing inside a paused zone is told
+ * so by their own serviceability verdict, which is the right place for it.
+ */
+export interface CityMarket {
+  city   : MarketCity
+  country: {
+    id  : string
+    name: string
+    slug: string
+    code: string
+  }
+  areas: string[]
+}
+
+// ─── Catalog ─────────────────────────────────────────────────────────────────
+
+/** A cuisine as the storefront shows it. A narrow allowlist: no status, no
+ *  storage key, no ids of other things — see customer.catalog.service.ts. */
+export interface CustomerCuisine {
+  id   : string
+  slug : string
+  name : string
+  /** Null when no picture has been uploaded yet, or when the public bucket is
+   *  unconfigured. The tile renders name-only rather than breaking. */
+  image: {
+    url        : string
+    width      : number | null
+    height     : number | null
+    blurDataUrl: string | null
+    alt        : string | null
+  } | null
+}
+
+export interface CustomerCuisinesResult {
+  cuisines: CustomerCuisine[]
 }
 
 // ─── Money ───────────────────────────────────────────────────────────────────

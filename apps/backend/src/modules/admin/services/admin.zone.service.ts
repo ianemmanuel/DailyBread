@@ -238,6 +238,7 @@ export async function createZone(
     data: {
       cityId          : city.id,
       name            : input.name,
+      publicName      : input.publicName,
       boundaries      : input.boundary as object,
       level,
       levelChangedAt  : level === "REGISTRATION_ONLY" ? null : new Date(),
@@ -255,7 +256,7 @@ export async function createZone(
     action     : "zone.created",
     entityType : "Zone",
     entityId   : zone.id,
-    changes    : { after: { name: zone.name, level: zone.level, cityId: city.id } },
+    changes    : { after: { name: zone.name, publicName: zone.publicName, level: zone.level, cityId: city.id } },
   })
 
   await recomputeCityOutletsSafe(city.id, actorId, "zone.created")
@@ -305,8 +306,9 @@ export async function updateZone(
   const updated = await prisma.zone.update({
     where: { id: zone.id },
     data : {
-      ...(input.name     !== undefined ? { name      : input.name               } : {}),
-      ...(input.boundary !== undefined ? { boundaries: input.boundary as object } : {}),
+      ...(input.name       !== undefined ? { name      : input.name               } : {}),
+      ...(input.publicName !== undefined ? { publicName: input.publicName         } : {}),
+      ...(input.boundary   !== undefined ? { boundaries: input.boundary as object } : {}),
     },
   })
 

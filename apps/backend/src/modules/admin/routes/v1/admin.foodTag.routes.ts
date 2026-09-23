@@ -10,6 +10,12 @@ import {
   handleSetAllFoodTagsForCountry,
   handleGetFoodTagAdoption,
 } from "../../controllers/admin.foodTag.controller"
+import {
+  handleGetCuisineDetail,
+  handlePresignCuisineImage,
+  handleRemoveCuisineImage,
+  handleSetCuisineImage,
+} from "../../controllers/admin.cuisineImage.controller"
 
 /*
  * /admin/v1/food-tags/:kind  where :kind is "cuisines" | "dietary-tags".
@@ -24,6 +30,19 @@ const foodTagRouter: Router = Router()
 
 const READ  = requirePermission(AdminPermissions.SETTINGS_FOOD_TAGS_READ)
 const WRITE = requirePermission(AdminPermissions.SETTINGS_FOOD_TAGS_WRITE)
+
+/*
+ * CUISINE-ONLY routes, registered FIRST so their literal "cuisines" segment
+ * always wins over the generic "/:kind" patterns below — the same ordering
+ * rule /vendor-types/adoption needs.
+ *
+ * Imagery is cuisine-only on purpose: a cuisine tile is a photograph, a
+ * dietary tag is a badge. See admin.cuisineImage.service.ts.
+ */
+foodTagRouter.post  ("/cuisines/image/presign",  WRITE, handlePresignCuisineImage)
+foodTagRouter.get   ("/cuisines/:tagRef/detail", READ,  handleGetCuisineDetail)
+foodTagRouter.put   ("/cuisines/:tagRef/image",  WRITE, handleSetCuisineImage)
+foodTagRouter.delete("/cuisines/:tagRef/image",  WRITE, handleRemoveCuisineImage)
 
 foodTagRouter.get("/:kind", READ, handleListFoodTags)
 // Before /:kind/:tagRef for the same reason as the "countries" route below.

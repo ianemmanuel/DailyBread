@@ -446,7 +446,15 @@ model City {
 model Zone {
   id         String @id @default(uuid())
   cityId     String
+  //* OPERATIONAL name. Written for and by ops, and never shown to a customer
+  //* — "Karen-Langata-SouthC-Upperhill Area" is a real value here.
   name       String
+  //* CUSTOMER-FACING name, and the only one the storefront ever renders.
+  //* Required, because the alternative is an optional field that nobody fills
+  //* in and a fallback to `name` that silently publishes ops vocabulary — the
+  //* exact failure this column exists to end. Backfilled from `name` by the
+  //* migration that added it, so every pre-existing zone needs one edit.
+  publicName String
   boundaries Json // GeoJSON Polygon | MultiPolygon — must sit within the city boundary (enforced at the service layer, a later stage)
 
   //* Capability ladder — see ZoneLevel. Monotonic. Promotion/demotion is an
@@ -2061,6 +2069,25 @@ model Cuisine {
   name             String
   description      String?
   status           TaxonomyStatus @default(ACTIVE)
+
+  //* ── Imagery ──────────────────────────────────────────────────────────
+  //* A cuisine tile is a photograph; a dietary tag is a badge. DietaryTag is
+  //* deliberately NOT given these columns even though the two models are
+  //* otherwise column-for-column identical — dormant columns on a model that
+  //* will never use them mislead whoever reads this next. The shared
+  //* CatalogDelegate in admin.foodTag.service.ts is structural and keeps
+  //* working: it selects the common fields and ignores these.
+  //*
+  //* imageKey names an object in the PUBLIC bucket that THIS SERVER produced.
+  //* originalImageKey names the admin's untouched upload in the PRIVATE
+  //* bucket, kept so the crop can be redone, and never served.
+  imageKey         String?
+  originalImageKey String?
+  imageWidth       Int?
+  imageHeight      Int?
+  imageBlurDataUrl String?
+  //* What a screen reader announces in place of the photo.
+  imageAlt         String?
   createdByAdminId String?
   deletedAt        DateTime?
   createdAt        DateTime       @default(now())
@@ -2682,17 +2709,33 @@ model ConsumerAccount {
   @@index([status])
 }
 
+//* A saved DELIVERY DESTINATION, and the only durable customer location in the
+//* system. Every address belongs to whichever country its PIN resolves into —
+//* it is not the customer's home country, and a customer may keep addresses in
+//* several cities and several countries at once. ConsumerAccount.countryId is
+//* a first-address hint and is never delivery authority.
 model ConsumerAddress {
   id                String   @id @default(uuid())
   consumerAccountId String
   label             String?
   addressLine1      String
   addressLine2      String?
+  //* As the customer typed it, for printing an address label. NEVER
+  //* authoritative: the real city is resolved from the pin on every read, so
+  //* this column can say "Nairobi" over a pin in Mombasa and nothing downstream
+  //* is misled. No cityId is stored — a boundary redraw would make a cached one
+  //* wrong with nothing to refresh it (principle 4).
   city              String
   postalCode        String?
+  //* DERIVED from the pin at write time, never taken from the client. A
+  //* supplied country that disagrees with the coordinates is rejected outright
+  //* rather than silently corrected.
   countryId         String
-  latitude          Float?
-  longitude         Float?
+  //* REQUIRED, and required together. An address with no pin cannot take part
+  //* in serviceability, so it is not a deliverable destination and this model
+  //* does not represent one.
+  latitude          Float
+  longitude         Float
   isDefault         Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
