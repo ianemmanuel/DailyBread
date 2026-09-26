@@ -8,6 +8,7 @@ import {
   handleUpdateAddress,
   handleSetDefaultAddress,
   handleDeleteAddress,
+  handleSelectMarket,
 } from "../../controllers/customer.account.controller"
 
 /*
@@ -34,5 +35,9 @@ accountRouter.post("/addresses", handleCreateAddress)
 accountRouter.patch ("/addresses/:addressId/default", handleSetDefaultAddress)
 accountRouter.put   ("/addresses/:addressId",         handleUpdateAddress)
 accountRouter.delete("/addresses/:addressId",         handleDeleteAddress)
+
+//* "Your cities". Records that the customer chose a city (and, only when
+//* asked, makes it the default city signing in lands on). Idempotent: PUT.
+accountRouter.put("/markets/:citySlug", handleSelectMarket)
 
 export default accountRouter

@@ -21,13 +21,11 @@ import { SERVICEABILITY_COPY } from "@/lib/location/serviceability-copy"
  */
 export function AddressSummary({
   addresses,
-  defaultAddressId,
   limit,
 }: {
-  addresses       : CustomerAddress[]
-  defaultAddressId: string | null
+  addresses: CustomerAddress[]
   /** The account page shows a few; the address book shows them all. */
-  limit?          : number
+  limit?   : number
 }) {
   if (addresses.length === 0) return null
 
@@ -39,7 +37,12 @@ export function AddressSummary({
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {shown.map((address) => (
           <li key={address.id}>
-            <AddressLine address={address} isDefault={address.id === defaultAddressId} />
+            <AddressLine
+              address={address}
+              defaultLabel={address.serviceability.cityName
+                ? `Default for ${address.serviceability.cityName}`
+                : "Default"}
+            />
           </li>
         ))}
       </ul>
@@ -53,16 +56,19 @@ export function AddressSummary({
   )
 }
 
+/** One address card. `isDefault` comes from the address itself — the backend
+ *  resolves it PER CITY — and `defaultLabel` names the city it is default for. */
 export function AddressLine({
   address,
-  isDefault,
+  defaultLabel = "Default",
   children,
 }: {
-  address  : CustomerAddress
-  isDefault: boolean
+  address      : CustomerAddress
+  defaultLabel?: string
   /** Actions, when the surface has any. The summary has none. */
-  children?: React.ReactNode
+  children?    : React.ReactNode
 }) {
+  const isDefault = address.isDefault
   const copy = SERVICEABILITY_COPY[address.serviceability.status]
   const servable = address.serviceability.isServiceable
 
@@ -83,7 +89,7 @@ export function AddressLine({
 
         {isDefault && (
           <span className="shrink-0 rounded-full bg-primary-subtle px-2.5 py-1 text-xs font-semibold text-primary-subtle-fg">
-            Default
+            {defaultLabel}
           </span>
         )}
       </div>

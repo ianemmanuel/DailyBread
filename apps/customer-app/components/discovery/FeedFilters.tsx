@@ -38,7 +38,19 @@ const CHIP = "shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-sm 
 const CHIP_ON = "border-transparent bg-primary text-primary-foreground"
 const CHIP_OFF = "border-border bg-card text-foreground hover:bg-muted"
 
-export function FeedFilters({ cuisines }: { cuisines: DiscoveryResult["availableCuisines"] }) {
+export function FeedFilters({
+  cuisines,
+  sortable = true,
+}: {
+  cuisines: DiscoveryResult["availableCuisines"]
+  /*
+   * False while browsing a whole city. Every sort this app offers is
+   * distance- or ETA-derived, and both need a delivery point — so the control
+   * is ABSENT rather than present-and-ignored. A sort that quietly does
+   * nothing is the same failure as a filter that never reaches its mapper.
+   */
+  sortable?: boolean
+}) {
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
@@ -78,7 +90,7 @@ export function FeedFilters({ cuisines }: { cuisines: DiscoveryResult["available
   const activeCuisine = params.get("cuisine")
   const hasFilters =
     !!activeCuisine || TOGGLES.some((t) => params.get(t.param) === "1") ||
-    activeSort !== "RELEVANCE" || !!params.get("search")
+    (sortable && activeSort !== "RELEVANCE") || !!params.get("search")
 
   return (
     <div className={cn("space-y-3 transition-opacity duration-200", pending && "opacity-60")}>
@@ -109,6 +121,7 @@ export function FeedFilters({ cuisines }: { cuisines: DiscoveryResult["available
 
         {/* A native select: four fixed options, and the OS picker is faster and
             more accessible on a phone than anything rebuilt in a popover. */}
+        {sortable && (
         <label className="relative shrink-0">
           <span className="sr-only">Sort restaurants</span>
           <SlidersHorizontal className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -123,6 +136,7 @@ export function FeedFilters({ cuisines }: { cuisines: DiscoveryResult["available
             ))}
           </select>
         </label>
+        )}
       </div>
 
       <div className="rail">

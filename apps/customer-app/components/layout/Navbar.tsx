@@ -11,10 +11,12 @@ import {
 
 import { CircleUser, MapPin } from "lucide-react"
 
+import { CityPicker } from "@/components/layout/CityPicker"
 import { ThemeToggle } from "@/components/themes/ThemeToggle"
 import { Button } from "@/components/ui/button"
 import { Logo } from "./Logo"
 import { MobileNav } from "./MobileNav"
+import { useAfterAuthUrl } from "./useAfterAuthUrl"
 import { NavLinks } from "./NavLinks"
 
 /*
@@ -29,6 +31,8 @@ import { NavLinks } from "./NavLinks"
  * placeholder, which stops the bar changing width when the buttons appear.
  */
 export function Navbar() {
+  const afterAuth = useAfterAuthUrl()
+
   return (
     <header className="sticky top-0 z-50 border-b border-border/70 bg-background/80 backdrop-blur-md">
       <nav aria-label="Main" className="shell flex h-nav items-center gap-4">
@@ -39,6 +43,12 @@ export function Navbar() {
         >
           <Logo />
         </Link>
+
+        {/* The market being browsed, changeable from anywhere. It sits in the
+            GLOBAL bar rather than the market bar on purpose: from `/city` or
+            `/about` there is no market bar, and "which city am I in" is the
+            question that decides everything below it. */}
+        <CityPicker />
 
         <div className="hidden flex-1 justify-center md:flex">
           <NavLinks />
@@ -52,13 +62,19 @@ export function Navbar() {
           </ClerkLoading>
 
           <Show when="signed-out">
-            <SignInButton>
-              <Button variant="brand" className="h-10 rounded-full px-4 max-sm:hidden">
+          {/* Where signing in lands. Inside a market, back to the same page —
+              signing in there is about THAT city, and the market's own default
+              address will apply the moment they return. Anywhere else
+              (`/`, `/city`, `/about`), `/continue`, which resolves their
+              default city. The in-page auth walls (saving an address) keep
+              Clerk's own `redirect_url` and come back to the task. */}
+            <SignInButton forceRedirectUrl={afterAuth}>
+              <Button variant="brand" className="h-10 rounded-full px-4 max-md:hidden">
                 Sign in
               </Button>
             </SignInButton>
-            <SignUpButton>
-              <Button className="h-10 rounded-full px-5">Get Started</Button>
+            <SignUpButton forceRedirectUrl={afterAuth}>
+              <Button className="h-10 rounded-full px-5 max-sm:hidden">Get Started</Button>
             </SignUpButton>
           </Show>
 

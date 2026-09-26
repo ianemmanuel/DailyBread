@@ -5,7 +5,7 @@ import { ChevronRight } from "lucide-react"
 
 import { LocationWorkbench } from "@/components/location/LocationWorkbench"
 import { getCityDetail } from "@/lib/data/cities"
-import { getMarketsSafe } from "@/lib/data/markets"
+import { getMarketScope } from "@/lib/market/context"
 
 /*
  * `/city/[citySlug]/location` — establishing the delivery point.
@@ -22,20 +22,10 @@ import { getMarketsSafe } from "@/lib/data/markets"
  * city is NOT the answer: see LocationWorkbench for why the centroid opens the
  * view and never becomes the point.
  *
- * Reads no cookie and no auth, so it stays statically renderable on the hour's
- * revalidate its city read already uses.
+ * Dynamic, like every market route (see the market layout). It seeds the map
+ * with the customer's own PIN for this city when they have one, so signing in
+ * to save a pin brings them back to that pin rather than an empty map.
  */
-
-export const revalidate = 3600
-
-/** One per operating market, like the city page above it. Without this the
- *  route builds as `ƒ` and every visit re-renders a shell that depends on
- *  nothing but the city. Resilient on purpose: an unreachable backend at build
- *  time means these generate on demand instead of failing the build. */
-export async function generateStaticParams() {
-  const markets = await getMarketsSafe()
-  return markets.flatMap((market) => market.cities.map((city) => ({ citySlug: city.slug })))
-}
 
 export async function generateMetadata({
   params,
@@ -62,11 +52,16 @@ export default async function CityLocationPage({
   params: Promise<{ citySlug: string }>
 }) {
   const { citySlug } = await params
-  const market = await getCityDetail(citySlug)
+  const scope = await getMarketScope(citySlug)
 
   /* An unknown slug 404s; an unreachable backend throws instead, so the two
    * can never be confused for one another. */
-  if (!market) notFound()
+  if (!scope) notFound()
+  const { market } = scope.context
+  const target = scope.context.choice.target
+  const initialPin = target?.kind === "pin"
+    ? { latitude: target.latitude, longitude: target.longitude }
+    : null
 
   return (
     <div className="band-tight space-y-6">
@@ -94,7 +89,7 @@ export default async function CityLocationPage({
         </p>
       </header>
 
-      <LocationWorkbench market={market} />
+      <LocationWorkbench market={market} initialPin={initialPin} />
     </div>
   )
 }

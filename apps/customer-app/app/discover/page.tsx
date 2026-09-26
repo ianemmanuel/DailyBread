@@ -1,31 +1,25 @@
 import { redirect } from "next/navigation"
 
-import { getStoredLocation } from "@/lib/location/server"
+import { resolveDoorwayCity } from "@/lib/market/doorway"
 
 /*
- * `/discover` — a doorway, kept for links made before the routes were named
- * properly.
+ * `/discover` — a doorway into the customer's own market's discover page.
  *
- * The feed lives at `/city/[citySlug]/places` now: a market's name belongs in
- * the URL, and "places" is what the page actually lists — "kitchens" collides
- * with `VendorType` and "discover" described nothing.
+ * Discovery lives under a market (`/city/[citySlug]/discover`); this route
+ * exists for old links and for global pages with no city to link to — the
+ * landing page's cuisine tiles among them. It resolves the market from this
+ * device, then the account's default city, and otherwise asks via `/city`.
  *
- *   location cookie resolved to a city  →  that market's places
- *   anything else                       →  the city directory
- *
- * ── The query string travels ───────────────────────────────────────────────
- *
- * The landing page's cuisine tiles link here with `?cuisine=<id>`, and an
- * earlier version of this redirect dropped it — so every tile opened an
- * unfiltered feed and looked like it had done nothing. Forwarding the params
- * is what makes the doorway transparent rather than lossy.
+ * The query string travels: a cuisine tile arrives with `?cuisine=<id>`, and
+ * dropping it would open an unfiltered page that looks like the tile did
+ * nothing.
  */
 export default async function DiscoverDoorway({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const [location, params] = await Promise.all([getStoredLocation(), searchParams])
+  const [citySlug, params] = await Promise.all([resolveDoorwayCity(), searchParams])
 
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -34,5 +28,5 @@ export default async function DiscoverDoorway({
   }
   const suffix = query.size > 0 ? `?${query}` : ""
 
-  redirect(location?.citySlug ? `/city/${location.citySlug}/places${suffix}` : `/city${suffix}`)
+  redirect(citySlug ? `/city/${citySlug}/discover${suffix}` : `/city${suffix}`)
 }

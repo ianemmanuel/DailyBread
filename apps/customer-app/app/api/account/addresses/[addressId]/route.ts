@@ -1,28 +1,34 @@
-import type { NextRequest } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 
 import { backendFetch } from "@/lib/api/server"
-import { proxyBackendCall } from "@/lib/api/proxy"
+import { envelopeError } from "@/lib/api/proxy"
+import {
+  COOKIE_OPTIONS, DELIVERY_COOKIE, parseDeliveryCookie, serializeDeliveryCookie, withoutAddress,
+} from "@/lib/location/cookie"
 
 /*
- * DELETE /api/account/addresses/:addressId — remove a saved address.
+ * DELETE /api/account/addresses/:id — remove an address, and forget it on this
+ * device in the same response.
  *
- * The id is opaque and unvalidated here on purpose: the backend scopes every
- * address lookup to the caller, so another customer's id answers 404 rather
- * than 403 (principle 6). Re-checking here would be a second implementation of
- * one ownership rule, which is how the two drift.
- *
- * A hard delete, deliberately — see the address service. The customer asked
- * for it gone, and no order points at the row (orders will snapshot instead).
+ * Without the cookie half, every market that was delivering to the deleted
+ * address would keep a dead id for a year. The resolver would survive it (it
+ * falls back to the city default), but nothing should rely on that.
  */
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ addressId: string }> },
 ) {
   const { addressId } = await params
-
-  return proxyBackendCall(() =>
-    backendFetch<{ id: string }>(`/api/customer/v1/addresses/${addressId}`, {
-      method: "DELETE",
-    }),
-  )
+  try {
+    const result = await backendFetch<{ id: string }>(
+      `/api/customer/v1/addresses/${encodeURIComponent(addressId)}`,
+      { method: "DELETE" },
+    )
+    const res = NextResponse.json({ status: "success", data: result })
+    const cookie = withoutAddress(parseDeliveryCookie(req.cookies.get(DELIVERY_COOKIE)?.value), addressId)
+    res.cookies.set(DELIVERY_COOKIE, serializeDeliveryCookie(cookie), COOKIE_OPTIONS)
+    return res
+  } catch (err) {
+    return envelopeError(err)
+  }
 }

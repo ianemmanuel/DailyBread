@@ -1,6 +1,6 @@
 import { Router } from "express"
 
-import { handleListCuisines } from "../../controllers/customer.catalog.controller"
+import { handleGetCuisine, handleListCuisines } from "../../controllers/customer.catalog.controller"
 
 /*
  * PUBLIC, no auth middleware — the same posture as the marketing and geo
@@ -11,5 +11,6 @@ import { handleListCuisines } from "../../controllers/customer.catalog.controlle
 const catalogRouter: Router = Router()
 
 catalogRouter.get("/catalog/cuisines", handleListCuisines)
+catalogRouter.get("/catalog/cuisines/:slug", handleGetCuisine)
 
 export default catalogRouter

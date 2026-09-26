@@ -213,14 +213,16 @@ async function main() {
     check("at 512 x 512", meta.width === 512 && meta.height === 512, `${meta.width}x${meta.height}`)
 
     // ── 5. The customer catalogue ────────────────────────────────────────
-    const listed = await listCustomerCuisines({ limit: 48 })
+    const listed = (await listCustomerCuisines({ pageSize: 60 })).cuisines
     const mine = listed.find((c) => c.slug === cuisine.slug)
     check("the cuisine appears in the public catalogue", Boolean(mine))
     check("it carries its image URL", Boolean(mine?.image?.url))
     check(
       "the public payload is a NARROW allowlist",
       mine !== undefined &&
-        JSON.stringify(Object.keys(mine).sort()) === JSON.stringify(["id", "image", "name", "slug"]),
+        /* `description` was added deliberately for the cuisine pages — widening
+         * this list must always be a decision, never a side effect. */
+        JSON.stringify(Object.keys(mine).sort()) === JSON.stringify(["description", "id", "image", "name", "slug"]),
       mine && Object.keys(mine).sort(),
     )
     /* The PUBLIC key is necessarily part of the public URL — that is what a
@@ -238,7 +240,7 @@ async function main() {
 
     // ── 6. A suspended cuisine leaves the catalogue ──────────────────────
     await prisma.cuisine.update({ where: { id: cuisine.id }, data: { status: "SUSPENDED" } })
-    const afterSuspend = await listCustomerCuisines({ limit: 48 })
+    const afterSuspend = (await listCustomerCuisines({ pageSize: 60 })).cuisines
     check(
       "a suspended cuisine is not offered to customers",
       !afterSuspend.some((c) => c.slug === cuisine.slug),

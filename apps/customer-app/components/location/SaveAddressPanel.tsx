@@ -145,8 +145,8 @@ export function SaveAddressPanel({
 
         <div className="flex flex-wrap gap-2">
           <Button asChild className="h-10 rounded-full px-5">
-            <Link href={`/city/${serviceability.citySlug ?? citySlug}/places`}>
-              Browse places
+            <Link href={`/city/${serviceability.citySlug ?? citySlug}/discover`}>
+              See what can reach it
               <ArrowRight aria-hidden className="size-4" />
             </Link>
           </Button>

@@ -3,6 +3,7 @@
 import * as React from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   AlertCircle, ArrowRight, Check, Loader2, LocateFixed, MapPin,
 } from "lucide-react"
@@ -70,8 +71,17 @@ function keyOf(point: Point): string {
   return formatPoint(point)
 }
 
-export function LocationWorkbench({ market }: { market: CityMarket }) {
-  const [point, setPoint] = React.useState<Point | null>(null)
+export function LocationWorkbench({
+  market,
+  initialPin = null,
+}: {
+  market     : CityMarket
+  /** The customer's own pin for this city, from their delivery choice. Placed
+   *  but NOT confirmed — coverage is re-checked on confirm, never assumed. */
+  initialPin?: Point | null
+}) {
+  const router = useRouter()
+  const [point, setPoint] = React.useState<Point | null>(initialPin)
   /* The point the verdict on screen belongs to. Confirming is only meaningful
    * for a pin we have NOT already answered for: without this the button stayed
    * live after a confirmed — and even saved — location, inviting the customer
@@ -150,6 +160,9 @@ export function LocationWorkbench({ market }: { market: CityMarket }) {
 
       setPhase({ step: "answered", serviceability })
       setConfirmedKey(keyOf(point))
+      /* The cookie now holds this pin for its market — re-render the market
+       * bar so it says so. */
+      router.refresh()
 
       /* Inside a city we know but unable to serve it: name the places we do
        * cover there rather than leaving someone to guess. */
@@ -329,7 +342,7 @@ export function LocationWorkbench({ market }: { market: CityMarket }) {
                       for it with no further round trip. Straight to THIS
                       market's places rather than the global doorway, which
                       would only resolve the same city again. */}
-                  <Link href={`/city/${answered.citySlug ?? market.city.slug}/places`}>
+                  <Link href={`/city/${answered.citySlug ?? market.city.slug}/discover`}>
                     See what&apos;s available
                     <ArrowRight aria-hidden className="size-4" />
                   </Link>

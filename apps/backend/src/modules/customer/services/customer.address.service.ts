@@ -2,8 +2,11 @@ import { prisma } from "@repo/db"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
 import { logger } from "@/lib/pino/logger"
-import type { CustomerAddress, UpsertCustomerAddressRequest } from "@repo/types/backend"
-import { resolveCustomerLocation } from "./customer.geo.service"
+import type {
+  CustomerAddress, CustomerMarket, UpsertCustomerAddressRequest,
+} from "@repo/types/backend"
+import { getOperatingCities, resolveCustomerLocation } from "./customer.geo.service"
+import { resolveCustomerMarkets } from "./customer.markets"
 
 /*
  * The customer's address book.
@@ -28,18 +31,20 @@ const MAX_ADDRESSES = 20
 const ADDRESS_SELECT = {
   id: true, label: true, addressLine1: true, addressLine2: true,
   city: true, postalCode: true, countryId: true,
-  latitude: true, longitude: true, isDefault: true, createdAt: true,
+  latitude: true, longitude: true, createdAt: true,
 } as const
 
 type AddressRow = {
   id: string; label: string | null; addressLine1: string; addressLine2: string | null
   city: string; postalCode: string | null; countryId: string
-  latitude: number; longitude: number; isDefault: boolean; createdAt: Date
+  latitude: number; longitude: number; createdAt: Date
 }
 
 /** Resolved at the response boundary, on every read. Every saved address has a
  *  pin — that is what makes it a delivery destination — so there is always a
- *  real answer to give. */
+ *  real answer to give. `isDefault` is filled in by `loadAddressBook`, the only
+ *  place that can know it: defaults are per CITY, and which city an address is
+ *  in is only known once its pin is resolved. */
 async function present(row: AddressRow): Promise<CustomerAddress> {
   const { serviceability } = await resolveCustomerLocation({
     latitude: row.latitude, longitude: row.longitude,
@@ -55,28 +60,85 @@ async function present(row: AddressRow): Promise<CustomerAddress> {
     countryId   : row.countryId,
     latitude    : row.latitude,
     longitude   : row.longitude,
-    isDefault   : row.isDefault,
+    isDefault   : false,
     createdAt   : row.createdAt.toISOString(),
     serviceability,
   }
 }
 
-export async function listAddresses(customerId: string): Promise<CustomerAddress[]> {
-  const rows = await prisma.consumerAddress.findMany({
-    where  : { consumerAccountId: customerId },
-    select : ADDRESS_SELECT,
-    // The default first, then most recent — the order someone actually wants to
-    // pick from.
-    orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+export interface AddressBook {
+  addresses       : CustomerAddress[]
+  markets         : CustomerMarket[]
+  defaultCitySlug : string | null
+  defaultAddressId: string | null
+}
+
+/**
+ * The whole book: every address with its live serviceability, the customer's
+ * cities, and the defaults — resolved together, once, by the pure rule in
+ * customer.markets.ts.
+ *
+ * Everything that reports an address back goes through here, so a write can
+ * never answer with a different default than the next read would.
+ */
+export async function loadAddressBook(customerId: string): Promise<AddressBook> {
+  const [rows, marketRows, operating] = await Promise.all([
+    prisma.consumerAddress.findMany({
+      where  : { consumerAccountId: customerId },
+      select : ADDRESS_SELECT,
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.consumerMarket.findMany({
+      where : { consumerAccountId: customerId },
+      select: { cityId: true, isDefault: true, defaultAddressId: true, lastSelectedAt: true },
+    }),
+    getOperatingCities(),
+  ])
+
+  const addresses = await Promise.all(rows.map(present))
+  const cities = new Map(operating.map((c) => [c.id, {
+    id: c.id, slug: c.slug, name: c.name, countryId: c.countryId,
+  }]))
+
+  const resolved = resolveCustomerMarkets({
+    rows     : marketRows,
+    addresses: addresses.map((a, i) => ({
+      id: a.id, cityId: a.serviceability.cityId, createdAt: rows[i]!.createdAt,
+    })),
+    cities,
   })
-  return Promise.all(rows.map(present))
+
+  for (const address of addresses) {
+    const cityId = address.serviceability.cityId
+    address.isDefault = cityId !== null && resolved.defaultAddressByCity.get(cityId) === address.id
+  }
+
+  const defaultCity = resolved.markets.find((m) => m.cityId === resolved.defaultCityId) ?? null
+
+  return {
+    addresses,
+    markets         : resolved.markets,
+    defaultCitySlug : defaultCity?.citySlug ?? null,
+    defaultAddressId: defaultCity?.defaultAddressId ?? null,
+  }
+}
+
+export async function listAddresses(customerId: string): Promise<CustomerAddress[]> {
+  return (await loadAddressBook(customerId)).addresses
+}
+
+/** One address as the book sees it — with its per-city default resolved. */
+async function presentFromBook(customerId: string, addressId: string): Promise<CustomerAddress> {
+  const found = (await loadAddressBook(customerId)).addresses.find((a) => a.id === addressId)
+  if (!found) throw new ApiError(HttpStatus.NOT_FOUND, "Address not found.", "ADDRESS_NOT_FOUND")
+  return found
 }
 
 export async function createAddress(
   customerId: string,
   input     : UpsertCustomerAddressRequest,
 ): Promise<CustomerAddress> {
-  const data = await validate(input)
+  const { cityId, ...data } = await validate(input)
 
   const existing = await prisma.consumerAddress.count({ where: { consumerAccountId: customerId } })
   if (existing >= MAX_ADDRESSES) {
@@ -87,22 +149,27 @@ export async function createAddress(
     )
   }
 
-  // The first address a customer saves is their default whether they asked or
-  // not — otherwise they would have a book with nothing selected in it.
-  const shouldDefault = input.isDefault === true || existing === 0
-
   const created = await prisma.$transaction(async (tx) => {
-    if (shouldDefault) {
-      await tx.consumerAddress.updateMany({
-        where: { consumerAccountId: customerId, isDefault: true },
-        data : { isDefault: false },
-      })
-    }
-
     const row = await tx.consumerAddress.create({
-      data  : { ...data, consumerAccountId: customerId, isDefault: shouldDefault },
+      data  : { ...data, consumerAccountId: customerId },
       select: ADDRESS_SELECT,
     })
+
+    /*
+     * Saving an address in a city makes that city one of theirs. The address
+     * becomes the city's default only when asked, or when the city has none
+     * yet — the first address in Mombasa is the Mombasa default without
+     * displacing the Nairobi one.
+     */
+    const market = await tx.consumerMarket.upsert({
+      where : { consumerAccountId_cityId: { consumerAccountId: customerId, cityId } },
+      create: { consumerAccountId: customerId, cityId, defaultAddressId: row.id },
+      update: { lastSelectedAt: new Date() },
+      select: { id: true, defaultAddressId: true },
+    })
+    if (input.isDefault === true || market.defaultAddressId === null) {
+      await tx.consumerMarket.update({ where: { id: market.id }, data: { defaultAddressId: row.id } })
+    }
 
     /*
      * Adopt the country from the customer's first address when the account has
@@ -120,7 +187,7 @@ export async function createAddress(
   })
 
   addressLog.info({ customerId, addressId: created.id }, "Address created")
-  return present(created)
+  return presentFromBook(customerId, created.id)
 }
 
 export async function updateAddress(
@@ -129,41 +196,44 @@ export async function updateAddress(
   input     : UpsertCustomerAddressRequest,
 ): Promise<CustomerAddress> {
   await assertOwned(customerId, addressId)
-  const data = await validate(input)
+  const { cityId, ...data } = await validate(input)
 
-  const updated = await prisma.$transaction(async (tx) => {
-    if (input.isDefault === true) {
-      await tx.consumerAddress.updateMany({
-        where: { consumerAccountId: customerId, isDefault: true, id: { not: addressId } },
-        data : { isDefault: false },
-      })
-    }
-    return tx.consumerAddress.update({
-      where : { id: addressId },
-      data  : { ...data, ...(input.isDefault === true ? { isDefault: true } : {}) },
-      select: ADDRESS_SELECT,
-    })
+  await prisma.$transaction(async (tx) => {
+    await tx.consumerAddress.update({ where: { id: addressId }, data, select: { id: true } })
+    /* A moved pin may now be in another city; the old city's stored default
+     * simply stops being honoured on the next read. Asking for default makes it
+     * the default of the city it is in NOW. */
+    if (input.isDefault === true) await makeCityDefault(tx, customerId, cityId, addressId)
   })
 
-  return present(updated)
+  return presentFromBook(customerId, addressId)
 }
 
+/**
+ * Make this address the default FOR ITS CITY.
+ *
+ * Per city, not per account: choosing Kilimani as the Nairobi default leaves
+ * the Mombasa default exactly where it was. The city is the one the pin
+ * resolves into right now, never one the client names.
+ */
 export async function setDefaultAddress(customerId: string, addressId: string): Promise<CustomerAddress> {
-  await assertOwned(customerId, addressId)
-
-  const updated = await prisma.$transaction(async (tx) => {
-    await tx.consumerAddress.updateMany({
-      where: { consumerAccountId: customerId, isDefault: true, id: { not: addressId } },
-      data : { isDefault: false },
-    })
-    return tx.consumerAddress.update({
-      where : { id: addressId },
-      data  : { isDefault: true },
-      select: ADDRESS_SELECT,
-    })
+  const row = await prisma.consumerAddress.findFirst({
+    where : { id: addressId, consumerAccountId: customerId },
+    select: { latitude: true, longitude: true },
   })
+  if (!row) throw new ApiError(HttpStatus.NOT_FOUND, "Address not found.", "ADDRESS_NOT_FOUND")
 
-  return present(updated)
+  const { city } = await resolveCustomerLocation({ latitude: row.latitude, longitude: row.longitude })
+  if (!city) {
+    throw new ApiError(
+      HttpStatus.CONFLICT,
+      "That address is no longer inside a city we operate in, so it cannot be a default.",
+      "ADDRESS_OUTSIDE_MARKETS",
+    )
+  }
+
+  await prisma.$transaction((tx) => makeCityDefault(tx, customerId, city.id, addressId))
+  return presentFromBook(customerId, addressId)
 }
 
 /**
@@ -175,29 +245,26 @@ export async function setDefaultAddress(customerId: string, addressId: string): 
  * exist they will SNAPSHOT the delivery address onto the order rather than
  * pointing at this row — an order has to remain readable after the customer
  * tidies their address book, and a foreign key would make that impossible.
+ *
+ * A market that named it as its default is cleared by the foreign key
+ * (SetNull), and that city falls back to its newest remaining address — so a
+ * city with addresses never ends up with no default.
  */
 export async function deleteAddress(customerId: string, addressId: string): Promise<{ id: string }> {
-  const row = await assertOwned(customerId, addressId)
-
-  await prisma.$transaction(async (tx) => {
-    await tx.consumerAddress.delete({ where: { id: addressId } })
-
-    // Deleting the default promotes the next most recent, so the book never
-    // ends up with addresses but nothing selected.
-    if (row.isDefault) {
-      const next = await tx.consumerAddress.findFirst({
-        where  : { consumerAccountId: customerId },
-        orderBy: { createdAt: "desc" },
-        select : { id: true },
-      })
-      if (next) {
-        await tx.consumerAddress.update({ where: { id: next.id }, data: { isDefault: true } })
-      }
-    }
-  })
-
+  await assertOwned(customerId, addressId)
+  await prisma.consumerAddress.delete({ where: { id: addressId } })
   addressLog.info({ customerId, addressId }, "Address deleted")
   return { id: addressId }
+}
+
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
+
+async function makeCityDefault(tx: Tx, customerId: string, cityId: string, addressId: string) {
+  await tx.consumerMarket.upsert({
+    where : { consumerAccountId_cityId: { consumerAccountId: customerId, cityId } },
+    create: { consumerAccountId: customerId, cityId, defaultAddressId: addressId },
+    update: { defaultAddressId: addressId },
+  })
 }
 
 // ─── Internal ────────────────────────────────────────────────────────────────
@@ -205,7 +272,7 @@ export async function deleteAddress(customerId: string, addressId: string): Prom
 async function assertOwned(customerId: string, addressId: string) {
   const row = await prisma.consumerAddress.findFirst({
     where : { id: addressId, consumerAccountId: customerId },
-    select: { id: true, isDefault: true },
+    select: { id: true },
   })
   // 404 rather than 403 for someone else's address: an opaque id must not be
   // probeable, the same rule the admin module applies for scope.
@@ -290,6 +357,9 @@ async function validate(input: UpsertCustomerAddressRequest) {
   }
 
   return {
+    /** Not an address column — handed back so the caller can record the city
+     *  as one of the customer's markets. */
+    cityId      : resolved.city.id,
     label       : text(input.label, "label", 40, false),
     addressLine1,
     addressLine2: text(input.addressLine2, "addressLine2", 200, false),

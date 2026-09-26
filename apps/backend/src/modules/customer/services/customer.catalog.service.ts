@@ -1,5 +1,5 @@
 import { prisma } from "@repo/db"
-import type { CustomerCuisine } from "@repo/types/backend"
+import type { CustomerCuisine, CustomerCuisineDetail, CustomerCuisinesResult } from "@repo/types/backend"
 
 import { publicMediaStorage } from "@/lib/storage/publicMedia.storage"
 import { logger } from "@/lib/pino/logger"
@@ -54,6 +54,7 @@ function presentCuisine(row: CuisineRow): CustomerCuisine {
     id  : row.id,
     slug: row.slug,
     name: row.name,
+    description: row.description,
     image: servable
       ? {
           url        : publicMediaStorage.publicUrl(row.imageKey as string),
@@ -66,30 +67,49 @@ function presentCuisine(row: CuisineRow): CustomerCuisine {
   }
 }
 
+/** The catalogue a customer may see: active, not deleted, and — when a
+ *  country is given — switched on there. One definition for the list, its
+ *  count and the detail read, so they can never disagree. */
+function visibleWhere(countryId?: string) {
+  return {
+    status   : "ACTIVE" as const,
+    deletedAt: null,
+    ...(countryId
+      ? { countries: { some: { countryId, status: "ACTIVE" as const } } }
+      : {}),
+  }
+}
+
+/**
+ * A page of the catalogue, with the TOTAL.
+ *
+ * The landing band asks for a handful (`limit`); the cuisine directories page
+ * through everything. Before `total` existed the read simply stopped at 48,
+ * which a directory would have presented as the whole catalogue — the same
+ * silent truncation as the city picker's old ten-city page (bug class #4).
+ */
 export async function listCustomerCuisines(input: {
   countryId?: string
-  /** Hard-capped; a landing page asks for 8. */
-  limit?: number
-}): Promise<CustomerCuisine[]> {
-  const take = Math.min(Math.max(input.limit ?? 24, 1), 48)
+  page?     : number
+  pageSize? : number
+}): Promise<CustomerCuisinesResult> {
+  const pageSize = Math.min(Math.max(Math.trunc(input.pageSize ?? 24), 1), 60)
+  const page = Math.max(Math.trunc(input.page ?? 1), 1)
+  const where = visibleWhere(input.countryId)
 
-  const rows = await prisma.cuisine.findMany({
-    where: {
-      status   : "ACTIVE",
-      deletedAt: null,
-      ...(input.countryId
-        ? { countries: { some: { countryId: input.countryId, status: "ACTIVE" } } }
-        : {}),
-    },
-    select : CUISINE_SELECT,
-    /* Cuisines WITH a picture first: the tile row is the thing this feeds, and
-     * a photograph beside a blank square looks broken. Alphabetical within
-     * each group so the order is stable between renders and does not shuffle
-     * as imagery is added. Postgres sorts NULLs last for ASC by default, which
-     * is exactly the grouping wanted. */
-    orderBy: [{ imageKey: "asc" }, { name: "asc" }],
-    take,
-  })
+  const [rows, total] = await Promise.all([
+    prisma.cuisine.findMany({
+      where,
+      select : CUISINE_SELECT,
+      /* Pictured cuisines first (NULLs sort last), then alphabetical — stable
+       * between renders as imagery is added. `id` breaks name ties so pages
+       * never overlap or skip. */
+      orderBy: [{ imageKey: "asc" }, { name: "asc" }, { id: "asc" }],
+      skip   : (page - 1) * pageSize,
+      take   : pageSize,
+    }),
+    prisma.cuisine.count({ where }),
+  ])
 
   if (rows.length > 0 && rows.every((r) => !r.imageKey) && publicMediaStorage.isConfigured()) {
     catalogLog.warn(
@@ -98,5 +118,31 @@ export async function listCustomerCuisines(input: {
     )
   }
 
-  return rows.map(presentCuisine)
+  return { cuisines: rows.map(presentCuisine), total, page, pageSize }
+}
+
+/**
+ * One active cuisine by slug, with the customer-open countries it is switched
+ * on in. Null for an unknown, withdrawn or deleted cuisine — all of which are
+ * a 404 to a customer (principle 6).
+ *
+ * Only countries READY FOR CUSTOMERS are listed: a country still onboarding
+ * vendors is not a place anyone can order from, and naming it would advertise
+ * a market that does not exist yet.
+ */
+export async function getCustomerCuisine(slug: string): Promise<CustomerCuisineDetail | null> {
+  const row = await prisma.cuisine.findFirst({
+    where : { ...visibleWhere(), slug },
+    select: {
+      ...CUISINE_SELECT,
+      countries: {
+        where : { status: "ACTIVE", country: { status: "ACTIVE", readyForCustomerOperations: true } },
+        select: { countryId: true },
+      },
+    },
+  })
+  if (!row) return null
+
+  const { countries, ...cuisine } = row
+  return { cuisine: presentCuisine(cuisine), countryIds: countries.map((c) => c.countryId) }
 }

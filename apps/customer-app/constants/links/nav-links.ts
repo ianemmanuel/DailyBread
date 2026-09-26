@@ -30,10 +30,10 @@ export const GLOBAL_NAV_LINKS: readonly NavLink[] = [
 /**
  * The market being browsed, read from the path and from nowhere else.
  *
- * Used by the mobile sheet's location chip, which sits in the global navbar
- * and so has no city prop to be handed. `/city` itself is the DIRECTORY, not a
- * market, so it deliberately does not match: standing in the list of cities is
- * not standing in one.
+ * Used by the navbar's city picker, which sits in the global bar and so has
+ * no city prop to be handed. `/city` itself is the DIRECTORY, not a market, so
+ * it deliberately does not match: standing in the list of cities is not
+ * standing in one.
  */
 export function citySlugFromPath(pathname: string): string | null {
   const match = /^\/city\/([^/]+)/.exec(pathname)

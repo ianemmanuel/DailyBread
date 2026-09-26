@@ -3,25 +3,20 @@ import Link from "next/link"
 import { ChevronRight, MapPin } from "lucide-react"
 
 import { AccountError, AccountPending, AccountSuspended } from "@/components/account/AccountStates"
-import { AddressBook } from "@/components/account/AddressBook"
+import { AddressBook, type AddressGroup } from "@/components/account/AddressBook"
 import { Button } from "@/components/ui/button"
 import { getAccount } from "@/lib/data/account"
-import { getStoredLocation } from "@/lib/location/server"
+import { getDeliveryCookie } from "@/lib/location/server"
+import { resolveMarketChoice } from "@/lib/market/resolve"
 
 /*
- * `/account/addresses` — the address book.
+ * `/account/addresses` — the durable address manager, grouped by city.
  *
- * ── It manages; it does not create ─────────────────────────────────────────
- *
- * There is no "add address" form here, and that is deliberate. An address is a
- * PIN, so creating one needs a map, a coverage verdict and a market — which is
- * exactly `/city/[slug]/location`, already built. A second map on this page
- * would be a second location experience, the thing we just finished removing.
- * "Add an address" therefore sends you to a market to drop a pin, and saving
- * happens there while the customer is looking at the spot.
- *
- * Protected in `proxy.ts`; dynamic, because it reads both a token and the
- * location cookie.
+ * The market bar's picker SELECTS; this page MANAGES: per-city defaults,
+ * removal, and a way into each city's map to add another. Which address this
+ * device is delivering to in each city is resolved by the same rule the market
+ * pages use (`resolveMarketChoice`), so "Delivering here" on this page always
+ * matches what that city's pages are actually showing.
  */
 
 export const metadata: Metadata = {
@@ -30,19 +25,39 @@ export const metadata: Metadata = {
 }
 
 export default async function AddressesPage() {
-  /* Both reads are per-request and neither is cached. The cookie tells us
-   * which address this DEVICE is currently delivering to — a different
-   * question from which one is the default. */
-  const [state, location] = await Promise.all([getAccount(), getStoredLocation()])
+  const [state, cookie] = await Promise.all([getAccount(), getDeliveryCookie()])
 
   if (state.kind === "pending")   return <div className="band-tight"><AccountPending /></div>
   if (state.kind === "suspended") return <div className="band-tight"><AccountSuspended message={state.message} /></div>
   if (state.kind === "error")     return <div className="band-tight"><AccountError message={state.message} /></div>
 
-  const { addresses, defaultAddressId } = state.session
+  const { addresses, markets } = state.session
+
+  /* One group per city the customer has an address in, in the backend's
+   * order (default city first); then anything whose pin has fallen outside
+   * every operating city, so it can still be removed. */
+  const groups: AddressGroup[] = markets
+    .filter((market) => market.addressCount > 0)
+    .map((market) => {
+      const here = addresses.filter((a) => a.serviceability.citySlug === market.citySlug)
+      const choice = resolveMarketChoice(cookie.markets[market.citySlug], here, market.defaultAddressId)
+      return {
+        citySlug         : market.citySlug,
+        cityName         : market.cityName,
+        addresses        : here,
+        selectedAddressId: choice.mode === "delivery" && choice.target.kind === "address"
+          ? choice.target.address.id
+          : null,
+      }
+    })
+  const known = new Set(markets.map((m) => m.citySlug))
+  const elsewhere = addresses.filter((a) => !a.serviceability.citySlug || !known.has(a.serviceability.citySlug))
+  if (elsewhere.length > 0) {
+    groups.push({ citySlug: null, cityName: "Outside our cities", addresses: elsewhere, selectedAddressId: null })
+  }
 
   return (
-    <div className="band-tight space-y-6">
+    <div className="band-tight space-y-8">
       <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-muted-foreground">
         <Link href="/account" className="rounded-sm hover:text-foreground hover:underline">
           Account
@@ -54,8 +69,8 @@ export default async function AddressesPage() {
       <header className="max-w-2xl space-y-2">
         <h1 className="heading-xl text-balance">Delivery addresses</h1>
         <p className="lede">
-          Choose where this order goes, set the one you use most as your
-          default, and see what we can actually deliver to each of them today.
+          Each city keeps its own default. Choose where this device delivers,
+          and see what we can actually reach at each address today.
         </p>
       </header>
 
@@ -67,7 +82,7 @@ export default async function AddressesPage() {
               No addresses yet
             </p>
             <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">
-              An address is a point on a map, so it is added from the market you
+              An address is a point on a map, so it is added from the city you
               are ordering in. Pick your city, drop a pin where you want the food,
               and save it from there.
             </p>
@@ -79,22 +94,7 @@ export default async function AddressesPage() {
           </div>
         </div>
       ) : (
-        <>
-          <AddressBook
-            addresses={addresses}
-            defaultAddressId={defaultAddressId}
-            selectedAddressId={location?.addressId ?? null}
-          />
-
-          <div className="pt-2">
-            <Button asChild variant="brand" className="h-11 rounded-full px-5">
-              <Link href={location?.citySlug ? `/city/${location.citySlug}/location` : "/city"}>
-                <MapPin aria-hidden className="size-4" />
-                Add an address
-              </Link>
-            </Button>
-          </div>
-        </>
+        <AddressBook groups={groups} />
       )}
     </div>
   )

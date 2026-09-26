@@ -12,6 +12,9 @@ export type {
   // Identity
   CustomerAccount,
   CustomerSessionData,
+  CustomerMarket,
+  CustomerMarketsResult,
+  SelectCustomerMarketRequest,
   CustomerAddress,
   UpsertCustomerAddressRequest,
 
@@ -28,6 +31,7 @@ export type {
   CityViewport,
   CustomerCuisine,
   CustomerCuisinesResult,
+  CustomerCuisineDetail,
 
   // Money
   CustomerCurrency,
@@ -39,6 +43,7 @@ export type {
   DiscoveryOffer,
   DiscoveryFilters,
   DiscoveryResult,
+  CityDiscoveryResult,
 
   // Storefront
   Storefront,

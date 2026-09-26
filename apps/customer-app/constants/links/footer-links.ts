@@ -1,13 +1,24 @@
 /*
  * The footer's link groups, as data.
  *
- * Every href is "#" for now, deliberately — none of these pages exist yet and a
- * link to a route that 404s is worse than one that goes nowhere. Replace them
- * group by group as the pages land; nothing else in Footer.tsx has to change.
+ * ── Every href here GOES SOMEWHERE ─────────────────────────────────────────
  *
- * The four columns mirror what a customer actually comes to a footer for, in
- * the order design.png sets them: somewhere to browse, who we are, help when an
- * order has gone wrong, and the legal line.
+ * This file used to be fifteen links to `#`. That reads as a finished footer
+ * and behaves as a broken one: a customer clicks "Track an order", nothing
+ * happens, and the conclusion they draw is about the platform rather than
+ * about the link. The rule is now the same one the rest of the app follows —
+ * a destination that does not exist is not offered. Groups shrink rather than
+ * filling up with placeholders, and a column that would be empty is gone.
+ *
+ * Add a link back at the moment its page lands; nothing in `Footer.tsx` has to
+ * change either way.
+ *
+ * ── The doorways are legitimate destinations ───────────────────────────────
+ *
+ * `/discover` and `/meal-plans` resolve the customer's own market (from their
+ * location, then their default address) and fall back to the city directory.
+ * They are real answers from a global footer, which cannot know a market —
+ * unlike a bare "Restaurants", which would have to invent one.
  */
 
 export interface FooterLink {
@@ -24,39 +35,51 @@ export const FOOTER_GROUPS: readonly FooterGroup[] = [
   {
     title: "Explore",
     links: [
-      { href: "#", label: "Discover" },
-      { href: "#", label: "Meal Plans" },
-      { href: "#", label: "Restaurants" },
-      { href: "#", label: "Cuisines" },
-      { href: "#", label: "Offers" },
+      { href: "/city", label: "Our cities" },
+      { href: "/cuisines", label: "Cuisines" },
+      { href: "/discover", label: "Find food near you" },
+      { href: "/meal-plans", label: "Meal plans" },
+    ],
+  },
+  {
+    title: "Your account",
+    links: [
+      /* Protected routes. Signed out, Clerk returns the visitor here after
+         sign-in via `redirect_url`, so the link still does what it says. */
+      { href: "/account", label: "Your account" },
+      { href: "/account/addresses", label: "Delivery addresses" },
+      { href: "/sign-in", label: "Sign in" },
     ],
   },
   {
     title: "Company",
     links: [
-      { href: "#", label: "About Us" },
-      { href: "#", label: "Careers" },
-      { href: "#", label: "Press" },
-      { href: "#", label: "Blog" },
-      { href: "#", label: "Partner with us" },
-    ],
-  },
-  {
-    title: "Support",
-    links: [
-      { href: "#", label: "Help Center" },
-      { href: "#", label: "Contact Us" },
-      { href: "#", label: "Track an order" },
-      { href: "#", label: "Delivery" },
-      { href: "#", label: "Refunds & Returns" },
+      { href: "/about", label: "About DailyBread" },
     ],
   },
 ] as const
 
-/** The small print along the bottom bar, kept separate from the columns above
- *  because it is legal boilerplate rather than navigation. */
-export const FOOTER_LEGAL: readonly FooterLink[] = [
-  { href: "#", label: "Terms" },
-  { href: "#", label: "Privacy" },
-  { href: "#", label: "Cookies" },
-] as const
+/*
+ * The small print along the bottom bar, kept separate from the columns above
+ * because it is legal boilerplate rather than navigation.
+ *
+ * EMPTY until the pages exist, and the bar drops the row rather than linking
+ * nowhere. Terms, Privacy and a cookie notice are the three to add first, and
+ * they are content decisions rather than code ones.
+ */
+export const FOOTER_LEGAL: readonly FooterLink[] = [] as const
+
+/*
+ * Social profiles. Empty until real URLs exist: an icon that does nothing when
+ * tapped is the same dead link as a `#` in a column, and this row is the most
+ * tapped part of a footer on a phone.
+ *
+ * `icon` is a NAME, not a component reference — this file is imported by a
+ * Server Component and only JSON-serializable values may cross the boundary
+ * (recurring bug class #5). `Footer.tsx` maps the name to the lucide icon.
+ */
+export const FOOTER_SOCIALS: ReadonlyArray<{
+  href : string
+  label: string
+  icon : "instagram" | "facebook" | "twitter"
+}> = [] as const

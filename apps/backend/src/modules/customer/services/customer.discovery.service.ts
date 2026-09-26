@@ -2,7 +2,7 @@ import { prisma, Prisma } from "@repo/db"
 import { logger } from "@/lib/pino/logger"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
-import type { DiscoveryFilters, DiscoveryOutlet, DiscoveryResult } from "@repo/types/backend"
+import type { CityDiscoveryResult, DiscoveryFilters, DiscoveryOutlet, DiscoveryResult } from "@repo/types/backend"
 
 /** One cuisine tag as every customer surface shows it. */
 type Cuisine = { id: string; name: string; slug: string }
@@ -12,7 +12,8 @@ import {
 } from "./customer.discovery"
 import { outletAreaAllowsSelling } from "./customer.serviceability"
 import {
-  resolveCustomerLocation, resolveOutletArea, type OperatingCity, type ResolvedLocation,
+  getOperatingCities, resolveCustomerLocation, resolveOutletArea,
+  type OperatingCity, type ResolvedLocation,
 } from "./customer.geo.service"
 import { SELLABLE_OUTLET_WHERE, SELLABLE_MEAL_WHERE, SELLABLE_MENU_ITEM_WHERE } from "./customer.visibility"
 import {
@@ -231,7 +232,17 @@ export async function discoverOutlets(
   const slice = sorted.slice((page - 1) * pageSize, page * pageSize)
 
   const outlets = await hydratePage(
-    slice, city, offersByVendor, now, resolved.serviceability.platformDelivers,
+    slice.map((row) => ({
+      id            : row.id,
+      vendorId      : row.vendorId,
+      rating        : row.rating,
+      reviewCount   : row.reviewCount,
+      isFeatured    : row.isFeatured,
+      isOpenNow     : row.isOpenNow,
+      distanceMeters: row.distanceMeters,
+      eta           : { minMinutes: row.etaMinMinutes, maxMinutes: row.etaMaxMinutes },
+    })),
+    city, offersByVendor, now, resolved.serviceability.platformDelivers,
   )
 
   return {
@@ -240,7 +251,7 @@ export async function discoverOutlets(
     total   : sorted.length,
     page,
     pageSize,
-    availableCuisines: await countCuisines(sorted.map((r) => r.vendorId)),
+    availableCuisines: await countCuisines(sorted.map((r) => r.id)),
   }
 }
 
@@ -345,8 +356,21 @@ async function loadRunningOffers(vendorIds: readonly string[]): Promise<Map<stri
 // ─── Phase 2 ─────────────────────────────────────────────────────────────────
 
 /** The full read, for ONE page of outlets. */
+/** What hydration needs from phase 1. Distance and ETA are NULLABLE because
+ *  city-wide browsing has no point to measure from — see CityDiscoveryResult. */
+interface HydratableRow {
+  id            : string
+  vendorId      : string
+  rating        : number
+  reviewCount   : number
+  isFeatured    : boolean
+  isOpenNow     : boolean
+  distanceMeters: number | null
+  eta           : { minMinutes: number; maxMinutes: number } | null
+}
+
 async function hydratePage(
-  rows          : ReadonlyArray<RankableOutlet & { vendorId: string; etaMinMinutes: number }>,
+  rows          : ReadonlyArray<HydratableRow>,
   city          : OperatingCity,
   offersByVendor: Map<string, OfferRow[]>,
   now           : Date,
@@ -356,7 +380,7 @@ async function hydratePage(
    * customer — so it is the customer's own zone that decides, not the outlet's.
    * Resolved once for the whole page rather than per row.
    */
-  platformDelivers: boolean,
+  platformDelivers: boolean | null,
 ): Promise<DiscoveryOutlet[]> {
   if (rows.length === 0) return []
 
@@ -430,8 +454,8 @@ async function hydratePage(
       rating     : row.rating,
       reviewCount: row.reviewCount,
       isFeatured : row.isFeatured,
-      distanceMeters  : Math.round(row.distanceMeters),
-      eta             : { minMinutes: row.etaMinMinutes, maxMinutes: row.etaMaxMinutes },
+      distanceMeters  : row.distanceMeters === null ? null : Math.round(row.distanceMeters),
+      eta             : row.eta,
       isOpenNow       : row.isOpenNow,
       deliveryFeeMinor : detail.deliveryFeeMinor,
       minimumOrderMinor: detail.minimumOrderMinor,
@@ -464,29 +488,70 @@ function mergeCuisines(detail: {
 }
 
 /**
- * Which cuisines this result set actually contains, and how many outlets each.
+ * Which cuisines this result set actually contains, and how many OUTLETS each.
  *
  * Computed over the WHOLE result, not the current page, so the filter bar does
  * not change as someone pages — and so it never offers a choice that matches
  * nothing, the same rule listOutletCities follows on the vendor side.
+ *
+ * ── It counts the same two sources the card and the FILTER already use ─────
+ *
+ * A cuisine reaches an outlet two ways: the vendor declared it on their
+ * profile, or the outlet sells a dish tagged with it. `mergeCuisines` shows
+ * both on the card and `buildFilterWhere` matches on both — but this facet
+ * used to count vendor-profile links ALONE. A vendor who tagged their dishes
+ * and not their profile therefore got cuisines printed on every card, a
+ * working `?cuisineId=` filter, and no chip to click: the dev database
+ * produced an empty facet on every feed in the app while each card read
+ * "African · Chicken". A facet narrower than the filter it drives is the same
+ * class of silent gap as a filter that never reaches its mapper.
+ *
+ * ── Per OUTLET, counted once ───────────────────────────────────────────────
+ *
+ * The list is outlets, so the number beside a chip must be outlets. Counting
+ * join rows made a vendor with three branches worth one and a vendor with six
+ * dishes in one cuisine worth six.
+ *
+ * Bounded by the same scan cap as the feed itself: this runs over the whole
+ * narrowed set, which `MAX_CANDIDATE_SCAN` already limits.
  */
-async function countCuisines(vendorIds: readonly string[]) {
-  if (vendorIds.length === 0) return []
+async function countCuisines(outletIds: readonly string[]) {
+  if (outletIds.length === 0) return []
 
-  const rows = await prisma.vendorProfileCuisine.findMany({
-    where : { vendorProfile: { vendorAccountId: { in: [...new Set(vendorIds)] } } },
-    select: { cuisine: { select: { id: true, name: true, slug: true } } },
+  const rows = await prisma.outlet.findMany({
+    where : { id: { in: [...new Set(outletIds)] } },
+    select: {
+      vendor: {
+        select: {
+          vendorProfile: {
+            select: { cuisines: { select: { cuisine: { select: CUISINE_SELECT } } } },
+          },
+        },
+      },
+      meals: {
+        where : SELLABLE_MEAL_WHERE,
+        select: {
+          menuItem: { select: { cuisines: { select: { cuisine: { select: CUISINE_SELECT } } } } },
+        },
+      },
+    },
   })
 
   const counts = new Map<string, { id: string; name: string; slug: string; count: number }>()
   for (const row of rows) {
-    const existing = counts.get(row.cuisine.id)
-    if (existing) existing.count += 1
-    else counts.set(row.cuisine.id, { ...row.cuisine, count: 1 })
+    /* One outlet contributes at most one to each cuisine, however many of its
+     * dishes carry it. `mergeCuisines` is the same dedupe on the card. */
+    for (const cuisine of mergeCuisines(row)) {
+      const existing = counts.get(cuisine.id)
+      if (existing) existing.count += 1
+      else counts.set(cuisine.id, { ...cuisine, count: 1 })
+    }
   }
 
   return [...counts.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 }
+
+const CUISINE_SELECT = { id: true, name: true, slug: true } as const
 
 // ─── Internal ────────────────────────────────────────────────────────────────
 
@@ -502,5 +567,121 @@ function emptyResult(resolved: ResolvedLocation, filters: DiscoveryFilters): Dis
     page    : Math.max(1, filters.page ?? 1),
     pageSize: Math.min(MAX_PAGE_SIZE, Math.max(1, filters.pageSize ?? DEFAULT_PAGE_SIZE)),
     availableCuisines: [],
+  }
+}
+
+// ─── The city's inventory, with no point ─────────────────────────────────────
+
+/**
+ * What DailyBread offers in a CITY, answered without a delivery point.
+ *
+ * ── Why this exists ────────────────────────────────────────────────────────
+ *
+ * "Is there decent food in Nairobi?" is asked before anyone hands over an
+ * address, and the point-based feed cannot answer it: no coordinates, no feed.
+ * That made the marketplace a form — an address wall in front of the only page
+ * with real supply. It also answers the second case the address flow needs: a
+ * customer whose own address sits in a zone we cannot serve should still see
+ * what the city has, clearly marked as undeliverable to them, rather than an
+ * empty screen (city inventory and deliverable inventory are different things).
+ *
+ * ── What it deliberately does NOT answer ───────────────────────────────────
+ *
+ * No distance, no ETA, no `platformDelivers`, and no serviceability. Every one
+ * of those is a function of coordinates; inventing any of them is exactly the
+ * fabrication principle 11 refuses. `DiscoveryOutlet` carries them as NULL
+ * here, and the card renders without them rather than with a guess.
+ *
+ * ── What it still enforces ─────────────────────────────────────────────────
+ *
+ * The same visibility rules as the located feed: the outlet must be sellable
+ * (`SELLABLE_OUTLET_WHERE`) and its OWN zone must permit trading
+ * (`outletAreaAllowsSelling`). A kitchen sitting in a registration-only zone
+ * is not city inventory — nobody may sell there, so listing it would advertise
+ * something that cannot be bought from any address at all.
+ */
+export async function discoverCityOutlets(
+  citySlug: string,
+  filters : DiscoveryFilters,
+  now     : Date = new Date(),
+): Promise<CityDiscoveryResult | null> {
+  const cities = await getOperatingCities()
+  /* The same gate the city pages use: operating, and with a boundary. A city
+   * nobody can resolve a point into is not a market we should be listing. */
+  const city = cities.find((c) => c.slug === citySlug && c.boundary !== null)
+  if (!city) return null
+
+  const candidates = await prisma.outlet.findMany({
+    where : { ...SELLABLE_OUTLET_WHERE, cityId: city.id, ...buildFilterWhere(filters) },
+    select: CANDIDATE_SELECT,
+    take  : MAX_CANDIDATE_SCAN + 1,
+  })
+
+  if (candidates.length > MAX_CANDIDATE_SCAN) {
+    discoveryLog.warn(
+      { cityId: city.id, count: candidates.length },
+      "City browse scan cap hit — this market has outgrown an in-memory pass",
+    )
+  }
+
+  const scanned = candidates.slice(0, MAX_CANDIDATE_SCAN)
+  const offersByVendor = await loadRunningOffers(scanned.map((c) => c.vendorId))
+
+  const rows = scanned
+    /* The outlet's own zone still decides whether it may trade at all. */
+    .filter((outlet) => outletAreaAllowsSelling(resolveOutletArea(city, outlet.zoneId)))
+    .map((outlet) => {
+      const offers = offersByVendor.get(outlet.vendorId) ?? []
+      return {
+        id         : outlet.id,
+        vendorId   : outlet.vendorId,
+        name       : outlet.name,
+        rating     : outlet.ratings,
+        reviewCount: outlet.totalReviews,
+        isFeatured : outlet.isFeatured,
+        isOpenNow  : isOpenAt(outlet.operatingHours as TradingDay[], now, city.timezone),
+        hasOffer   : offers.some((o) => offerAppliesNow(o, outlet.id, true, now, city.timezone)),
+        /* No point, so no honest value for either. */
+        distanceMeters: null,
+        eta           : null,
+      }
+    })
+
+  const narrowed = rows.filter((row) => {
+    if (filters.openNow && !row.isOpenNow) return false
+    if (filters.hasOffer && !row.hasOffer) return false
+    if (filters.minRating != null && row.rating < filters.minRating) return false
+    /* `maxDeliveryMinutes` is the one filter this mode cannot answer — it
+     * needs an ETA, which needs a point. It is therefore not OFFERED here
+     * either: silently ignoring a filter a customer set is worse than the
+     * filter being absent from the mode. (`freeDelivery` is answerable and is
+     * applied in SQL above, being the outlet's own configured fee.) */
+    return true
+  })
+
+  /*
+   * Ranking without a point. `sortOutlets` cannot help — every one of its
+   * orders is distance- or ETA-derived. Featured first, then rating, then name
+   * so the list is stable between renders rather than shuffling on each load.
+   */
+  const sorted = [...narrowed].sort((a, b) =>
+    Number(b.isFeatured) - Number(a.isFeatured) ||
+    b.rating - a.rating ||
+    a.name.localeCompare(b.name),
+  )
+
+  const page = Math.max(1, filters.page ?? 1)
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, filters.pageSize ?? DEFAULT_PAGE_SIZE))
+  const slice = sorted.slice((page - 1) * pageSize, page * pageSize)
+
+  const outlets = await hydratePage(slice, city, offersByVendor, now, null)
+
+  return {
+    city   : { id: city.id, name: city.name, slug: city.slug, timezone: city.timezone },
+    outlets,
+    total  : sorted.length,
+    page,
+    pageSize,
+    availableCuisines: await countCuisines(sorted.map((r) => r.id)),
   }
 }

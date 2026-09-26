@@ -5,6 +5,7 @@ import { getCustomerSession, updateCustomerProfile } from "../services/customer.
 import {
   listAddresses, createAddress, updateAddress, setDefaultAddress, deleteAddress,
 } from "../services/customer.address.service"
+import { selectMarket } from "../services/customer.market.service"
 
 /*
  * The signed-in half of the customer API.
@@ -102,5 +103,17 @@ export const handleDeleteAddress: RequestHandler = async (req, res, next) => {
   try {
     const result = await deleteAddress(customerOf(req).id, req.params.addressId!)
     return sendSuccess(res, result, "Address removed")
+  } catch (err) { next(err) }
+}
+
+//* PUT /customer/v1/markets/:citySlug
+//* Body: { isDefault?: boolean } — field by field; nothing else is settable.
+export const handleSelectMarket: RequestHandler = async (req, res, next) => {
+  try {
+    const body = req.body as Record<string, unknown> | undefined
+    const result = await selectMarket(customerOf(req).id, req.params.citySlug!, {
+      isDefault: body?.isDefault === true,
+    })
+    return sendSuccess(res, result, "City selected")
   } catch (err) { next(err) }
 }

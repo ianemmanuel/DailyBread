@@ -1,7 +1,9 @@
 import type { Request, RequestHandler } from "express"
 import type { MaybeCustomerRequest } from "@repo/types/backend"
 import { sendSuccess } from "@/helpers/api-response/response"
-import { discoverOutlets, resolveDiscoveryLocation } from "../services/customer.discovery.service"
+import { ApiError } from "@/errors/ApiError"
+import { HttpStatus } from "@/constants/httpStatus"
+import { discoverOutlets, discoverCityOutlets, resolveDiscoveryLocation } from "../services/customer.discovery.service"
 import { getStorefront } from "../services/customer.storefront.service"
 import { priceCustomerCart } from "../services/customer.cart.service"
 
@@ -89,6 +91,46 @@ export const handleDiscoverOutlets: RequestHandler = async (req, res, next) => {
     )
 
     return sendSuccess(res, result, "Restaurants fetched")
+  } catch (err) { next(err) }
+}
+
+/*
+ * GET /customer/v1/discovery/cities/:citySlug/outlets?…filters
+ *
+ * The city's inventory, with NO point. Deliberately a separate route rather
+ * than the same one with the coordinates left off: the two answer different
+ * questions and return different shapes (this one carries no serviceability
+ * and no distance), and folding them together would mean a caller who simply
+ * forgot to send a point silently got a city-wide answer instead of an error.
+ *
+ * No identity at all. "What is there in Nairobi" is the same answer for
+ * everyone, so there is nothing to personalise and nothing to verify.
+ */
+export const handleDiscoverCityOutlets: RequestHandler = async (req, res, next) => {
+  try {
+    const result = await discoverCityOutlets(
+      String(req.params.citySlug ?? ""),
+      {
+        search       : str(req.query.search),
+        cuisineIds   : ids(req.query.cuisineId),
+        dietaryTagIds: ids(req.query.dietaryTagId),
+        openNow      : bool(req.query.openNow),
+        hasOffer     : bool(req.query.hasOffer),
+        /* An outlet's own configured fee, not a function of where anybody is
+         * standing — so it is answerable without a point, unlike an ETA. */
+        freeDelivery : bool(req.query.freeDelivery),
+        minRating    : num(req.query.minRating),
+        page         : num(req.query.page),
+        pageSize     : num(req.query.pageSize),
+      },
+    )
+
+    /* An unknown or non-operating city is a 404, exactly as its pages are. */
+    if (!result) {
+      throw new ApiError(HttpStatus.NOT_FOUND, "We do not have a market for that city.", "CITY_NOT_FOUND")
+    }
+
+    return sendSuccess(res, result, "City inventory fetched")
   } catch (err) { next(err) }
 }
 

@@ -1,24 +1,14 @@
 import { redirect } from "next/navigation"
 
-import { getStoredLocation } from "@/lib/location/server"
+import { resolveDoorwayCity } from "@/lib/market/doorway"
 
 /*
- * `/meal-plans` — a doorway, not a page.
- *
- * Meal plans moved under a market (`/city/[citySlug]/meal-plans`) because a
- * plan belongs to an outlet, which belongs to a city: a global page could list
- * nothing and answer nothing. The route stays because links to it exist, and
- * because there is a correct destination for someone who already has a market.
- *
- *   location cookie resolved to a city  →  that market's meal plans
- *   anything else                       →  the city directory
- *
- * The same shape as the `/discover` doorway, and for the same reason: no city is ever
- * invented for a visitor who has not chosen one. `/about` is where the idea is
- * explained without a market.
+ * `/meal-plans` — a doorway. A plan belongs to an outlet, which belongs to a
+ * city, so there is no global list to show: this sends the customer to their
+ * own market's meal plans, or to `/city` to choose one. `/about` explains the
+ * idea without a market.
  */
-export default async function MealPlansRedirect() {
-  const location = await getStoredLocation()
-
-  redirect(location?.citySlug ? `/city/${location.citySlug}/meal-plans` : "/city")
+export default async function MealPlansDoorway() {
+  const citySlug = await resolveDoorwayCity()
+  redirect(citySlug ? `/city/${citySlug}/meal-plans` : "/city")
 }
