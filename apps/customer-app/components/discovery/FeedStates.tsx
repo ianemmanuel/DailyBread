@@ -1,8 +1,7 @@
 import Link from "next/link"
 import { AlertTriangle, MapPin, SearchX, Store } from "lucide-react"
-import type { Serviceability } from "@repo/types/customer-app"
+import type { CityMarket, Serviceability } from "@repo/types/customer-app"
 
-import { LocationPicker } from "@/components/location/LocationPicker"
 import { Button } from "@/components/ui/button"
 import { SERVICEABILITY_COPY } from "@/lib/location/serviceability-copy"
 
@@ -45,41 +44,86 @@ function Panel({
 }
 
 /**
- * First visit. A welcome rather than an error — nothing has gone wrong, we have
- * simply not been told where to look. The picker is right here rather than a
- * sentence pointing somewhere else on the page: the old copy pointed at a
- * "Deliver to" control in the navbar that no longer exists.
+ * First visit to a market: we know WHICH market, and not where to deliver.
+ *
+ * The inline picker that used to sit here is gone. It was a second, smaller
+ * copy of the location flow — GPS and a city dropdown squeezed into an empty
+ * state — and it could only ever do half the job, because there is no room
+ * here for a map. One location experience, on the page built for it, reached
+ * from every place that needs it.
+ *
+ * The panel names the market so the button is an obvious continuation of it
+ * rather than a jump to somewhere unrelated.
  */
-export function NeedsLocation() {
+export function NeedsLocation({ market }: { market: CityMarket }) {
   return (
     <Panel
       icon={<MapPin className="size-6 text-primary-subtle-fg" />}
-      title="Where are we delivering?"
-      body="Share your location and we'll show the kitchens that can reach you, with real delivery times and prices."
+      title={`Where in ${market.city.name} are we delivering?`}
+      body="Set your delivery point and we will show the places that can reach it, with real delivery times and fees."
     >
-      <div className="w-full text-left">
-        <LocationPicker placeholder="Your delivery address" />
+      <div className="flex flex-wrap justify-center gap-3">
+        <Button asChild className="h-11 rounded-full px-5">
+          <Link href={`/city/${market.city.slug}/location`}>Set delivery location</Link>
+        </Button>
+        <Button asChild variant="brand" className="h-11 rounded-full px-5">
+          <Link href="/city">Browse another city</Link>
+        </Button>
       </div>
     </Panel>
   )
 }
 
-/** We know where they are and cannot serve it. The wording comes from the one
- *  place a serviceability code becomes a sentence — and the picker stays
- *  available, since the next useful thing is trying somewhere else. */
-export function NotServiceable({ serviceability }: { serviceability: Serviceability }) {
+/**
+ * We know exactly where this is, and we cannot deliver there.
+ *
+ * The wording comes from the one place a serviceability code becomes a
+ * sentence (SERVICEABILITY_COPY), so a code means the same thing everywhere.
+ *
+ * The distinction this draws is the whole point: a point INSIDE a city we
+ * operate in ("not open in this area yet", "paused right now") is a different
+ * answer from one outside every market, and the customer gets the city's name
+ * and a way back to its map rather than a generic shrug. A point in no city
+ * has no city page to offer, so the directory is the honest next step.
+ */
+export function NotServiceable({
+  serviceability,
+  browsingCitySlug,
+}: {
+  serviceability  : Serviceability
+  /** The market whose feed this is — where "move your pin" goes when the
+   *  point itself landed outside every city we know. */
+  browsingCitySlug: string
+}) {
   const copy = SERVICEABILITY_COPY[serviceability.status]
+  const known = Boolean(serviceability.citySlug && serviceability.cityName)
+
   return (
-    <Panel icon={<MapPin className="size-6 text-primary-subtle-fg" />} title={copy.title} body={copy.body}>
-      <div className="w-full text-left">
-        <LocationPicker placeholder="Try another address" />
+    <Panel
+      icon={<MapPin className="size-6 text-primary-subtle-fg" />}
+      title={copy.title}
+      body={known
+        ? `${copy.body} Your pin is in ${serviceability.cityName}.`
+        : copy.body}
+    >
+      <div className="flex flex-wrap justify-center gap-3">
+        <Button asChild className="h-11 rounded-full px-5">
+          {/* Back to the map — the resolved city's when we know it, otherwise
+              this market's, which is the one whose map they came from. */}
+          <Link href={`/city/${serviceability.citySlug ?? browsingCitySlug}/location`}>
+            Move your pin
+          </Link>
+        </Button>
+        {!known && (
+          <Button asChild variant="brand" className="h-11 rounded-full px-5">
+            <Link href="/city">See where we deliver</Link>
+          </Button>
+        )}
       </div>
     </Panel>
   )
 }
 
-/** We deliver there; these filters match nothing. Says which, and offers the
- *  way out — an empty state with no escape is a dead end. */
 /**
  * The selected saved address cannot be used — it was deleted, or it is not
  * this customer's.
@@ -88,36 +132,59 @@ export function NotServiceable({ serviceability }: { serviceability: Serviceabil
  * cookie: the feed would then be ranked around a different place while the
  * page claimed to be delivering to the chosen address. Ask again instead.
  */
-export function AddressUnusable({ message }: { message: string }) {
+export function AddressUnusable({
+  citySlug,
+  message,
+}: {
+  citySlug: string
+  message : string
+}) {
   return (
     <Panel
       icon={<MapPin className="size-6 text-primary-subtle-fg" />}
       title="Choose a delivery address"
-      body={`${message} Pick where you'd like this order delivered and we'll show the kitchens that can reach it.`}
+      body={`${message} Pick where you'd like this order delivered and we'll show the places that can reach it.`}
     >
-      <div className="w-full text-left">
-        <LocationPicker placeholder="Your delivery address" />
-      </div>
+      <Button asChild className="h-11 rounded-full px-5">
+        <Link href={`/city/${citySlug}/location`}>Set delivery location</Link>
+      </Button>
     </Panel>
   )
 }
 
-export function NoMatches({ hasFilters }: { hasFilters: boolean }) {
+export function NoMatches({
+  hasFilters,
+  basePath,
+  citySlug,
+}: {
+  hasFilters: boolean
+  /** This market's feed, for clearing filters without leaving it. */
+  basePath  : string
+  citySlug  : string
+}) {
   return (
     <Panel
       icon={hasFilters
         ? <SearchX className="size-6 text-primary-subtle-fg" />
         : <Store className="size-6 text-primary-subtle-fg" />}
-      title={hasFilters ? "Nothing matches those filters" : "No restaurants here yet"}
+      title={hasFilters ? "Nothing matches those filters" : "Nothing open to you here yet"}
       body={hasFilters
         ? "Try removing a filter or searching for something else — there may be more nearby than this."
         : "We deliver to your area, but no kitchen is open to you right now. It's worth checking again later."}
     >
-      {hasFilters && (
-        <Button asChild variant="outline">
-          <Link href="/discover">Clear filters</Link>
-        </Button>
-      )}
+      <div className="flex flex-wrap justify-center gap-3">
+        {hasFilters ? (
+          <Button asChild variant="outline" className="h-11 rounded-full px-5">
+            <Link href={basePath}>Clear filters</Link>
+          </Button>
+        ) : (
+          /* We DO deliver here, so the useful move is a different address in
+             the same market — not a different city. */
+          <Button asChild variant="outline" className="h-11 rounded-full px-5">
+            <Link href={`/city/${citySlug}/location`}>Try another address</Link>
+          </Button>
+        )}
+      </div>
     </Panel>
   )
 }

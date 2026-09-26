@@ -1,6 +1,30 @@
 import "dotenv/config"
 import { z } from "zod"
 
+/**
+ * An identity provider's ISSUER, canonicalised at the edge.
+ *
+ * `verifyClerkJwt` compares this to a token's `iss` claim by exact string, so
+ * `https://x.clerk.accounts.dev/` and `https://x.clerk.accounts.dev` are two
+ * different issuers and one of them rejects every token. That is not a
+ * hypothetical: the customer issuer was configured with the trailing slash a
+ * dashboard shows, and every authenticated request failed as "Untrusted Clerk
+ * issuer" — reaching the browser as a bare "Unauthorized" with nothing
+ * pointing at config, while the webhook (verified by Svix secret, never by
+ * issuer) kept working and made everything look wired.
+ *
+ * Normalised HERE rather than at the comparison, for the same reason
+ * `R2_PUBLIC_ENDPOINT` is checked here: env traps that fail silently belong at
+ * the boundary, once, so the rest of the app only ever sees a canonical value.
+ * Only TRAILING slashes go — a provider that issues from a path
+ * (`…/realms/dailybread`) keeps it.
+ */
+export function canonicalIssuer(value: string): string {
+  return value.trim().replace(/\/+$/, "")
+}
+
+const issuerUrl = () => z.string().url().transform(canonicalIssuer)
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -16,23 +40,30 @@ const envSchema = z.object({
   //* throws a clear error if it is missing when a real event arrives, so an
   //* unset secret fails loudly at the one place it matters rather than silently
   //* accepting unverified payloads.
-  CLERK_CUSTOMER_ISSUER: z.string().url(),
+  CLERK_CUSTOMER_ISSUER: issuerUrl(),
   CLERK_CUSTOMER_JWKS_URL: z.string().url(),
   CLERK_CUSTOMER_WEBHOOK_SECRET: z.string().min(1).optional(),
+  //* Needed only to ACT on a customer's identity — suspending one revokes
+  //* their sessions at the provider, which a JWKS-verify-only setup cannot do.
+  //* Optional for the same reason the webhook secret is: nobody working on
+  //* another module should be blocked by it. `ClerkCustomerStateService`
+  //* asserts it on the one path that needs it, so an unset key fails loudly
+  //* there instead of silently leaving a suspended customer signed in.
+  CLERK_CUSTOMER_SECRET_KEY: z.string().default(""),
 
   //* Vendor module
-  CLERK_VENDOR_ISSUER: z.string().url(),
+  CLERK_VENDOR_ISSUER: issuerUrl(),
   CLERK_VENDOR_JWKS_URL: z.string().url(),
   CLERK_VENDOR_SECRET_KEY: z.string().min(1),
   CLERK_VENDOR_PUBLISHABLE_KEY: z.string().min(1),
   CLERK_VENDOR_WEBHOOK_SECRET: z.string().min(1),
 
   //* Courier module — JWKS-verify only, no backend client needed
-  CLERK_COURIER_ISSUER: z.string().url(),
+  CLERK_COURIER_ISSUER: issuerUrl(),
   CLERK_COURIER_JWKS_URL: z.string().url(),
 
   //* Admin module
-  CLERK_ADMIN_ISSUER: z.string().url(),
+  CLERK_ADMIN_ISSUER: issuerUrl(),
   CLERK_ADMIN_JWKS_URL: z.string().url(),
   CLERK_ADMIN_PUBLISHABLE_KEY: z.string().min(1),
   CLERK_ADMIN_SECRET_KEY: z.string().min(1),

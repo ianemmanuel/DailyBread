@@ -2,6 +2,7 @@ import { Router } from "express"
 import authRouter from "./admin.auth.routes"
 import usersRouter from "./admin.user.routes"
 import vendorsRouter from "./admin.vendor.routes"
+import customersRouter from "./admin.customer.routes"
 import deliveryzoneRouter from "./admin.deliveryzone.routes"
 import serviceAreaRouter from "./admin.servicearea.routes"
 import zoneRouter from "./admin.zone.routes"
@@ -28,6 +29,7 @@ const v1Router: Router = Router()
 v1Router.use("/auth", authRouter)
 v1Router.use("/users", usersRouter)
 v1Router.use("/vendors", vendorsRouter)
+v1Router.use("/customers", customersRouter)
 v1Router.use("/delivery-zones", deliveryzoneRouter)
 v1Router.use("/service-areas", serviceAreaRouter)
 v1Router.use("/zones", zoneRouter)

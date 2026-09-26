@@ -29,6 +29,11 @@ export interface OperatingCity {
   countryId: string
   timezone : string
   status   : GeoStatus
+  /** The stored centroid. MAP VIEWPORT ONLY — never a customer's location.
+   *  The column's own comment says "Mapbox fly-to only", and it is: the value
+   *  is a vertex average, so it can sit outside a concave boundary and outside
+   *  every operating zone. Nothing resolves against it. */
+  centroid : { latitude: number; longitude: number } | null
   boundary : CityBoundary | null
   boundingBox: { north: number; south: number; east: number; west: number } | null
   /* A superset of what capability resolution needs: `publicName` rides along
@@ -153,6 +158,7 @@ export async function getOperatingCities(): Promise<OperatingCity[]> {
     },
     select: {
       id: true, name: true, slug: true, countryId: true, timezone: true, status: true,
+      latitude: true, longitude: true,
       boundary: true, boundingBox: true,
       zones: { where: { status: "ACTIVE" }, select: ZONE_SELECT },
     },
@@ -165,6 +171,9 @@ export async function getOperatingCities(): Promise<OperatingCity[]> {
     countryId: city.countryId,
     timezone : city.timezone,
     status   : city.status,
+    centroid : city.latitude != null && city.longitude != null
+      ? { latitude: city.latitude, longitude: city.longitude }
+      : null,
     boundary : normalizeBoundary(city.boundary),
     boundingBox: normalizeBox(city.boundingBox),
     zones    : city.zones.map(toZoneInput),
@@ -396,6 +405,13 @@ export async function getCityDetail(slug: string): Promise<CityMarket | null> {
     city   : { id: city.id, name: city.name, slug: city.slug, timezone: city.timezone },
     country: { id: country.id, name: country.name, slug: country.slug, code: country.code },
     areas,
+    /* WHERE TO POINT A MAP, and nothing more. The location page opens looking
+     * at the city instead of at the middle of the ocean; what the customer
+     * then pins is the only thing that ever becomes a delivery point. The
+     * bounds are the boundary's box, which is fine for fitting a view and
+     * useless as a coverage claim — membership is point-in-polygon, server
+     * side, every time. */
+    viewport: { center: city.centroid, bounds: city.boundingBox },
   }
 }
 

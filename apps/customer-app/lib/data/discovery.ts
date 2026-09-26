@@ -2,6 +2,7 @@ import "server-only"
 import type { DiscoveryResult } from "@repo/types/customer-app"
 
 import { backendFetch, BackendApiError } from "@/lib/api/server"
+import { getAccount } from "@/lib/data/account"
 import type { StoredLocation } from "@/lib/location/cookie"
 import { getStoredLocation } from "@/lib/location/server"
 
@@ -69,7 +70,16 @@ function buildFeedQuery(location: StoredLocation, params: FeedSearchParams): str
 
 export type FeedState =
   | { kind: "no-location" }
-  | { kind: "ok"; result: DiscoveryResult; location: StoredLocation }
+  | {
+      kind    : "ok"
+      result  : DiscoveryResult
+      location: StoredLocation
+      /** True when nothing was selected on this device and we fell back to the
+       *  customer's DEFAULT address. The page says so — a feed silently
+       *  anchored somewhere the customer did not choose here and now is the
+       *  same failure as the old cookie fallback, just with a nicer origin. */
+      usingDefault: boolean
+    }
   /** The SELECTED saved address cannot be used — deleted, or not the caller's.
    *  Its own state because the answer is "choose a delivery address", not
    *  "something went wrong", and because it must never be answered by quietly
@@ -84,14 +94,33 @@ export type FeedState =
  * as an empty list (recurring bug class #4).
  */
 export async function getFeed(params: FeedSearchParams): Promise<FeedState> {
-  const location = await getStoredLocation()
+  const selected = await getStoredLocation()
+
+  /*
+   * ── A saved DEFAULT is a location; an empty cookie is not the same thing ──
+   *
+   * The cookie is per-DEVICE. A customer who saved "Home" months ago and opens
+   * the site on a laptop, or after clearing cookies, has told us exactly where
+   * they want food — and the feed used to answer "where are we delivering?" as
+   * though they were a stranger. That is the durable preference doing nothing,
+   * which is the whole point of having one.
+   *
+   * The account read happens ONLY on this path: there is no cookie, so there
+   * is nothing cheaper to try, and a signed-out visitor never pays for it. The
+   * fallback is not written back to the cookie — a render cannot set one, and
+   * quietly turning a default into a per-device selection would erase the
+   * distinction between them. Choosing an address explicitly still writes it.
+   */
+  const location = selected ?? (await defaultAddressLocation())
   if (!location) return { kind: "no-location" }
+
+  const usingDefault = selected === null
 
   try {
     const result = await backendFetch<DiscoveryResult>(
       `/api/customer/v1/discovery/outlets?${buildFeedQuery(location, params)}`,
     )
-    return { kind: "ok", result, location }
+    return { kind: "ok", result, location, usingDefault }
   } catch (err) {
     /*
      * A SELECTED ADDRESS IS AUTHORITATIVE, so a request made with one either
@@ -106,6 +135,10 @@ export async function getFeed(params: FeedSearchParams): Promise<FeedState> {
      * answer presented as the right one is worse than no answer.
      */
     if (err instanceof BackendApiError && location.addressId && err.status < 500) {
+      /* A DEFAULT that cannot be used is not the customer's mistake — they
+       * selected nothing. Ask for a location rather than accusing them of
+       * choosing a broken address. */
+      if (usingDefault) return { kind: "no-location" }
       return { kind: "address-unusable", message: err.message }
     }
 
@@ -113,5 +146,43 @@ export async function getFeed(params: FeedSearchParams): Promise<FeedState> {
       kind   : "error",
       message: err instanceof BackendApiError ? err.message : "We couldn't load restaurants just now.",
     }
+  }
+}
+
+/**
+ * The signed-in customer's default address, shaped like a stored location.
+ *
+ * Returns null for everyone else — signed out, still being created
+ * (`pending`), suspended, or simply holding no addresses — and never throws:
+ * this is a fallback, and a failure here must leave the caller with the
+ * ordinary "tell us where you are" screen rather than an error.
+ *
+ * The POINT carried here is only for the label; the query goes out with the
+ * `addressId`, so the backend re-resolves the row it owns exactly as it does
+ * for an explicit selection.
+ */
+async function defaultAddressLocation(): Promise<StoredLocation | null> {
+  const account = await getAccount()
+  if (account.kind !== "ok") return null
+
+  const { addresses, defaultAddressId } = account.session
+  const fallback =
+    addresses.find((address) => address.id === defaultAddressId) ?? addresses[0]
+  if (!fallback) return null
+
+  const { serviceability } = fallback
+
+  return {
+    addressId: fallback.id,
+    latitude : fallback.latitude,
+    longitude: fallback.longitude,
+    label    : fallback.label
+      ?? (serviceability.zoneName && serviceability.cityName
+        ? `${serviceability.zoneName}, ${serviceability.cityName}`
+        : serviceability.cityName ?? fallback.addressLine1),
+    ...(serviceability.cityId    ? { cityId   : serviceability.cityId }    : {}),
+    ...(serviceability.citySlug  ? { citySlug : serviceability.citySlug }  : {}),
+    ...(serviceability.cityName  ? { cityName : serviceability.cityName }  : {}),
+    ...(serviceability.countryId ? { countryId: serviceability.countryId } : {}),
   }
 }

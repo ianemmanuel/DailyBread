@@ -1,67 +1,42 @@
-import type { CustomerCurrency } from "@repo/types/customer-app"
-
-import { PLACEHOLDER_CURRENCY, pexels } from "./placeholder-data"
+import { pexels } from "./placeholder-data"
 
 /*
- * "Your week, sorted" — the meal-plan teaser. Static for now; plan names,
- * prices and the "Most popular" badge are placeholders.
+ * The meal-plan PROPOSITION — what a plan is, not which plans exist.
+ *
+ * This file used to carry three plans with names, prices and a "Most popular"
+ * badge. All of it was invented, and a price is the single worst thing to
+ * invent: a customer who reads "from KSh 650" and later pays something else
+ * was misled by us, not by a placeholder (principle 11).
+ *
+ * What survives is the part that is true regardless of inventory — meal plans
+ * are this platform's differentiator and explaining them is honest marketing.
+ * The photography is atmosphere, deliberately unlabelled: no dish names, no
+ * prices, nothing that reads as a menu. When `MealPlan` has a customer read,
+ * a real band belongs on the CITY page where the plans actually exist, not
+ * here on a page with no market.
  */
-
-export interface MealPlanTeaser {
-  id: string
-  name: string
-  mealsPerWeek: number
-  /** Lowest price per meal, integer minor units. */
-  fromPriceMinor: number
-  image: string
-  badge: string | null
-  href: string
-}
 
 export interface MealPlansContent {
   eyebrow: string
-  title: string
-  steps: string[]
-  cta: { label: string; href: string }
-  currency: CustomerCurrency
-  plans: MealPlanTeaser[]
+  title  : string
+  body   : string
+  steps  : string[]
+  cta    : { label: string; href: string }
+  /** Atmosphere only. Never captioned, never priced. */
+  images : [string, string]
 }
 
 const STATIC_MEAL_PLANS: MealPlansContent = {
   eyebrow: "Meal plans",
-  title: "Your week, sorted",
-  steps: ["Choose your meals", "Choose your delivery days", "We handle the rest"],
-  cta: { label: "Explore meal plans", href: "/meal-plans" },
-  currency: PLACEHOLDER_CURRENCY,
-  plans: [
-    {
-      id: "balanced-classics",
-      name: "Balanced Classics",
-      mealsPerWeek: 5,
-      fromPriceMinor: 65000,
-      image: pexels(699953, 800, 600),
-      badge: "Most popular",
-      href: "/meal-plans",
-    },
-    {
-      id: "protein-power",
-      name: "Protein Power",
-      mealsPerWeek: 5,
-      fromPriceMinor: 75000,
-      image: pexels(1624487, 800, 600),
-      badge: null,
-      href: "/meal-plans",
-    },
-    {
-      id: "clean-and-green",
-      name: "Clean & Green",
-      mealsPerWeek: 5,
-      fromPriceMinor: 60000,
-      image: pexels(2097090, 800, 600),
-      badge: null,
-      href: "/meal-plans",
-    },
+  title  : "Your week, sorted",
+  body   : "Instead of deciding what to eat every evening, choose a plan once and let a kitchen near you cook through the week.",
+  steps  : [
+    "Choose the meals you want",
+    "Choose the days they arrive",
+    "We handle the rest",
   ],
+  cta    : { label: "How meal plans work", href: "/about" },
+  images : [pexels(699953, 800, 600), pexels(1624487, 800, 600)],
 }
 
 export async function getMealPlansContent(): Promise<MealPlansContent> {

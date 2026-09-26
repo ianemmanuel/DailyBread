@@ -75,6 +75,8 @@ Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**680 test
 11. **Compiler emit must never land next to sources.** `packages/ui` built with `tsc -b` and no `outDir`, littering `src/` with `.js` / `.d.ts` / `.d.ts.map`; a later sweep of those strays took the whole component directory with it and left all three frontends unable to resolve their imports — undetected because nothing typechecks a package with no TS. `.gitignore` now blocks `packages/*/src/**/*.js` and friends. Any new package that compiles needs an explicit `outDir`.
 12. **Client-only state that changes the TREE SHAPE is a hydration bug, not a styling one.** The ERP sidebar stored its collapsed state in `localStorage`, and `SidebarNav` renders a `<Popover>` + `<Tooltip>` per section *only when collapsed* — both call Radix's `useId`. The server always rendered the expanded tree, the client switched after mount, and every generated id downstream shifted: it surfaced as `aria-controls` mismatching on the **mobile sheet's trigger**, a component with nothing to do with the sidebar's width. Fixed by moving the preference to a **cookie**, which travels with the request so the server renders what the client will hydrate (and which also killed a real flash of an expanded sidebar on every load). Rule: if a persisted preference changes *which components render*, it must reach the server — `localStorage` can only carry preferences that change CSS.
 13. **A stale `.next/dev/types` produces syntax errors in files you did not write.** `Unterminated template literal` / `Declaration or statement expected` pointing into `.next/dev/types/{routes.d.ts,validator.ts}` is a corrupt cache, not a real error: `rm -rf .next && next typegen`. Do not go looking for the bug in your own code.
+15. **A trailing slash on a Clerk ISSUER rejects every token, and says only "Unauthorized".** `verifyClerkJwt` matches the token's `iss` claim against the configured issuer by EXACT STRING, so `https://x.clerk.accounts.dev/` and `https://x.clerk.accounts.dev` are different issuers. `CLERK_CUSTOMER_ISSUER` was pasted with the slash; every customer token failed as "Untrusted Clerk issuer" and surfaced in the browser as a bare 401 on the first authenticated call, with nothing pointing at config. **The webhook working proves nothing about this** — webhooks are verified by svix secret and never touch the issuer. `canonicalIssuer()` in **env.ts** now strips trailing slashes as the value is parsed (unit-tested), so the paste is tolerated and the rest of the app only ever sees a canonical issuer — the same place, and the same reasoning, as the `R2_PUBLIC_ENDPOINT` guard. The comparison in `verifyClerkJwt` stays an exact string match on purpose. To check an instance's true issuer: `curl https://<domain>/.well-known/openid-configuration`, or base64-decode the publishable key (`pk_test_<base64 domain>$`) — the domain is in the key.
+
 14. **`next build` run over a live `next dev` breaks the dev server — every route 404s.** They share the app's `.next` folder; the build rewrites it and the running dev server loses its compiled `server/` output from under it. It presented as "`/` is missing" while `app/page.tsx` was untouched — the tell is that plain static routes like `/meals` 404 too. Fix: stop the dev server, `rm -rf apps/<app>/.next`, restart. **Before building to verify anything, check the app's port is free** (`netstat -ano | grep LISTENING | grep :3003`); if it is not, verify with `tsc` only, or ask.
 
 ---
@@ -431,6 +433,52 @@ vendor photos need it, not for this.
 - Every key carries the owner's id (`meal-images/<vendorId>/…`, `profile-media/<kind>/<vendorId>/…`, `payout-docs/<method>/<vendorId>/…`). That segment is **load-bearing**: `assertOwned*Key` is what stops a discard endpoint being a delete-anything primitive — it must check the exact prefix, one segment after it, no traversal, and no prefix collision (`vendor-1` must not match `vendor-1-extra`). Filenames are uuids, never fixed, so a replacement never destroys the evidence a decision rested on.
 - Payout identifiers are **AES-256-GCM at rest** with keyed-HMAC blind indexes for duplicate matching without decrypting. `presentPayoutAccount()` is the only exit to any client and returns masked values — a vendor never gets their own numbers back (Stripe's model). `decryptPayoutIdentifiers` is reachable from no route.
 
+**IDENTITY: the column is `externalAuthId`, the provider is Clerk.**
+`AdminUser`, `VendorUser` and `ConsumerAccount` each carry `externalAuthId` —
+named for the ROLE it plays, because verification is already plain JWT + JWKS
+against a configured issuer and a column named after one supplier is how that
+supplier quietly becomes part of the schema. The VALUE is a Clerk user id
+today; code that talks to Clerk's API still says `clerkUserId`, and that is
+deliberate — it is Clerk's id being handed to Clerk.
+> Renamed by `20260924090000_rename_clerk_id_to_external_auth_id`, **hand-written
+> as `ALTER TABLE … RENAME COLUMN` plus `ALTER INDEX … RENAME`**. `prisma
+> migrate diff` generates drop-and-add for a rename, which silently discards
+> every identity link; the indexes are renamed alongside so the database
+> matches the names Prisma derives, or the next diff reports drift and offers
+> to "fix" it.
+
+**Four Clerk applications, one account**: customer · vendor · courier (env
+reserved) · admin, each with its own issuer, JWKS and webhook secret.
+`verifyClerkJwt` matches the token's `iss` against the four and every
+middleware then asserts the audience (`verified.app !== "customer"` → 401), so
+a vendor token is structurally useless on a customer route. Separate user pools
+are the point: an admin identity cannot authenticate against the storefront at
+all, and MFA/session policy is set per audience.
+
+**CUSTOMER MODERATION MOVES IN BOTH DIRECTIONS.** `ConsumerStatus.SUSPENDED`
+used to be enforced on every request and settable by nothing — a rule nobody
+could apply.
+
+| | |
+|---|---|
+| admin → provider | `suspendCustomer` / `reinstateCustomer` write Postgres, then ban/unban at Clerk |
+| provider → admin | a `banned` flag on `user.updated` maps onto `SUSPENDED` / `ACTIVE` |
+
+> **Postgres decides; the provider only revokes sessions.** Every customer
+> request re-reads `status`, so a suspension lands on the next call with no
+> session to hunt down — the provider call is BEST-EFFORT and its failure is
+> reported (`sessionsRevoked: false`), never swallowed and never a rollback.
+> `CLERK_CUSTOMER_SECRET_KEY` is optional for exactly that reason: without it
+> the suspension still applies and says loudly that live sessions survived.
+> **`locked` is NOT mirrored** — that is Clerk's own brute-force lockout,
+> temporary and self-clearing, and turning it into a platform suspension would
+> strand someone who mistyped a password. Suspension never deletes: addresses
+> and later orders must survive being reinstated.
+> **No geographic scope gate on customer moderation.** Customers are not
+> country-scoped — `ConsumerAccount.countryId` is a home-market hint and a
+> customer may hold addresses in several countries — so gating on it would
+> refuse a legitimate action for someone who simply travelled.
+
 **Catalog pattern** (used six times): a global catalog + a per-country enablement table. `VendorType`, `Cuisine`, `DietaryTag`, `PaymentMethod`, `TaxCategory`. Catalog writes need GLOBAL scope; per-country availability needs only country scope. There is **no delete** — withdraw by status so history stays readable.
 
 ---
@@ -679,8 +727,66 @@ of them.
   > does.
 - Reads return a **state** (`no-location` / `ok` / `error`), never a bare throw or an empty array — see recurring bug class #4.
 - `lib/format/money.ts` is the only place minor units become a decimal, and it reads `currency.minorUnitDigits`.
-- Keep `"use client"` at the leaves. Today: `Navbar`, `NavLinks`, `MobileNav`, `ThemeToggle`. Cards, hero and menu are Server Components and must stay that way. `Navbar` is the one deliberate exception — see *Customer auth*.
+- Keep `"use client"` at the leaves. Today: `Navbar`, `NavLinks`, `MobileNav`, `LocationChip`, `ThemeToggle`, and the location page's `LocationWorkbench` + `DeliveryMap`. Cards, hero and menu are Server Components and must stay that way. `Navbar` is the one deliberate exception — see *Customer auth*.
 - **Pages start with a fragment.** `<main>` in the root layout carries `.shell` (centred max-width + responsive side gutters) and `flex flex-1 flex-col`, so a page never repeats that wrapper. Vertical spacing is the page's own business. A section that must span the full screen width uses `.full-bleed`; `body` has `overflow-x: clip` so that 100vw section never adds a sideways scroll (`clip`, not `hidden`, which would break the sticky navbar).
+
+**Browsing and setting a location are PUBLIC; saving is not** (explicit
+direction). The gate goes where the commitment is: a coordinate is not one, an
+order is. `/city/[slug]/location` stays open and writes only the session
+cookie — the anonymous path performs **zero durable writes**, which is the
+property that made gating it unnecessary. Authentication is required for
+anything durable or personal: saving an address, checkout, orders,
+subscriptions, account. **Clerk returns the customer to the page they were on**
+— a `<SignInButton>` or link persists the current URL as `redirect_url` and
+Clerk navigates back after sign-in; `fallbackRedirectUrl` only applies when
+there is no `redirect_url`. Our `/sign-in` renders a plain `<SignIn />` with no
+`forceRedirectUrl`, which would override it.
+
+**THE ACCOUNT SEAM: `/account` is the first protected route**, listed in
+`proxy.ts` (Next 16's Proxy — the renamed `middleware`, which must sit at the
+APP root beside `app/`). `auth.protect()` redirects with a `redirect_url`, so
+Clerk returns the customer to the page they wanted, and the gate stays OUT of
+the pages — which is why everything else keeps its static render. **Verified
+from the build and a live walk**: `/account` and `/account/addresses` 307 to
+`/sign-in?redirect_url=…`, while `/`, `/about`, `/city` and every market route
+still answer 200 signed-out.
+
+**`getAccount()` returns a STATE, and two of them are identity-specific.**
+`pending` (503 `CUSTOMER_ACCOUNT_PENDING` — the token is valid and the webhook
+has not landed; drawn as "setting up your account", never as an error) and
+`suspended` (403). Collapsing either into a generic failure turns a system
+working normally into a support ticket.
+
+**THE ADDRESS BOOK MANAGES; THE LOCATION PAGE CREATES.** There is no "add
+address" form under `/account` and there must not be one: an address is a PIN,
+so creating it needs a map, a market and a coverage verdict — which is
+`/city/[slug]/location`, already built. A second form would be a second
+location experience, the thing that was just consolidated. "Add an address"
+links to a market instead.
+> **`SaveAddressPanel` is where the auth wall goes** — under a CONFIRMED pin,
+> not in front of the map. Setting a point writes only a cookie and stays
+> public; saving is durable and personal, so it needs a person. Signed out it
+> offers `<SignInButton>` and Clerk returns them to the same page.
+> **It offers to save wherever the point is in a KNOWN city**, including one we
+> cannot serve yet — that address is a real destination and a real demand
+> signal (the same rule the backend enforces). Only a point in no city has
+> nothing to attach to.
+
+**SELECTING an address and DEFAULTING it are different verbs**, with different
+endpoints, and a list that blurs them is a list that quietly rewrites a durable
+preference to answer "where does tonight's order go".
+
+| | | |
+|---|---|---|
+| Deliver here | `POST /api/location/address` | per DEVICE, writes the cookie's `addressId` |
+| Make default | `PATCH /api/account/addresses/:id/default` | durable, on the row |
+
+> **The cookie is written from the SERVER's own read.** That handler fetches
+> the caller's address book with their token and finds the row — an id that is
+> not theirs simply is not in the list and 404s. Every field stored (label,
+> coordinates, city) comes from the backend's answer, never from the request,
+> and no serviceability verdict is stored. That is what makes `addressId`
+> safe to treat as authoritative later.
 
 **Customer auth is route-based**, on `/sign-in/[[...sign-in]]` and `/sign-up/[[...sign-up]]` — the optional catch-all is required, because Clerk routes its own multi-step flow (second factor, email code, reset) onto child paths. `<SignInButton>` / `<SignUpButton>` use their default **redirect** mode, and `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `_SIGN_UP_URL` point at those pages. Those two routes build as `ƒ`; other pages stay `○`.
   > This supersedes an earlier modal-only decision, on explicit direction. Switching back is `mode="modal"` on the buttons — and then the mobile sheet must close before the modal opens, because the sheet is a Radix dialog that blocks everything outside it.
@@ -722,19 +828,27 @@ Everything through the **customer backend module + customer frontend scaffold** 
 
 Verified green as of this pass: `pnpm check-types` 5/5, backend `vitest run`
 680/680, five smoke tests (40/40 promotions, 16/16 the real-R2 hero image,
-32/32 markets + areas + point resolution, 37/37 cuisine imagery/create/
-pagination incl. a real R2 round trip and the prefix guard, **39/39 the saved
-delivery-address contract**), and `next build` clean in `customer-app`
+**35/35 markets + areas + point resolution + city viewport**, 37/37 cuisine
+imagery/create/pagination incl. a real R2 round trip and the prefix guard,
+**51/51 the saved delivery-address contract**), and `next build` clean in `customer-app`
 and `admin-dashboard`. The prerendered HTML was checked directly for the
 customer-facing area names, for the ABSENCE of every `ZoneLevel` string and of
 the operational zone names, and for the live cuisine tiles.
 > Latest migration: `20260923090000_consumer_address_requires_pin`.
-> **The geography/address foundation pass is done** — saved addresses require a
+> **The customer journey is `/` → `/city` → a market → a point → the feed.**
+> `/` asks for nothing and carries no invented marketplace data; discovery is
+> city-scoped; navigation is contextual and path-driven; there is ONE location
+> experience. See *Location and markets*.
+> **The geography/address foundation is done** — saved addresses require a
 > pin and derive their geography from it, a selected address can no longer fall
 > back to unrelated coordinates, country readiness gates point resolution, and
-> customer-facing serviceability names zones by `publicName`. See *Location and
-> markets*. The customer city/location UX is built ON this; do not re-litigate
-> the model when building it.
+> customer-facing serviceability names zones by `publicName`.
+> **The customer location flow is built on it**: `/city`, the city page as a
+> marketplace entry point, and `/city/[slug]/location` (Mapbox pin + browser
+> GPS, **no geocoder** — a search box would simply be a third source of the one
+> primitive, `latitude + longitude`, which is why there is no provider
+> abstraction waiting for it). See *Location and markets*; do not re-litigate
+> the model when building on it.
 > **`next build` caches fetches in `.next/cache`**, so a backend change can be
 > invisible to a rebuild — `rm -rf .next/cache` before trusting prerendered
 > output after a data-shape change.
@@ -787,19 +901,33 @@ stays ours. Rules:
 - **Placeholder figures and offers must not ship.** The hero's "10,000+ happy
   food lovers" and its "20% off" offer are invented for layout.
 
-**All landing sections exist with static data**, in `design.png` order: `Hero`,
-`Categories`, `PopularDishes`, `EditorialBand`, `MealPlans`,
-`NeighbourhoodKitchens`, `CtaBand` (+ the layout's `Footer`). Shared: `SectionHeader`,
-and `constants/home/placeholder-data.ts` (`pexels()` + a KES placeholder currency —
-delete it when nothing uses it). Card rows are a sideways-swipe `.rail` on phones
-and a CSS grid from tablet up, so there are **no carousel arrows and no client
-JS**. Full-width tinted bands use `.full-bleed` with an inner `.shell`.
-Placeholder ratings, prices and dishes are invented; nothing writes ratings yet.
+**`/` CARRIES NO INVENTED MARKETPLACE DATA**, and nothing invented may be
+added back. The bands are `Hero` (a published promotion, or `FALLBACK_HERO`),
+`Categories` (the real global catalogue), `HowItWorks`, `EditorialBand`,
+`MealPlans`, `Markets` (the real `/geo/markets` list) and `CtaBand`.
+- **`PopularDishes` and `NeighbourhoodKitchens` were DELETED, not restyled.**
+  They rendered invented kitchens, ratings, prices and delivery times on the
+  first screen anyone sees. They were not replaced with better placeholders
+  either: a landing page has no location, so there is no honest answer to
+  "what is near you" to give here at all. That question belongs to
+  `/city/[slug]/discover`, where a point exists to answer it.
+- **`MealPlans` explains the product and shows no inventory** — no plan names,
+  no prices, no "Most popular". Its photographs are atmosphere, uncaptioned.
+  Real plans belong on a CITY page when a meal-plan read exists, because a plan
+  is sold by an outlet in a market and there is no global one.
+- `Markets` is the only counting the page does (`n cities`), straight off the
+  read, and it removes itself when the read fails or nothing is open — a
+  heading over an empty row would read as "we deliver nowhere".
+Full-width tinted bands use `.full-bleed` with an inner `.shell`; card rows are
+a sideways-swipe `.rail` on phones and a grid from tablet up, so there are **no
+carousel arrows and no client JS**.
 
-**Hero (`components/home/hero/`)** — done, awaiting review. Text, address
-search (`next/form` GET to `/discover?location=…`, works without JS) and avatar
-row on the left; a square photo with a floating offer card on the right; stacked
-text-first on phones. The photo uses `loading="eager"` + `fetchPriority="high"`,
+**Hero (`components/home/hero/`)** — copy on the left with the PAGE's own
+actions (an `actions` prop: `/` invites you to choose a city, a city page to
+browse or set a location — a promotion decides the words above them and must
+never decide whether there is a way forward); a square photo with a floating
+offer card on the right; stacked text-first on phones. It holds no client code
+at all. The photo uses `loading="eager"` + `fetchPriority="high"`,
 not `preload`: on phones it starts below the fold. Served as AVIF, ~57 KB at
 640px wide. **Image spec:** square **1600 × 1600**, JPEG or WebP at q85–90,
 under ~600 KB, food centred and kept out of the bottom-left third (the offer
@@ -868,15 +996,13 @@ landing page's ordinary default.
 > whether the next section is a second table or a `section` discriminator on a
 > shared one; do NOT default to copying the module.
 
-**`/discover` is built** — recovered from `30facf5` (where it was the home
-page), not rewritten: `lib/data/discovery.ts` (`getFeed`, returns a
-`no-location | ok | error` STATE), `components/discovery/*`, `app/discover/page.tsx`.
-Verified against the real backend in all three states: no cookie → the picker;
-a Westlands point → Manu's Kitchen; a point at 0,0 → "We are not here yet".
-> **A POINT lands on `/discover`; a MARKET lands on `/city/[slug]`.** The
-> picker used to push a serviceable point to the city page — which, pressed ON
-> the city page, reloaded the page you were already on. "Continue" in the
-> picker also goes to the feed now.
+**The feed is built and lives at `/city/[citySlug]/discover`** —
+`lib/data/discovery.ts` (`getFeed`, returning a
+`no-location | ok | address-unusable | error` STATE), `components/discovery/*`.
+Verified against the real backend: no cookie → "Where in Nairobi are we
+delivering?" with a link to that market's location page; a Westlands point →
+Manu's Kitchen; `/discover` with no cookie → `/city`, with one → that market's
+feed.
 >
 > **Cuisine tiles link with the cuisine ID, not the slug.** The feed forwards
 > `?cuisine=` to the backend as `cuisineId`; a slug there silently matches
@@ -889,12 +1015,10 @@ a Westlands point → Manu's Kitchen; a point at 0,0 → "We are not here yet".
 to and which currently 404s. Recover from `30facf5`
 (`app/store/[outletId]/*`, `components/storefront/*`, and the cart it opens:
 `components/cart/*`, `lib/cart/*`, `app/api/cart/price`). The imports and the
-arbitrary `text-[var(--x)]` forms need the same adaptation `/discover` got.
-`PopularDishes` / `NeighbourhoodKitchens` still sit on `/` with invented data;
-`/discover` supersedes the kitchens band with real outlets, and popular dishes
-needs a dishes read that does not exist yet.
-> The city-scoped browse feed stays **deferred**: picking a city already lands
-> somewhere real.
+arbitrary `text-[var(--x)]` forms need the same adaptation the feed got.
+> The city-scoped browse feed (outlets WITHOUT a point) stays **deferred**: the
+> city page sends you to the feed, and the feed asks for a point when it needs
+> one.
 
 **VENDOR-CREATED CATEGORIES ARE REFUSED** (explicit direction, after analysis).
 A controlled vocabulary is what filters, facets and analytics run on — the same
@@ -1059,6 +1183,24 @@ and the two are allowed to differ. The three concepts stay separate on purpose:
 > a home-market hint** adopted from the FIRST address and never overwritten —
 > it must never become delivery authority, and nothing filters on it.
 
+**A SAVED DEFAULT IS A LOCATION; AN EMPTY COOKIE IS NOT THE SAME THING.**
+`getFeed` falls back to the signed-in customer's DEFAULT address when this
+device has selected nothing. Before this, `defaultAddressId` was read in three
+places, all of them `/account*`, all of them only to draw a "Default" badge —
+so someone who saved "Home" months ago and opened the site on a laptop was
+asked "where are we delivering?" as though they were a stranger. A durable
+preference that changes nothing outside the page that sets it is not a
+preference.
+> The account read happens **only on that path** — there is no cookie, so there
+> is nothing cheaper to try, and a signed-out visitor never pays for it.
+> The fallback is **not written back to the cookie**: a render cannot set one,
+> and quietly promoting a default into a per-device selection would erase the
+> distinction the two exist to keep. Choosing explicitly still writes it.
+> It is **labelled** — "· your default address" — because a feed anchored
+> somewhere the customer did not choose here and now must say so, and a default
+> that cannot be used returns `no-location` rather than `address-unusable`:
+> they selected nothing, so accusing them of picking a broken address is wrong.
+
 **A SELECTED ADDRESS IS AUTHORITATIVE, or the request fails.** When
 `addressId` is sent, its coordinates are NOT sent with it: the backend resolves
 the point from the row after checking it belongs to the caller. The frontend
@@ -1084,13 +1226,148 @@ chosen, and it swaps in `publicName` for every customer-facing serviceability
 there is. Before this, the cookie label and the `/discover` header could read
 `"Karen-Langata-SouthC-Upperhill Area, Nairobi"`.
 
-**The three routes, and why each has the render mode it does:**
+**GEOGRAPHIC EXISTENCE AND OPERATIONAL AVAILABILITY ARE DIFFERENT ANSWERS**,
+and the address book keeps both:
+
+| The point is… | Verdict | Stored? |
+|---|---|---|
+| in a city, in a live zone | `SERVICEABLE` | yes |
+| in a city, in no zone or a paused one | `AREA_NOT_LAUNCHED` / `AREA_PAUSED` | **yes** — "we know where this is and cannot serve it *yet*" is a delivery address and a demand signal for wherever we open next |
+| in no operating city | `OUTSIDE_COVERAGE` | **no** — `countryId` is an FK into countries we operate in, so the row cannot even be typed honestly. Revisit with the account work |
+
+> Never collapse "we do not operate there" into "we do not know where that is",
+> and never let a stored address imply coverage: serviceability is resolved on
+> every read and the customer is always told the truth about today.
+
+**THE JOURNEY IS `/` → `/city` → a market → a point → the feed**, and each
+step asks for exactly one thing:
 
 | | | |
 |---|---|---|
-| `/` | `○` static | marketing. GLOBAL promotion. Reads no cookie, no auth |
-| `/city/[citySlug]` | `●` SSG + ISR | per-market. CITY/COUNTRY promotion, named areas. The SEO surface |
-| `/discover` | `ƒ` dynamic | the located feed. Reads the location COOKIE — which is exactly why it is its own route |
+| `/` | `○` static | the brand, and a way into a market. Asks for NOTHING — no location prompt, no account, no cookie |
+| `/about` | `○` static, 1h | what DailyBread is, globally, including what a meal plan IS. Replaced the global `/meal-plans` in the navbar |
+| `/city` | `○` static, 1h | the market directory, straight from `/geo/markets`. Cities grouped under their country — **country is a heading, never a link**, because you cannot order from a country. No `/country/[slug]`, and adding one would invent a marketplace that does not exist |
+| `/city/[citySlug]` | `●` SSG + ISR | the market's ENTRY POINT. CITY/COUNTRY promotion, named areas, this market's cuisines, and the two actions there are: browse, or set a location. The SEO surface |
+| `/city/[citySlug]/places` | `ƒ` dynamic | the places you can order from, INSIDE a market |
+| `/city/[citySlug]/meal-plans` | `●` SSG + ISR | meal plans, in this market |
+| `/city/[citySlug]/location` | `●` SSG + ISR | the delivery-point picker. A PAGE, not a sheet — a map is the whole task, it survives a refresh, and every empty state links to it |
+| `/discover`, `/meal-plans` | `ƒ` | doorways, kept for old links: cookie has a city → that market's page, otherwise `/city`. They resolve nothing themselves, and they **forward the query string** — the landing page's cuisine tiles arrive with `?cuisine=`, and dropping it opened an unfiltered feed that looked like the tile had done nothing |
+
+> **`/` NEVER ASKS FOR A LOCATION.** The picker used to sit in the hero, so the
+> landing page's primary action was a geolocation prompt fired at someone who
+> had not yet been told what DailyBread is or where it operates. Browsers
+> penalise that and visitors resent it, and it asked the wrong question first:
+> "where are you?" only matters once you know we are in your city. **Verified by
+> build output, not by inspection** — the chunks containing `getCurrentPosition`
+> are not referenced by `/`'s HTML. Keep it that way.
+
+**Discovery is CITY-SCOPED, and the slug is still not a location.** The feed is
+resolved from the point in the cookie exactly as before; the slug decides which
+market page you are in, which location page the empty states link to, and what
+the heading says. When the resolved point is in a different city, `DeliveringTo`
+**says so and offers the switch** — the URL is never rewritten to match the
+point, and the point is never rewritten to match the URL. `FeedPagination` takes
+its `basePath` for the same reason a hard-coded `/discover` was wrong: paging
+must not walk someone out of the market they are browsing.
+
+**NAVIGATION IS TWO BARS, AND THE SPLIT IS THE SCOPE RULE.**
+
+| | | |
+|---|---|---|
+| global navbar | root layout, every route | brand · Our cities · About · theme · auth |
+| **market bar** | `app/city/[citySlug]/layout.tsx`, market routes only | the city NAME · Overview · Places · Meal plans · the delivery-location chip |
+
+Anything that is a property of a MARKET — kitchens, meal plans, outlets, the
+delivery location — belongs to the market bar and appears nowhere else. From
+`/` those links could only go nowhere useful or silently pick a city for the
+customer. Anything above a market (`/`, `/city`, `/about`) is global and says
+nothing about one.
+
+> **The city NAME is why the market bar is a layout.** The global navbar lives
+> in the ROOT layout, which renders for every route and therefore cannot know a
+> city's name without a client fetch (a waterfall in the header on every page)
+> or route params it does not have. Deriving from the path gives a SLUG, and
+> "nairobi-ke" is not what a customer should read. A layout on the `[citySlug]`
+> segment has it for free: a Server Component with the param, a cached
+> `getCityDetail` already read by the pages below it. The bar is in the HTML
+> with the real name and **no client fetch anywhere** — `MarketNav` is `"use
+> client"` only for `usePathname`, which is a hook call, not a bundle.
+> Confirmed in the prerendered HTML: `/` carries "Our cities"/"About" only, and
+> `/city/nairobi-ke` additionally carries the `Nairobi marketplace` bar.
+
+**THEY ARE "PLACES", NOT KITCHENS, RESTAURANTS OR OUTLETS.** The label a
+customer reads for a sellable vendor location is **Places**, and the route is
+`/city/[slug]/places`:
+- **Kitchens** collides with a real domain term — `VendorType` is a catalog a
+  country admin curates (commercial kitchen, restaurant, café) — and it
+  misdescribes a café.
+- **Outlet** is the schema's word. Shipping it is the `Zone.name` mistake again:
+  operator vocabulary reaching a customer.
+- **Restaurants** is the market convention in Kenya and would be wrong the day a
+  home caterer or cloud kitchen joins — and those are the meal-plan
+  differentiator.
+- **Places** is true for every vendor type and reads naturally: "12 places
+  deliver to Westlands".
+
+> There is **no `/discover` page**, deliberately. "Discover" is not a
+> destination, it is searching across meals, places and cuisines — and a page
+> built today could only show cuisine tiles the city page already has. The nav
+> grows by adding things you can BROWSE (Places, then Meals), with search
+> cutting across them. A summary page earns its place once those reads exist,
+> not before.
+
+**A CONFIRMED PIN IS "SETTLED", AND THE UI MUST SAY SO.** The location page
+tracks WHICH point the verdict belongs to (`confirmedKey`), not merely that one
+exists. While the pin matches it, the confirm button is replaced by a summary
+naming the area — leaving a live "Confirm this location" under a location the
+customer has already confirmed, and possibly saved, invites them to re-ask a
+finished question. Moving the pin clears both the verdict and the confirmation,
+so the button returns for what is now a different place.
+
+**Meal plans are CITY-SCOPED** — `/city/[citySlug]/meal-plans`. A `MealPlan`
+hangs off an OUTLET, which sits in a city, so there is no global meal-plan
+page to build: `/about` explains the idea, the market page answers it. The
+city page lists nothing yet and **does not claim there are no plans** — that
+would be a statement about inventory from a page that has not asked. When the
+read exists it drops in there, scoped by the city and then narrowed by the
+customer's point.
+
+**`/meal-plans` and `/discover` are DOORWAYS**, kept for old links and shaped
+identically: the location cookie's city → that market's page, otherwise
+`/city`. Neither resolves anything itself, and neither invents a city for a
+visitor who has not chosen one.
+
+> **There is ONE location experience.** The inline picker in the feed's empty
+> states was a second, smaller copy of it — GPS and a city dropdown with no room
+> for a map — and it is deleted (`LocationPicker`, and `/api/markets` with it).
+> Every "where should we deliver?" moment now links to
+> `/city/[slug]/location`.
+
+**The city page shows nothing that needs a point.** No outlets, no counts, no
+ETAs, no meal-plan pricing — the `MealPlans` band was REMOVED from it because
+its plans and prices are invented placeholders, and a city marketplace is
+precisely where a customer reads them as that market's real offering
+(principle 11). It comes back when a meal-plan read exists.
+
+**The map draws no zones**, unlike the vendor picker, which draws them on
+purpose: a merchant choosing where to build needs the operating map, while
+publishing the polygons to an anonymous page hands over the coverage footprint
+exactly rather than roughly — the same boundary `areas` (names only) holds.
+
+**The centroid opens the view and is never a pin.** `CityMarket.viewport`
+(`center` + `bounds`) exists so the location map starts looking at the city;
+`DeliveryMap` has no way to report a point the customer did not place, and the
+smoke proves why by resolving a city's own centroid to `AREA_NOT_LAUNCHED`.
+`bounds` is a bounding box, so it is a *view*, never a coverage claim —
+membership is point-in-polygon on the server, every time.
+
+**A pin in another city is answered, not overwritten.** The URL city decided
+which map opened; the point decides which city it is in. When the two differ
+the page names the resolved city and offers to switch marketplace — it never
+relabels the point as the URL's city, and the URL never mutates to follow the
+pin. `/discover`'s not-serviceable panel makes the same distinction: a known
+city gets its name and a link back to its map, a point in no city gets the
+directory.
 
 `/` deliberately stays location-free: a first-time visitor has no cookie
 anyway, so personalising it would pay a per-request render to serve the global
@@ -1106,11 +1383,9 @@ root-level dynamic segment would catch every future route, and a city named
 cache and 404s, so a bot probing paths costs one cached read.
 
 **Landing bands split by whether they need a point.** `Hero`, `Categories`,
-`EditorialBand`, `MealPlans` and `CtaBand` do not and render on both `/` and
-`/city/*`. `PopularDishes` and `NeighbourhoodKitchens` do, carry invented
-ratings and prices, and belong on `/discover` — they are deliberately absent
-from the city page and still sit on `/` only until `/discover` exists to
-receive them.
+`EditorialBand`, `MealPlans` and `CtaBand` need none and render on both `/` and
+`/city/*`. Anything that needs a point — outlets, fees, ETAs, "popular near
+you" — lives in the feed under a market and nowhere else.
 
 ### Cuisines — the storefront taxonomy
 

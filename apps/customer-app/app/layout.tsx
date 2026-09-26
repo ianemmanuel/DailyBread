@@ -41,16 +41,12 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  // One entry per scheme, matching --background in each, so the phone's browser
-  // chrome never shows a light bar over a dark page.
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f4f5f7" },
     { media: "(prefers-color-scheme: dark)",  color: "#0a0b0d" },
   ],
   width       : "device-width",
   initialScale: 1,
-  // Deliberately zoomable. Pinning maximumScale is an accessibility failure on
-  // a page whose whole job is small text over photographs.
 }
 
 
@@ -68,25 +64,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             inside the client ThemeProvider is also what avoids React 19's
             "script tag while rendering React component" warning. */}
         <ThemeScript />
-
         <ThemeProvider>
-
-          {/* Clerk's official shadcn theme reads our CSS variables, so its forms
-              and menus follow light/dark on their own. The one override is the
-              focus ring: the theme draws it at 50% opacity, too faint on white. */}
           <ClerkProvider
             appearance={{ theme: shadcn, variables: { colorRing: "var(--ring)" } }}
           >
             <Navbar />
-
-            {/* The page wrapper: `.shell` is the centred max-width with
-                responsive side gutters, so pages can return a fragment instead
-                of repeating a wrapper div. A section that must span the full
-                screen width uses the `.full-bleed` class to break out. */}
             <main id="main" className="shell flex flex-1 flex-col">
               {children}
             </main>
-
             <Footer />
           </ClerkProvider>
         </ThemeProvider>

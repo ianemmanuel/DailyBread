@@ -1520,9 +1520,9 @@ export async function banVendor(
     * has already succeeded. A Clerk hiccup shouldn't roll that back
     * or fail the whole request.
   */
-  if (vendorUser.clerkId) {
+  if (vendorUser.externalAuthId) {
     try {
-      await ClerkVendorStateService.banUser(vendorUser.clerkId)
+      await ClerkVendorStateService.banUser(vendorUser.externalAuthId)
     } catch (err) {
       serviceLog.error({ err, vendorUserId: vendorUser.id }, "Clerk ban failed — continuing, DB ban already applied")
     }
@@ -1571,9 +1571,9 @@ export async function unbanVendor(
     data : { isBanned: false, banReason: null, bannedAt: null, isActive: true },
   })
 
-  if (vendorUser.clerkId) {
+  if (vendorUser.externalAuthId) {
     try {
-      await ClerkVendorStateService.unbanUser(vendorUser.clerkId)
+      await ClerkVendorStateService.unbanUser(vendorUser.externalAuthId)
     } catch (err) {
       serviceLog.error({ err, vendorUserId: vendorUser.id }, "Clerk unban failed — continuing, DB unban already applied")
     }

@@ -47,7 +47,7 @@ export interface AdminUserScope {
 
 export interface AdminUser {
   id : string
-  clerkUserId : string | null
+  externalAuthId: string | null
   roleId : string | null
   email: string
   firstName : string

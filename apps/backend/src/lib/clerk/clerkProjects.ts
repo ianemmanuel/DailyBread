@@ -2,6 +2,10 @@ import { env } from "@/env"
 
 export type ClerkAppType = "customer" | "vendor" | "courier" | "admin"
 
+/* Issuers arrive CANONICAL — env.ts strips any trailing slash at the boundary,
+ * because an exact-string comparison against a token's `iss` makes one extra
+ * character reject every token. See `canonicalIssuer`. */
+
 export function getClerkProjects(): Record<ClerkAppType, {
   issuer: string
   jwksUrl: string

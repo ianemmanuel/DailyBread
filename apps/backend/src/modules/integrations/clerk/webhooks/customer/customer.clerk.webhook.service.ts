@@ -91,9 +91,9 @@ async function handleCustomerUserCreated(data: ClerkUserCreatedData): Promise<vo
    */
   try {
     const consumer = await prisma.consumerAccount.upsert({
-      where : { clerkId },
+      where : { externalAuthId: clerkId },
       update: {},
-      create: { clerkId, email, fullName, phone },
+      create: { externalAuthId: clerkId, email, fullName, phone },
       select: { id: true },
     })
     hookLog.info({ consumerId: consumer.id }, "Created/confirmed consumer account")
@@ -135,7 +135,7 @@ async function adoptDeletedAccount(input: {
 }): Promise<void> {
   const existing = await prisma.consumerAccount.findUnique({
     where : { email: input.email },
-    select: { id: true, status: true, deletedAt: true, clerkId: true },
+    select: { id: true, status: true, deletedAt: true, externalAuthId: true },
   })
 
   if (!existing) {
@@ -144,7 +144,7 @@ async function adoptDeletedAccount(input: {
     throw new Error("[webhook:customer] email collision resolved to no row — retrying")
   }
 
-  if (existing.clerkId === input.clerkId) {
+  if (existing.externalAuthId === input.clerkId) {
     hookLog.info({ consumerId: existing.id }, "user.created for an account that already exists — ignoring")
     return
   }
@@ -169,7 +169,7 @@ async function adoptDeletedAccount(input: {
   await prisma.consumerAccount.update({
     where: { id: existing.id },
     data : {
-      clerkId         : input.clerkId,
+      externalAuthId  : input.clerkId,
       fullName        : input.fullName,
       phone           : input.phone,
       status          : ConsumerStatus.ACTIVE,
@@ -189,12 +189,24 @@ async function adoptDeletedAccount(input: {
 
 /*
  * Clerk is authoritative for the identity fields it owns — email, name, phone.
- * Nothing else on the row is touched: status, suspension and country are the
- * platform's own decisions and Clerk knows nothing about them.
+ * The platform's own decisions (country, and the reason behind a suspension)
+ * are never touched here.
  *
- * Deliberately does NOT revive a deleted account, and never clears a
- * suspension. An update is not a reinstatement, and letting one act as a back
- * door into a suspended account would make the suspension meaningless.
+ * ── The one status Clerk DOES get a say in ─────────────────────────────────
+ *
+ * A `banned` flag is an access decision taken in the provider's dashboard, and
+ * before this it reached nothing: Clerk revoked the sessions while our row
+ * stayed ACTIVE, so support saw a working account for someone who could not
+ * sign in, and re-enabling them later left the two disagreeing. It is mirrored
+ * onto ConsumerStatus in BOTH directions, because an unban applied there is as
+ * real a decision as the ban was.
+ *
+ * `locked` is deliberately NOT mirrored: that is Clerk's own brute-force
+ * lockout, temporary and self-clearing, and turning it into a platform
+ * suspension would strand someone who merely mistyped their password.
+ *
+ * Deliberately does NOT revive a deleted account. An update is not a
+ * resurrection.
  */
 async function handleCustomerUserUpdated(data: ClerkUserCreatedData): Promise<void> {
   const clerkId  = data.id
@@ -202,7 +214,7 @@ async function handleCustomerUserUpdated(data: ClerkUserCreatedData): Promise<vo
   if (!clerkId) return
 
   const existing = await prisma.consumerAccount.findUnique({
-    where : { clerkId },
+    where : { externalAuthId: clerkId },
     select: { id: true, status: true },
   })
 
@@ -221,10 +233,34 @@ async function handleCustomerUserUpdated(data: ClerkUserCreatedData): Promise<vo
   const fullName = extractFullName(data)
   const phone    = extractPrimaryPhone(data)
 
+  /* The provider's access decision, mapped onto ours. Only ever moves between
+   * ACTIVE and SUSPENDED — DELETED was returned above, and nothing here
+   * invents a status the platform did not already use. */
+  const banned = (data as { banned?: unknown }).banned === true
+  const statusChange =
+    banned && existing.status === ConsumerStatus.ACTIVE
+      ? {
+          status          : ConsumerStatus.SUSPENDED,
+          suspendedAt     : new Date(),
+          suspensionReason: "Suspended from the identity provider",
+        }
+      : !banned && existing.status === ConsumerStatus.SUSPENDED
+        ? { status: ConsumerStatus.ACTIVE, suspendedAt: null, suspensionReason: null }
+        : {}
+
+  if (Object.keys(statusChange).length > 0) {
+    hookLog.warn(
+      { consumerId: existing.id, banned },
+      banned
+        ? "Customer banned at the identity provider — suspending the account"
+        : "Customer unbanned at the identity provider — reinstating the account",
+    )
+  }
+
   try {
     await prisma.consumerAccount.update({
       where: { id: existing.id },
-      data : { fullName, phone, ...(rawEmail ? { email: normalizeEmail(rawEmail) } : {}) },
+      data : { fullName, phone, ...statusChange, ...(rawEmail ? { email: normalizeEmail(rawEmail) } : {}) },
     })
     hookLog.info({ consumerId: existing.id }, "Updated consumer account from Clerk")
   } catch (err) {
@@ -241,7 +277,7 @@ async function handleCustomerUserUpdated(data: ClerkUserCreatedData): Promise<vo
       )
       await prisma.consumerAccount.update({
         where: { id: existing.id },
-        data : { fullName, phone },
+        data : { fullName, phone, ...statusChange },
       })
       return
     }
@@ -263,7 +299,7 @@ async function handleCustomerUserDeleted(clerkId: string): Promise<void> {
   }
 
   const result = await prisma.consumerAccount.updateMany({
-    where: { clerkId, status: { not: ConsumerStatus.DELETED } },
+    where: { externalAuthId: clerkId, status: { not: ConsumerStatus.DELETED } },
     data : { status: ConsumerStatus.DELETED, deletedAt: new Date() },
   })
 

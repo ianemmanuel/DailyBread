@@ -149,6 +149,30 @@ export interface CityMarket {
     code: string
   }
   areas: string[]
+  /** Where to POINT A MAP when this city's location page opens, and nothing
+   *  else. See CityViewport. */
+  viewport: CityViewport
+}
+
+/**
+ * A map viewport, and **never a delivery location**.
+ *
+ * `center` is the city's stored centroid — a vertex average of its boundary,
+ * which can land outside a concave city and, in this database, outside every
+ * operating zone of a city we plainly serve. It exists so a map opens looking
+ * at the right place; the delivery point is whatever the customer then puts
+ * their pin on, and it must always be established explicitly.
+ *
+ * `bounds` is the boundary's bounding box, for fitting the initial view. It is
+ * NOT a coverage claim: a bounding box contains land outside the city, and
+ * membership is decided by point-in-polygon on the server.
+ *
+ * Both are null when the city has no boundary drawn — such a city cannot be
+ * listed to customers at all, so in practice they are always present here.
+ */
+export interface CityViewport {
+  center: { latitude: number; longitude: number } | null
+  bounds: { north: number; south: number; east: number; west: number } | null
 }
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────

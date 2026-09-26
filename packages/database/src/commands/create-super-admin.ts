@@ -11,7 +11,7 @@
  *   4. Writes a bootstrap AuditLog entry
  *   5. Sends Clerk invitation
  *   6. Updates status → invited
- *   7. User accepts → webhook fires → status: active, clerkUserId populated
+ *   7. User accepts → webhook fires → status: active, externalAuthId populated
  *
  * Usage:
  *   pnpm db:super-admin -- --email admin@dailybread.co.ke --name "Your Name"

@@ -7,7 +7,7 @@ import type { Country } from "./country"
 
 export interface VendorUser {
   id       : string
-  clerkId  : string
+  externalAuthId: string
   email    : string
   isActive : boolean
   isDeleted: boolean

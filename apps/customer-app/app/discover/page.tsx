@@ -1,128 +1,38 @@
-import type { Metadata } from "next"
-import { Suspense } from "react"
+import { redirect } from "next/navigation"
 
-import { FeedFilters } from "@/components/discovery/FeedFilters"
-import { FeedPagination } from "@/components/discovery/FeedPagination"
-import {
-  AddressUnusable, FeedError, FeedSkeleton, NeedsLocation, NoMatches, NotServiceable,
-} from "@/components/discovery/FeedStates"
-import { OutletCard } from "@/components/discovery/OutletCard"
-import { getFeed, type FeedSearchParams } from "@/lib/data/discovery"
-
-export const metadata: Metadata = {
-  title      : "Restaurants near you",
-  /* A personal, per-location page — nothing here is worth indexing, and an
-   * indexed copy would show a crawler's "where are we delivering?" state. The
-   * city pages are the SEO surface. */
-  robots     : { index: false, follow: true },
-}
+import { getStoredLocation } from "@/lib/location/server"
 
 /*
- * `/discover` — the located feed.
+ * `/discover` — a doorway, kept for links made before the routes were named
+ * properly.
  *
- * Recovered from commit 30facf5, where it was the home page. It moved because
- * `/` became the static marketing page: this route reads the location COOKIE,
- * which makes it dynamic, and keeping that out of `/` is what lets the landing
- * page stay `○` for everyone (see "Location and markets" in CLAUDE.md).
+ * The feed lives at `/city/[citySlug]/places` now: a market's name belongs in
+ * the URL, and "places" is what the page actually lists — "kitchens" collides
+ * with `VendorType` and "discover" described nothing.
  *
- * Rendered per request: the feed depends on a point, the clock (open now,
- * happy-hour windows) and live availability, and a cached copy would
- * confidently offer a closed kitchen. Reading cookies already forces this;
- * `force-dynamic` just says so out loud.
+ *   location cookie resolved to a city  →  that market's places
+ *   anything else                       →  the city directory
+ *
+ * ── The query string travels ───────────────────────────────────────────────
+ *
+ * The landing page's cuisine tiles link here with `?cuisine=<id>`, and an
+ * earlier version of this redirect dropped it — so every tile opened an
+ * unfiltered feed and looked like it had done nothing. Forwarding the params
+ * is what makes the doorway transparent rather than lossy.
  */
-export const dynamic = "force-dynamic"
-
-export default async function DiscoverPage({
+export default async function DiscoverDoorway({
   searchParams,
 }: {
-  searchParams: Promise<FeedSearchParams>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const params = await searchParams
+  const [location, params] = await Promise.all([getStoredLocation(), searchParams])
 
-  return (
-    <div className="py-6 sm:py-8">
-      {/* Streamed. The shell paints immediately while the feed resolves. The key
-          restarts the boundary whenever the query changes, so the skeleton
-          shows again for a genuinely different request. */}
-      <Suspense key={JSON.stringify(params)} fallback={<FeedLoading />}>
-        <Feed params={params} />
-      </Suspense>
-    </div>
-  )
-}
-
-async function Feed({ params }: { params: FeedSearchParams }) {
-  const state = await getFeed(params)
-
-  if (state.kind === "no-location") return <NeedsLocation />
-  if (state.kind === "address-unusable") return <AddressUnusable message={state.message} />
-  if (state.kind === "error") return <FeedError message={state.message} />
-
-  const { result, location } = state
-  const hasFilters = Boolean(
-    params.search || params.cuisine || params.openNow || params.hasOffer || params.freeDelivery,
-  )
-
-  if (!result.serviceability.isServiceable) {
-    return <NotServiceable serviceability={result.serviceability} />
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "string") query.set(key, value)
+    else if (Array.isArray(value) && value[0]) query.set(key, value[0])
   }
+  const suffix = query.size > 0 ? `?${query}` : ""
 
-  return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h1 className="heading-xl text-foreground">
-          Delivering to <span className="text-primary-text">{location.label}</span>
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {result.total === 0
-            ? "Nothing available here right now"
-            : `${result.total} ${result.total === 1 ? "restaurant" : "restaurants"} can deliver to you`}
-        </p>
-      </div>
-
-      <FeedFilters cuisines={result.availableCuisines} />
-
-      {result.outlets.length === 0 ? (
-        <NoMatches hasFilters={hasFilters} />
-      ) : (
-        <>
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {result.outlets.map((outlet, index) => (
-              <OutletCard
-                key={outlet.outletId}
-                outlet={outlet}
-                /* The first row is this page's largest contentful paint, so
-                   those images are not lazy-loaded. */
-                priority={index < 3}
-              />
-            ))}
-          </div>
-
-          <FeedPagination
-            page={result.page}
-            pageSize={result.pageSize}
-            total={result.total}
-            params={params}
-          />
-        </>
-      )}
-    </div>
-  )
-}
-
-/** Matches the resolved layout's shape so nothing jumps when it swaps in. */
-function FeedLoading() {
-  return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <div className="shimmer h-9 w-80 max-w-full rounded-lg" />
-        <div className="shimmer h-4 w-56 rounded-md" />
-      </div>
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <div className="shimmer h-11 flex-1 rounded-full" />
-        <div className="shimmer h-11 w-36 rounded-full" />
-      </div>
-      <FeedSkeleton />
-    </div>
-  )
+  redirect(location?.citySlug ? `/city/${location.citySlug}/places${suffix}` : `/city${suffix}`)
 }

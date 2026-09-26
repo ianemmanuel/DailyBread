@@ -9,6 +9,8 @@ import {
   UserButton,
 } from "@clerk/nextjs"
 
+import { CircleUser, MapPin } from "lucide-react"
+
 import { ThemeToggle } from "@/components/themes/ThemeToggle"
 import { Button } from "@/components/ui/button"
 import { Logo } from "./Logo"
@@ -61,7 +63,27 @@ export function Navbar() {
           </Show>
 
           <Show when="signed-in">
-            <UserButton />
+            {/* Clerk's own menu, with OUR destinations added to it.
+                `<UserButton.Link>` is the supported way to put an app route in
+                that dropdown — before this, `/account` existed and could only
+                be reached by typing the URL, which is the same as not existing.
+                The built-in "Manage account" (Clerk's profile modal) stays; it
+                answers a different question — email, password, devices — while
+                ours answers "where does my food go". */}
+            <UserButton>
+              <UserButton.MenuItems>
+                <UserButton.Link
+                  label="Your account"
+                  labelIcon={<CircleUser className="size-4" />}
+                  href="/account"
+                />
+                <UserButton.Link
+                  label="Delivery addresses"
+                  labelIcon={<MapPin className="size-4" />}
+                  href="/account/addresses"
+                />
+              </UserButton.MenuItems>
+            </UserButton>
           </Show>
 
           <MobileNav />

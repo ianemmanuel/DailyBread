@@ -112,8 +112,8 @@ async function handleUserCreated(data: ClerkUserCreatedData): Promise<void> {
 
   //* Happy path: invited → active
   const result = await prisma.adminUser.updateMany({
-    where: { id: adminUser.id, status: AdminUserStatus.invited, clerkUserId: null },
-    data : { clerkUserId, status: AdminUserStatus.active, isActive: true },
+    where: { id: adminUser.id, status: AdminUserStatus.invited, externalAuthId: null },
+    data : { externalAuthId: clerkUserId, status: AdminUserStatus.active, isActive: true },
   })
 
   if (result.count === 0) {
@@ -130,8 +130,8 @@ async function handleUserCreated(data: ClerkUserCreatedData): Promise<void> {
     entityType : "AdminUser",
     entityId   : adminUser.id,
     changes    : {
-      before: { status: "invited",  isActive: false, clerkUserId: null },
-      after : { status: "active",   isActive: true,  clerkUserId },
+      before: { status: "invited",  isActive: false, externalAuthId: null },
+      after : { status: "active",   isActive: true,  externalAuthId: clerkUserId },
     },
     metadata: { trigger: "clerk_webhook", event: "user.created" },
   })
@@ -150,11 +150,11 @@ async function handleUserDeleted(clerkUserId: string): Promise<void> {
 
   const result = await prisma.adminUser.updateMany({
     where: {
-      clerkUserId,
+      externalAuthId: clerkUserId,
       status: { in: [AdminUserStatus.active, AdminUserStatus.suspended] },
     },
     data: {
-      clerkUserId       : null,
+      externalAuthId    : null,
       status            : AdminUserStatus.deactivated,
       isActive          : false,
       deactivatedAt     : new Date(),

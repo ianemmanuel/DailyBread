@@ -7,19 +7,27 @@ import { logger } from "@/lib/pino/logger"
 const clerkLog = logger.child({ module: "clerk-metadata" })
 
 /*
- * Only vendor and admin have a Clerk backend client — customer and
- * courier are JWKS-verify-only by design (see env.ts). Narrowing the
- * type here means calling getClerkClient("customer") is a compile
- * error, not a "missing env var" surprise at runtime.
+ * Vendor, admin and customer have a Clerk backend client; courier stays
+ * JWKS-verify-only by design (see env.ts). Narrowing the type here means
+ * calling getClerkClient("courier") is a compile error, not a "missing env
+ * var" surprise at runtime.
+ *
+ * The CUSTOMER client was added for one reason: suspending a customer has to
+ * revoke their sessions at the provider. Verifying tokens needs only JWKS, but
+ * ACTING on an identity needs a secret key, and a suspension that leaves the
+ * person signed in until their token expires is not a suspension.
  */
-type ClientAppType = "vendor" | "admin"
+type ClientAppType = "vendor" | "admin" | "customer"
 
 const _clerkClients = new Map<ClientAppType, ReturnType<typeof createClerkClient>>()
 
 function getClerkClient(app: ClientAppType) {
   if (_clerkClients.has(app)) return _clerkClients.get(app)!
 
-  const secretKey = app === "vendor" ? env.CLERK_VENDOR_SECRET_KEY : env.CLERK_ADMIN_SECRET_KEY
+  const secretKey =
+    app === "vendor"   ? env.CLERK_VENDOR_SECRET_KEY   :
+    app === "customer" ? env.CLERK_CUSTOMER_SECRET_KEY :
+                         env.CLERK_ADMIN_SECRET_KEY
 
   const client = createClerkClient({ secretKey })
   _clerkClients.set(app, client)
@@ -151,5 +159,51 @@ export class ClerkAdminStateService {
       expiresInDays : params.expiresInDays,
       notify        : true,
     })
+  }
+}
+
+//* Customer-specific identity actions
+
+/**
+ * Acting on a CUSTOMER's identity at the provider.
+ *
+ * Postgres stays the source of truth: `ConsumerStatus` is what every request
+ * is checked against, freshly, so a suspension takes effect on the very next
+ * call whether or not this succeeds. What the provider adds is session
+ * revocation — without it a suspended customer keeps a valid token until it
+ * expires, and would keep browsing as though nothing had happened.
+ *
+ * Unlike the vendor and admin services, this one may be UNCONFIGURED: the
+ * customer secret key is optional so nobody is blocked by it. It therefore
+ * says so loudly rather than pretending to have worked.
+ */
+export class ClerkCustomerStateService {
+  private static get client() {
+    return getClerkClient("customer")
+  }
+
+  static get isConfigured(): boolean {
+    return env.CLERK_CUSTOMER_SECRET_KEY.length > 0
+  }
+
+  /** Throws with the exact cause, so a half-applied suspension is never
+   *  reported as a clean one. */
+  static assertConfigured(): void {
+    if (!this.isConfigured) {
+      throw new Error(
+        "CLERK_CUSTOMER_SECRET_KEY is not set — a customer's sessions cannot be revoked without it",
+      )
+    }
+  }
+
+  /** Bans at the provider, which also revokes every live session. */
+  static async banUser(externalAuthId: string) {
+    this.assertConfigured()
+    return this.client.users.banUser(externalAuthId)
+  }
+
+  static async unbanUser(externalAuthId: string) {
+    this.assertConfigured()
+    return this.client.users.unbanUser(externalAuthId)
   }
 }

@@ -68,7 +68,7 @@ export async function loadCustomerContext(req: Request, _res: Response, next: Ne
   }
 
   const account = await prisma.consumerAccount.findUnique({
-    where : { clerkId: customerClerkUserId },
+    where : { externalAuthId: customerClerkUserId },
     select: ACCOUNT_SELECT,
   })
 
@@ -83,7 +83,7 @@ export async function loadCustomerContext(req: Request, _res: Response, next: Ne
    * rather than bounce them back to a sign-in screen they just completed.
    */
   if (!account) {
-    authLog.warn({ clerkId: customerClerkUserId }, "No consumer account for a verified customer token")
+    authLog.warn({ externalAuthId: customerClerkUserId }, "No consumer account for a verified customer token")
     return next(new ApiError(
       HttpStatus.SERVICE_UNAVAILABLE,
       "Your account is still being set up. Try again in a moment.",
@@ -124,14 +124,14 @@ export async function loadCustomerContext(req: Request, _res: Response, next: Ne
  */
 export async function attachCustomerContext(req: Request, _res: Response, next: NextFunction) {
   try {
-    const clerkId = await resolveOptionalCustomerToken(req)
-    if (!clerkId) {
+    const subject = await resolveOptionalCustomerToken(req)
+    if (!subject) {
       ;(req as MaybeCustomerRequest).customer = null
       return next()
     }
 
     const account = await prisma.consumerAccount.findUnique({
-      where : { clerkId },
+      where : { externalAuthId: subject },
       select: ACCOUNT_SELECT,
     })
 

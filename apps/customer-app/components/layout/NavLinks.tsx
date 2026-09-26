@@ -4,21 +4,22 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ChevronRight } from "lucide-react"
 
-import { NAV_LINKS, isNavLinkActive } from "@/constants/links/nav-links"
+import { GLOBAL_NAV_LINKS, isNavLinkActive } from "@/constants/links/nav-links"
 
 /*
- * The primary links, rendered identically in the desktop bar and the mobile
- * sheet.
+ * The GLOBAL links, rendered identically in the desktop bar and the mobile
+ * sheet. A market's own sections live in MarketNav — see
+ * constants/links/nav-links.ts for why they are not here.
  *
- * A Client Component only because the active link needs the current path and
- * `usePathname` is client-only. That costs effectively nothing: next/link is
- * itself a Client Component, so any page carrying navigation has already loaded
- * the router — this adds a hook call, not a bundle.
+ * A Client Component only because the active link needs the current path. That costs effectively nothing: next/link is itself a
+ * Client Component, so any page carrying navigation has already loaded the
+ * router — this adds a hook call, not a bundle. Crucially it reads the PATH
+ * and not cookies or auth, so pages stay static.
  *
- * `aria-current="page"` is the SINGLE source of the active state. Both `.nav-link`
- * and `.nav-row` in globals.css style themselves off that attribute rather than
- * off a duplicated className, so what a screen reader announces and what a
- * sighted visitor sees can never drift apart.
+ * `aria-current="page"` is the SINGLE source of the active state. Both
+ * `.nav-link` and `.nav-row` in globals.css style themselves off that
+ * attribute rather than off a duplicated className, so what a screen reader
+ * announces and what a sighted visitor sees can never drift apart.
  */
 export function NavLinks({
   orientation = "horizontal",
@@ -33,7 +34,7 @@ export function NavLinks({
 
   return (
     <ul className={vertical ? "flex flex-col gap-1" : "flex items-center gap-8 lg:gap-10"}>
-      {NAV_LINKS.map(({ href, label, icon: Icon }) => (
+      {GLOBAL_NAV_LINKS.map(({ href, label, icon: Icon }) => (
         <li key={href}>
           <Link
             href={href}
