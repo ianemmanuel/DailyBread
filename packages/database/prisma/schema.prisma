@@ -402,6 +402,7 @@ model City {
   deliveryZones  DeliveryZone[]
   adminScopes    AdminUserScope[]
   heroPromotions HeroPromotion[]
+  consumerMarkets ConsumerMarket[]
 
   @@unique([countryId, name])
   @@index([countryId])
@@ -2709,6 +2710,7 @@ model ConsumerAccount {
   updatedAt        DateTime       @updatedAt
 
   addresses ConsumerAddress[]
+  markets   ConsumerMarket[]
 
   @@index([externalAuthId])
   @@index([email])
@@ -2742,14 +2744,49 @@ model ConsumerAddress {
   //* does not represent one.
   latitude          Float
   longitude         Float
-  isDefault         Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   consumer ConsumerAccount @relation(fields: [consumerAccountId], references: [id], onDelete: Cascade)
+  /// The markets that use this address as their default. Deleting the address
+  /// clears those pointers (SetNull) rather than failing.
+  defaultForMarkets ConsumerMarket[]
 
   @@index([consumerAccountId])
-  @@index([consumerAccountId, isDefault])
+}
+
+/// A city the customer has chosen to order in — "Your cities".
+///
+/// The CITY is stored here, and nowhere on the address: an address's city is
+/// re-resolved from its pin on every read, because a boundary redraw would make
+/// a stored one wrong with nothing to refresh it. A market row records a
+/// CHOICE the customer made (they picked this city, or saved an address in
+/// it), which a boundary redraw cannot invalidate.
+///
+/// `defaultAddressId` is this city's default delivery address. It is a CLAIM,
+/// validated on read: honoured only while that address still resolves into
+/// this city, otherwise the city falls back to its most recent address.
+///
+/// `isDefault` marks the customer's default CITY — where signing in lands.
+/// At most one per customer, enforced by a partial unique index
+/// (ConsumerMarket_one_default_per_customer) that Prisma cannot express.
+model ConsumerMarket {
+  id                String   @id @default(uuid())
+  consumerAccountId String
+  cityId            String
+  isDefault         Boolean  @default(false)
+  defaultAddressId  String?
+  lastSelectedAt    DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  consumer       ConsumerAccount  @relation(fields: [consumerAccountId], references: [id], onDelete: Cascade)
+  city           City             @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  defaultAddress ConsumerAddress? @relation(fields: [defaultAddressId], references: [id], onDelete: SetNull)
+
+  @@unique([consumerAccountId, cityId])
+  @@index([cityId])
+  @@index([defaultAddressId])
 }
 
 //* ================ENUMS=====================

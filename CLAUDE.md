@@ -29,7 +29,7 @@ Nothing a user uploaded is ever served byte for byte. `lib/storage/publicMedia.s
 is the only writer to the public bucket and `publicUrl()` is the only place a key
 becomes a URL.
 
-Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**680 tests**), and the smoke scripts in `apps/backend/scripts/smoke/` (`pnpm dlx tsx --env-file=.env scripts/smoke/<name>.ts`). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
+Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**695 tests**), and the smoke scripts in `apps/backend/scripts/smoke/` (`pnpm dlx tsx --env-file=.env scripts/smoke/<name>.ts`). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
 
 ---
 
@@ -76,6 +76,8 @@ Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**680 test
 12. **Client-only state that changes the TREE SHAPE is a hydration bug, not a styling one.** The ERP sidebar stored its collapsed state in `localStorage`, and `SidebarNav` renders a `<Popover>` + `<Tooltip>` per section *only when collapsed* — both call Radix's `useId`. The server always rendered the expanded tree, the client switched after mount, and every generated id downstream shifted: it surfaced as `aria-controls` mismatching on the **mobile sheet's trigger**, a component with nothing to do with the sidebar's width. Fixed by moving the preference to a **cookie**, which travels with the request so the server renders what the client will hydrate (and which also killed a real flash of an expanded sidebar on every load). Rule: if a persisted preference changes *which components render*, it must reach the server — `localStorage` can only carry preferences that change CSS.
 13. **A stale `.next/dev/types` produces syntax errors in files you did not write.** `Unterminated template literal` / `Declaration or statement expected` pointing into `.next/dev/types/{routes.d.ts,validator.ts}` is a corrupt cache, not a real error: `rm -rf .next && next typegen`. Do not go looking for the bug in your own code.
 15. **A trailing slash on a Clerk ISSUER rejects every token, and says only "Unauthorized".** `verifyClerkJwt` matches the token's `iss` claim against the configured issuer by EXACT STRING, so `https://x.clerk.accounts.dev/` and `https://x.clerk.accounts.dev` are different issuers. `CLERK_CUSTOMER_ISSUER` was pasted with the slash; every customer token failed as "Untrusted Clerk issuer" and surfaced in the browser as a bare 401 on the first authenticated call, with nothing pointing at config. **The webhook working proves nothing about this** — webhooks are verified by svix secret and never touch the issuer. `canonicalIssuer()` in **env.ts** now strips trailing slashes as the value is parsed (unit-tested), so the paste is tolerated and the rest of the app only ever sees a canonical issuer — the same place, and the same reasoning, as the `R2_PUBLIC_ENDPOINT` guard. The comparison in `verifyClerkJwt` stays an exact string match on purpose. To check an instance's true issuer: `curl https://<domain>/.well-known/openid-configuration`, or base64-decode the publishable key (`pk_test_<base64 domain>$`) — the domain is in the key.
+
+16. **A cookie value encoded twice is unreadable in the browser, and nothing errors.** Next's `cookies().set` / `res.cookies.set` percent-encode the value and the server-side readers decode it; our serialisers ALSO ran `encodeURIComponent`, so the stored value was double-encoded. The server tolerated it (it decoded twice), but `document.cookie` sees the raw value, so every browser-side reader parsed `%7B…` as JSON, failed, and silently read "nothing" — the old market bar could never show a selected address for exactly this reason. Serialise as **plain JSON**; `readJson` in `lib/location/cookie.ts` parses both forms. Assert a round trip through `encodeURIComponent` (as `scripts/check-market-rules.ts` does) whenever a cookie is read on both sides.
 
 14. **`next build` run over a live `next dev` breaks the dev server — every route 404s.** They share the app's `.next` folder; the build rewrites it and the running dev server loses its compiled `server/` output from under it. It presented as "`/` is missing" while `app/page.tsx` was untouched — the tell is that plain static routes like `/meals` 404 too. Fix: stop the dev server, `rm -rf apps/<app>/.next`, restart. **Before building to verify anything, check the app's port is free** (`netstat -ano | grep LISTENING | grep :3003`); if it is not, verify with `tsc` only, or ask.
 
@@ -742,6 +744,27 @@ Clerk navigates back after sign-in; `fallbackRedirectUrl` only applies when
 there is no `redirect_url`. Our `/sign-in` renders a plain `<SignIn />` with no
 `forceRedirectUrl`, which would override it.
 
+**SIGNING IN LANDS THE CUSTOMER IN THEIR OWN MARKET.** `/continue` is a
+ROUTE HANDLER (`app/continue/route.ts`), so it can set the device's
+`db_market` cookie on the redirect. Order: suspended → `/account`; signed in →
+the backend's `defaultCitySlug` (explicit default city, else most recently
+selected, else newest address's city); otherwise the market this DEVICE was
+last in; otherwise `/city`. Every destination is checked against the operating
+markets. `pending` and a failed account read fall through to the device's
+market — a successful sign-in never ends on an error page.
+> **Where each sign-in button points.** The navbar and mobile sheet use
+> `useAfterAuthUrl()`: inside a market (`/city/<slug>/…`) they return to THAT
+> page — signing in there is about that city, and its per-city default address
+> applies the moment they are back; anywhere else they go to `/continue`.
+> `<SignIn>`/`<SignUp>` pages keep `fallbackRedirectUrl="/continue"`, never
+> `forceRedirectUrl`, so the in-page auth walls (`SaveAddressPanel`, later
+> checkout) still return to the task via Clerk's own `redirect_url`.
+>
+> **It never writes the DELIVERY cookie.** Which address a market delivers to
+> is resolved on the market page from the account's per-city default; copying
+> it into this device's choice would erase the difference between the two and
+> silently re-aim a borrowed browser.
+
 **THE ACCOUNT SEAM: `/account` is the first protected route**, listed in
 `proxy.ts` (Next 16's Proxy — the renamed `middleware`, which must sit at the
 APP root beside `app/`). `auth.protect()` redirects with a `redirect_url`, so
@@ -773,20 +796,21 @@ links to a market instead.
 > nothing to attach to.
 
 **SELECTING an address and DEFAULTING it are different verbs**, with different
-endpoints, and a list that blurs them is a list that quietly rewrites a durable
-preference to answer "where does tonight's order go".
+endpoints, and both are PER CITY. A picker that blurs them quietly rewrites a
+durable preference to answer "where does tonight's order go".
 
 | | | |
 |---|---|---|
-| Deliver here | `POST /api/location/address` | per DEVICE, writes the cookie's `addressId` |
-| Make default | `PATCH /api/account/addresses/:id/default` | durable, on the row |
+| Deliver here | `POST /api/location/address` | per DEVICE, per MARKET — the delivery cookie's entry for the address's city |
+| Browse / deliver | `POST /api/location/browse` | per DEVICE, per MARKET — a view flag; the target is kept |
+| Make default for \<city\> | `PATCH /api/account/addresses/:id/default` | durable — `ConsumerMarket.defaultAddressId` for the city the pin resolves into |
+| Make default city | `POST /api/markets/select {isDefault:true}` | durable — `ConsumerMarket.isDefault`, where signing in lands |
 
-> **The cookie is written from the SERVER's own read.** That handler fetches
-> the caller's address book with their token and finds the row — an id that is
-> not theirs simply is not in the list and 404s. Every field stored (label,
-> coordinates, city) comes from the backend's answer, never from the request,
-> and no serviceability verdict is stored. That is what makes `addressId`
-> safe to treat as authoritative later.
+> **Every cookie write is from the SERVER's own read.** The address handler
+> finds the row in the caller's own book with their token (another person's id
+> simply is not there) and keys the choice by the city the BACKEND resolved.
+> A pin is keyed by the city its serviceability resolved into, never by the
+> page it was dropped on.
 
 **Customer auth is route-based**, on `/sign-in/[[...sign-in]]` and `/sign-up/[[...sign-up]]` — the optional catch-all is required, because Clerk routes its own multi-step flow (second factor, email code, reset) onto child paths. `<SignInButton>` / `<SignUpButton>` use their default **redirect** mode, and `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `_SIGN_UP_URL` point at those pages. Those two routes build as `ƒ`; other pages stay `○`.
   > This supersedes an earlier modal-only decision, on explicit direction. Switching back is `mode="modal"` on the buttons — and then the mobile sheet must close before the modal opens, because the sheet is a Radix dialog that blocks everything outside it.
@@ -826,15 +850,25 @@ preference to answer "where does tonight's order go".
 
 Everything through the **customer backend module + customer frontend scaffold** is shipped and verified. Latest migration: `20260913120000_drop_outlet_cuisine_and_repair_city_timezones`.
 
-Verified green as of this pass: `pnpm check-types` 5/5, backend `vitest run`
-680/680, five smoke tests (40/40 promotions, 16/16 the real-R2 hero image,
-**35/35 markets + areas + point resolution + city viewport**, 37/37 cuisine
+Verified green as of the market-navigation pass: `pnpm check-types` 5/5,
+backend `vitest run` **695/695**, `customer.address` smoke **68/68** (per-city
+defaults, your cities, the controller mapper), `scripts/check-market-rules.ts`
+in customer-app **19/19**, and a curl walk of every market route against
+`next dev` (browse → pin → browse → deliver → unlaunched area → doorways →
+`/continue`). **`next build` was NOT run in that pass** (a dev server held
+:3003) and signed-in flows were verified by smoke, not in a browser.
+Earlier: backend `vitest run`
+**686/686**, seven smoke tests (40/40 promotions, 16/16 the real-R2 hero image,
+**35/35 markets + areas + point resolution + city viewport**, 39/39 cuisine
 imagery/create/pagination incl. a real R2 round trip and the prefix guard,
-**51/51 the saved delivery-address contract**), and `next build` clean in `customer-app`
-and `admin-dashboard`. The prerendered HTML was checked directly for the
+**51/51 the saved delivery-address contract**, 14/14 customer moderation,
+**23/23 city-wide browsing**), and `next build` clean in `customer-app`.
+**Walked live** against `next start` + the real backend: all four market modes
+(delivery, browse-no-location, browse-chosen, other-city cookie), the
+storefront, `/continue`, `/discover` and `/account`'s auth redirect. The prerendered HTML was checked directly for the
 customer-facing area names, for the ABSENCE of every `ZoneLevel` string and of
 the operational zone names, and for the live cuisine tiles.
-> Latest migration: `20260923090000_consumer_address_requires_pin`.
+> Latest migration: `20260926090100_drop_consumer_address_is_default`.
 > **The customer journey is `/` → `/city` → a market → a point → the feed.**
 > `/` asks for nothing and carries no invented marketplace data; discovery is
 > city-scoped; navigation is contextual and path-driven; there is ONE location
@@ -975,7 +1009,7 @@ than no eyebrow. The fallback hero's "20% off your first meal plan" and
 there are no customers yet (principle 11).
 
 **The hero is LIVE on both `/` and `/city/[citySlug]`.** `/` is still `○`
-static and `/city/nairobi-ke` builds as `●` SSG, both on a 60s revalidate —
+static (the city page has since become `ƒ` — see *Market scope*), both on a 60s revalidate —
 verified by building and reading the prerendered HTML, not by inspection: the
 published promotion's copy appears in both, the city page carries its own
 `We deliver in Nairobi` band, and the invented placeholder figures appear in
@@ -996,29 +1030,119 @@ landing page's ordinary default.
 > whether the next section is a second table or a `section` discriminator on a
 > shared one; do NOT default to copying the module.
 
-**The feed is built and lives at `/city/[citySlug]/discover`** —
-`lib/data/discovery.ts` (`getFeed`, returning a
-`no-location | ok | address-unusable | error` STATE), `components/discovery/*`.
-Verified against the real backend: no cookie → "Where in Nairobi are we
-delivering?" with a link to that market's location page; a Westlands point →
-Manu's Kitchen; `/discover` with no cookie → `/city`, with one → that market's
-feed.
->
-> **Cuisine tiles link with the cuisine ID, not the slug.** The feed forwards
-> `?cuisine=` to the backend as `cuisineId`; a slug there silently matches
-> nothing, so every tile would have opened an empty feed.
->
-> `robots: noindex` — the feed is per-location, and an indexed copy would be a
-> crawler's "where are we delivering?" state. The city pages are the SEO surface.
+### Market scope: city, delivery point, browse — and the customer's cities
 
-**Next:** the **storefront** — `/store/[outletId]`, which every feed card links
-to and which currently 404s. Recover from `30facf5`
-(`app/store/[outletId]/*`, `components/storefront/*`, and the cart it opens:
-`components/cart/*`, `lib/cart/*`, `app/api/cart/price`). The imports and the
-arbitrary `text-[var(--x)]` forms need the same adaptation the feed got.
-> The city-scoped browse feed (outlets WITHOUT a point) stays **deferred**: the
-> city page sends you to the feed, and the feed asks for a point when it needs
-> one.
+**THREE THINGS, THREE HOMES.** Collapsing any two is the bug this design
+exists to prevent.
+
+| | Where it lives | Decides |
+|---|---|---|
+| marketplace city | the URL, `/city/[slug]` | which market you are in. Never a location |
+| delivery choice | cookie `db_delivery`, **one entry per market** | deliver to an address / a pin, or browse — on THIS device |
+| customer's cities + defaults | `ConsumerMarket` (backend) | your cities, the default city, each city's default address — durable, every device |
+
+**`db_delivery` is PER MARKET** (`lib/location/cookie.ts`):
+`{ v: 2, markets: { "<slug>": { mode: "deliver" | "browse", target, at } } }`.
+A choice belongs to a place, so switching city needs no rule at all — Berlin
+has no entry, so Berlin browses, and Nairobi's choice is still there on the way
+back. **Browse keeps the target**, so "Deliver to Home" is one click away again;
+browsing never deletes, never changes a default, never touches another market.
+An address target is its id ONLY (no coordinates, no label): it is resolved
+against the caller's book on every request, so a signed-out visitor or the next
+person on the browser sees nothing of it. Capped at 12 markets, oldest dropped.
+`db_market` is the market this device was last in — the navbar chip,
+`/continue` and the doorways.
+> The pre-v2 single-location cookie (`db_location`, `browseCitySlug`) is gone;
+> v1 values simply read as "nothing chosen".
+
+**`resolveMarketChoice` (`lib/market/resolve.ts`) IS the rule, and it is pure:**
+this device's choice for the market → else the CITY's default address → else
+browse. A remembered address that is no longer in this city's book (deleted,
+pin moved, signed out) falls through to the default rather than failing, and
+the page names the address it actually used — "· your Nairobi default".
+
+**`getMarketScope` (`lib/market/context.ts`) is the ONE per-request answer**,
+`cache()`d, shared by the market bar and every section on the page:
+
+| scope | when | data |
+|---|---|---|
+| `delivery` | a target whose point is SERVICEABLE and in this city | narrowed — backend applies city → the outlet's own zone → the outlet's radius |
+| `unavailable` | a target we cannot deliver to (area not launched, paused, now in another city) | CITY-WIDE, with "We can't deliver to Home — …" said once in the banner. City inventory is never hidden because delivery is unavailable |
+| `browse` | chosen, or nothing to deliver to | CITY-WIDE, no distance/ETA claims |
+
+> An address's verdict comes from the session (resolved in the same request);
+> only a pin costs a serviceability call. **Zone availability and the outlet's
+> radius are separate facts**, and the frontend decides neither.
+
+**EVERY MARKET ROUTE IS DYNAMIC, deliberately** (explicit direction: the city
+page itself narrows once an address applies). The market LAYOUT reads the
+cookie and the session, so the bar is server-rendered from the same scope as
+the page — the old browser-side bar could never see a per-city default and
+went stale after its own changes. Crawlers carry no cookie and get the
+city-wide page, i.e. the SEO content; the anonymous reads underneath stay
+fetch-cached. `/`, `/about` and `/city` stay static. The way back to a static
+shell, if ever needed, is Partial Prerendering — never client-fetching the
+scope.
+
+**THE SECTIONS ARE WRITTEN ONCE** (`components/market/MarketSections.tsx`):
+`PlacesRow`, `MealsRow`, `MealPlansRow`, `OffersRow`, `CuisinesRow`. Each takes
+the scope, titles itself for the mode ("Places that deliver to Home" /
+"Places in Nairobi"), distinguishes failed / empty / not built yet, offers
+"Browse all of <city>" instead of a dead end when delivering, and links to its
+focused page. The city page and `/discover` compose them; they do not branch.
+
+| route | what |
+|---|---|
+| `/city/[slug]` | the introduction + SEO page: hero, mode strip, places, meals, plans, offers, catalogue tiles, areas, editorial |
+| `/city/[slug]/discover` | canonical exploration: mode banner, search + cuisine + toggles (sort only when delivering) applied to every row |
+| `/places`, `/offers` | the full live lists (`PlacesList`; offers = places with `hasOffer` pinned) |
+| `/meals`, `/meal-plans` | the full lists — SAMPLE until the reads exist |
+
+> **"Offers", not "discounts"** in anything a customer reads — `Discount` is the
+> schema's word (the Places-not-Outlets rule).
+>
+> **In browse mode the SORT control is absent, not ignored** — every ordering
+> is distance- or ETA-derived. `freeDelivery` is offered in both modes (it is
+> the outlet's configured fee); `maxDeliveryMinutes` in neither.
+>
+> **Cuisine tiles link with the cuisine ID, not the slug** — the loader forwards
+> `?cuisine=` as `cuisineId`. `robots: noindex` on every market page except the
+> city page and meal plans, which are the SEO surfaces.
+
+**SAMPLE DATA: allowed for meals and meal plans, and fenced** (explicit
+direction, superseding "every row is real" for these two). Rules:
+- Only `lib/data/market/sample/` holds fixtures, and only `meals.ts` /
+  `meal-plans.ts` import it. Each loader is the ONE function to change when the
+  backend read lands; its comment names the endpoint. The shapes in
+  `lib/data/market/types.ts` are the contract that read must return.
+- **Off in production builds** (`SAMPLE_DATA_ENABLED`; `MARKET_SAMPLE_DATA=1`
+  forces it on for a demo). Off, the loaders return `not-available` and the
+  sections say the listing is coming — no invented inventory reaches a real
+  customer.
+- Every section rendering sample data shows the `SampleBadge`; the kitchens
+  are named "(sample)" and carry no outlet id, so no card links anywhere and no
+  real vendor is shown a menu they did not write.
+- The sample adapter SIMULATES delivery scoping with a fixed `reaches` flag —
+  it never computes geography. Places, offers and cuisines are LIVE.
+
+**THE STOREFRONT IS BUILT, AND IT IS READ-ONLY ON PURPOSE.**
+`/store/[outletId]` + `lib/data/storefront.ts` + `components/storefront/*`,
+recovered from `30facf5` per the recover-don't-rewrite rule. The CART was
+deliberately left out of the recovery (`components/cart/*`, `lib/cart/*`,
+`app/api/cart/price`, and `ItemSheet`): there is no `Order` model, so an "Add
+to cart" would price a meal with nowhere to send it. The menu is the honest
+half and it is the half that makes every card in the app lead somewhere real —
+a whole storefront currently ships zero JavaScript. `MenuItemCard` goes back to
+`"use client"` when orders land.
+> **The route is FLAT, not `/city/[slug]/places/[outletId]`.** An outlet id
+> carries no city, so nothing on that page could verify the slug names the
+> market the kitchen is actually in — a mismatched pair would render a
+> storefront under the wrong market's name, which is the "the URL is not the
+> location" mistake the whole geography model exists to prevent. The hero's
+> back link goes through the `/discover` DOORWAY, which resolves the
+> customer's OWN market rather than one inferred from a link they were sent.
+> `robots: noindex` — live prices and availability, reached without a
+> location.
 
 **VENDOR-CREATED CATEGORIES ARE REFUSED** (explicit direction, after analysis).
 A controlled vocabulary is what filters, facets and analytics run on — the same
@@ -1037,10 +1161,19 @@ landing page), `dark-theme.jpg` (the dark palette's source — near-neutral
 grounds, vivid orange) and `mobile-dark-theme.jpg`. Retuning the dark theme is
 editing the `.dark` block in `globals.css` — Clerk follows automatically.
 
-**The footer is built and shipped.** `Footer.tsx` + `constants/footer-links.ts`,
-a Server Component on `--surface-subtle` so it ends the page rather than running
-on from the page ground above it. **Every href is `"#"`** until those pages exist; replace
-them group by group in the data file.
+**The footer is built and shipped.** `Footer.tsx` +
+`constants/links/footer-links.ts`, a Server Component on `--surface-subtle` so
+it ends the page rather than running on from the page ground above it.
+**EVERY HREF IN IT GOES SOMEWHERE.** It held fifteen links to `"#"`, which
+reads as a finished footer and behaves as a broken one — a customer clicks
+"Track an order", nothing happens, and the conclusion they draw is about the
+platform. Groups now SHRINK rather than filling with placeholders, a column
+that would be empty is gone, and the legal row and the social row are empty
+arrays the component drops entirely. Add a link back the moment its page
+lands; nothing in `Footer.tsx` changes either way.
+> The social icons' `icon` is a NAME resolved to a component inside
+> `Footer.tsx` — the data file is imported by a Server Component and only
+> JSON-serializable values may cross that boundary (bug class #5).
 
 `next dev` (Next 16) writes `AGENTS.md` and a one-line `CLAUDE.md` into each app
 directory and re-creates them if deleted. They are framework notes, not project
@@ -1183,33 +1316,33 @@ and the two are allowed to differ. The three concepts stay separate on purpose:
 > a home-market hint** adopted from the FIRST address and never overwritten —
 > it must never become delivery authority, and nothing filters on it.
 
-**A SAVED DEFAULT IS A LOCATION; AN EMPTY COOKIE IS NOT THE SAME THING.**
-`getFeed` falls back to the signed-in customer's DEFAULT address when this
-device has selected nothing. Before this, `defaultAddressId` was read in three
-places, all of them `/account*`, all of them only to draw a "Default" badge —
-so someone who saved "Home" months ago and opened the site on a laptop was
-asked "where are we delivering?" as though they were a stranger. A durable
-preference that changes nothing outside the page that sets it is not a
-preference.
-> The account read happens **only on that path** — there is no cookie, so there
-> is nothing cheaper to try, and a signed-out visitor never pays for it.
-> The fallback is **not written back to the cookie**: a render cannot set one,
-> and quietly promoting a default into a per-device selection would erase the
-> distinction the two exist to keep. Choosing explicitly still writes it.
-> It is **labelled** — "· your default address" — because a feed anchored
-> somewhere the customer did not choose here and now must say so, and a default
-> that cannot be used returns `no-location` rather than `address-unusable`:
-> they selected nothing, so accusing them of picking a broken address is wrong.
+**DEFAULTS ARE PER CITY, AND "YOUR CITIES" IS STORED** (`ConsumerMarket`,
+migration `20260926090000_consumer_markets`; `ConsumerAddress.isDefault` was
+dropped by `…090100`). A customer has a default address in Nairobi AND one in
+Mombasa, and a default CITY. The rule is the pure `resolveCustomerMarkets`
+(`customer.markets.ts`, unit-tested):
+- a city's default address = the stored choice while that address still
+  resolves into the city, else the city's NEWEST address — a city with
+  addresses always has one;
+- the default city = the explicit choice, else the most recently SELECTED city,
+  else the newest address's city. Selecting a city never makes it the default;
+- a city that stopped operating is dropped from the list entirely.
+> The CITY is stored on the market row and never on the address: a market row
+> records a CHOICE, which a boundary redraw cannot invalidate, while an
+> address's city is re-resolved from its pin on every read. A stored default
+> address is therefore a claim, checked on read.
+>
+> Saving an address upserts that city's row and makes it the city default if it
+> has none. Deleting clears the pointer (FK `SetNull`) and the newest remaining
+> address takes over. A city is recorded as "yours" when the customer ENTERS it
+> (`RememberMarket` in the market layout, once per switch, best-effort) or saves
+> an address there. A cap on the number of cities is planned, not built.
 
-**A SELECTED ADDRESS IS AUTHORITATIVE, or the request fails.** When
-`addressId` is sent, its coordinates are NOT sent with it: the backend resolves
-the point from the row after checking it belongs to the caller. The frontend
-used to retry with the cookie's raw coordinates when that failed — so the
-header said "Delivering to Home" while the feed was ranked around somewhere
-else entirely, and every fee and ETA on screen was computed for a place the
-customer had not chosen. That fallback is gone: `getFeed` returns
-`address-unusable`, which asks for a delivery address instead. **A wrong answer
-presented as the right one is worse than no answer.**
+**A SELECTED ADDRESS IS AUTHORITATIVE.** When an address is the target, only
+its `addressId` is sent; the backend resolves the point from the row after
+checking it belongs to the caller. Coordinates from anywhere else are never
+substituted for it — a label saying "Home" over data ranked around somewhere
+else is worse than no answer.
 
 **Country readiness gates POINT RESOLUTION, not just the city list.**
 `getOperatingCities` filters on `country.readyForCustomerOperations`, so a
@@ -1247,11 +1380,15 @@ step asks for exactly one thing:
 | `/` | `○` static | the brand, and a way into a market. Asks for NOTHING — no location prompt, no account, no cookie |
 | `/about` | `○` static, 1h | what DailyBread is, globally, including what a meal plan IS. Replaced the global `/meal-plans` in the navbar |
 | `/city` | `○` static, 1h | the market directory, straight from `/geo/markets`. Cities grouped under their country — **country is a heading, never a link**, because you cannot order from a country. No `/country/[slug]`, and adding one would invent a marketplace that does not exist |
-| `/city/[citySlug]` | `●` SSG + ISR | the market's ENTRY POINT. CITY/COUNTRY promotion, named areas, this market's cuisines, and the two actions there are: browse, or set a location. The SEO surface |
-| `/city/[citySlug]/places` | `ƒ` dynamic | the places you can order from, INSIDE a market |
-| `/city/[citySlug]/meal-plans` | `●` SSG + ISR | meal plans, in this market |
-| `/city/[citySlug]/location` | `●` SSG + ISR | the delivery-point picker. A PAGE, not a sheet — a map is the whole task, it survives a refresh, and every empty state links to it |
-| `/discover`, `/meal-plans` | `ƒ` | doorways, kept for old links: cookie has a city → that market's page, otherwise `/city`. They resolve nothing themselves, and they **forward the query string** — the landing page's cuisine tiles arrive with `?cuisine=`, and dropping it opened an unfiltered feed that looked like the tile had done nothing |
+| `/city/[citySlug]` | `ƒ` | the market's introduction: CITY/COUNTRY promotion, then every section in the market's scope (see *Market scope*). The SEO surface — crawlers get the city-wide version |
+| `/city/[citySlug]/discover` | `ƒ` | canonical exploration — filters over a row of each thing, each with a way to see the rest |
+| `/city/[citySlug]/places` | `ƒ` dynamic | the full list of places, filtered, sorted and paged |
+| `/city/[citySlug]/meals` · `/offers` | `ƒ` | all meals (sample) · every place running an offer (live) |
+| `/city/[citySlug]/meal-plans` | `ƒ` | meal plans in this market (sample) + how plans work |
+| `/city/[citySlug]/location` | `ƒ` | the delivery-point picker; seeds the map with this market's anonymous pin. A PAGE, not a sheet — a map is the whole task, it survives a refresh, and every empty state links to it |
+| `/store/[outletId]` | `ƒ` | one storefront: the kitchen, its menu, its hours. Read-only until orders exist |
+| `/continue` | route handler | where sign-in lands when not returning to a market page. Default city → device's last market → `/city` |
+| `/discover`, `/meal-plans` | `ƒ` | doorways (`lib/market/doorway.ts`): device's last market → signed-in default city → `/city`. `/discover` **forwards the query string** — the landing page's cuisine tiles arrive with `?cuisine=` |
 
 > **`/` NEVER ASKS FOR A LOCATION.** The picker used to sit in the hero, so the
 > landing page's primary action was a geolocation prompt fired at someone who
@@ -1261,39 +1398,47 @@ step asks for exactly one thing:
 > build output, not by inspection** — the chunks containing `getCurrentPosition`
 > are not referenced by `/`'s HTML. Keep it that way.
 
-**Discovery is CITY-SCOPED, and the slug is still not a location.** The feed is
-resolved from the point in the cookie exactly as before; the slug decides which
-market page you are in, which location page the empty states link to, and what
-the heading says. When the resolved point is in a different city, `DeliveringTo`
-**says so and offers the switch** — the URL is never rewritten to match the
-point, and the point is never rewritten to match the URL. `FeedPagination` takes
-its `basePath` for the same reason a hard-coded `/discover` was wrong: paging
-must not walk someone out of the market they are browsing.
-
-**NAVIGATION IS TWO BARS, AND THE SPLIT IS THE SCOPE RULE.**
+**NAVIGATION IS TWO BARS, AND THE SPLIT IS THE SCOPE RULE.** The global bar
+changes CITY; the market bar changes WHERE IN THAT CITY. Neither does the
+other's job.
 
 | | | |
 |---|---|---|
-| global navbar | root layout, every route | brand · Our cities · About · theme · auth |
-| **market bar** | `app/city/[citySlug]/layout.tsx`, market routes only | the city NAME · Overview · Places · Meal plans · the delivery-location chip |
+| global navbar | root layout, every route | brand · **`CityPicker`** · Our cities · About · theme · auth |
+| **market bar** | `app/city/[citySlug]/layout.tsx` | city name + country · Overview · Discover · Meals · Meal plans · Places · Offers · **`DeliveryPicker`** |
 
-Anything that is a property of a MARKET — kitchens, meal plans, outlets, the
-delivery location — belongs to the market bar and appears nowhere else. From
-`/` those links could only go nowhere useful or silently pick a city for the
-customer. Anything above a market (`/`, `/city`, `/about`) is global and says
-nothing about one.
+| picker | lists | does |
+|---|---|---|
+| `CityPicker` | "Your cities" (backend order; default city first; each row says in words "Default city", "You're here", or both) then "All cities". Signed out: the device's last city as "Recently visited" | **navigates only**; carries no location. OUTSIDE a market it splits into **[★ Nairobi →][▾]** — the left half links straight to the HOME market (`resolveHomeMarket` in `lib/market/home.ts`: the account's default city, else the device's last market; the same answer `/continue` lands on, served by `/api/markets/home`), so every global page is one click from your city while `/` stays global |
+| `DeliveryPicker` | your addresses resolved INTO THIS CITY (city default marked), an anonymous pin, "Browse all of <city>", "Add an address", sign-in / manage | writes through route handlers, then `router.refresh()`; props come from the server scope, so it cannot disagree with the page |
 
-> **The city NAME is why the market bar is a layout.** The global navbar lives
-> in the ROOT layout, which renders for every route and therefore cannot know a
-> city's name without a client fetch (a waterfall in the header on every page)
-> or route params it does not have. Deriving from the path gives a SLUG, and
-> "nairobi-ke" is not what a customer should read. A layout on the `[citySlug]`
-> segment has it for free: a Server Component with the param, a cached
-> `getCityDetail` already read by the pages below it. The bar is in the HTML
-> with the real name and **no client fetch anywhere** — `MarketNav` is `"use
-> client"` only for `usePathname`, which is a hook call, not a bundle.
-> Confirmed in the prerendered HTML: `/` carries "Our cities"/"About" only, and
-> `/city/nairobi-ke` additionally carries the `Nairobi marketplace` bar.
+> `CityPicker` loads on OPEN (and reloads each open — "Your cities" changes as
+> you move) and reads `db_market` after mount; only TEXT changes, never the
+> tree (bug class #12). It shows a `CommandInput` only at 8+ cities.
+>
+> **On phones the delivery control shares the city's row** and the tabs get
+> their own swipe row: a Radix popover inside the mobile Sheet would open in a
+> portal the sheet blocks. The city chip stays in the navbar at every width.
+>
+> Icons for the market tabs are resolved inside the client `MarketTabs`, never
+> passed from the server bar (bug class #5).
+>
+> **"Delivering to" is GREEN** (`success`), in the bar and in the page banner:
+> it is the one state that decides where food goes, so it should be seen at a
+> glance and a wrong address caught before an order. The green carries the
+> tint, border and a solid icon disc; the WORDS stay `foreground`, because
+> `success` on the light page is ~3.3:1 and fails AA as small text. Browsing is
+> neutral, "can't deliver here" is `warning`.
+
+**`/` HAS A WAY BACK, AND STAYS GLOBAL.** `ContinueToCity` (under the hero) is a
+compact photographic strip — "Continue to Nairobi" — shown only once
+`/api/markets/home` names a home market (default city, else this device's last
+market). A client leaf: `/` stays `○`, a first-time visitor sees nothing (no
+empty slot), and it shares one memoised request with the navbar chip
+(`lib/market/home-client.ts`). City pictures come from `cityImage()` in
+`lib/data/city-image.ts` — a single vetted placeholder today (Pexels 29069329,
+empty alt because it is generic); per-city WebP from the public bucket replaces
+that function body and nothing else.
 
 **THEY ARE "PLACES", NOT KITCHENS, RESTAURANTS OR OUTLETS.** The label a
 customer reads for a sellable vendor location is **Places**, and the route is
@@ -1309,12 +1454,13 @@ customer reads for a sellable vendor location is **Places**, and the route is
 - **Places** is true for every vendor type and reads naturally: "12 places
   deliver to Westlands".
 
-> There is **no `/discover` page**, deliberately. "Discover" is not a
-> destination, it is searching across meals, places and cuisines — and a page
-> built today could only show cuisine tiles the city page already has. The nav
-> grows by adding things you can BROWSE (Places, then Meals), with search
-> cutting across them. A summary page earns its place once those reads exist,
-> not before.
+> **There is no GLOBAL `/discover` page** — only `/city/[slug]/discover`, and
+> the bare route is a doorway. Outside a market, "discover" could resolve
+> nothing and could only show what a location-free page is allowed to show,
+> which is nothing about supply. This supersedes the earlier "no discover page
+> at all" note: inside a market every row is real, which is what earned it.
+> Search across meals, places and cuisines is still the thing that will cut
+> across all of them, and it is not built.
 
 **A CONFIRMED PIN IS "SETTLED", AND THE UI MUST SAY SO.** The location page
 tracks WHICH point the verdict belongs to (`confirmedKey`), not merely that one
@@ -1337,17 +1483,9 @@ identically: the location cookie's city → that market's page, otherwise
 `/city`. Neither resolves anything itself, and neither invents a city for a
 visitor who has not chosen one.
 
-> **There is ONE location experience.** The inline picker in the feed's empty
-> states was a second, smaller copy of it — GPS and a city dropdown with no room
-> for a map — and it is deleted (`LocationPicker`, and `/api/markets` with it).
-> Every "where should we deliver?" moment now links to
-> `/city/[slug]/location`.
-
-**The city page shows nothing that needs a point.** No outlets, no counts, no
-ETAs, no meal-plan pricing — the `MealPlans` band was REMOVED from it because
-its plans and prices are invented placeholders, and a city marketplace is
-precisely where a customer reads them as that market's real offering
-(principle 11). It comes back when a meal-plan read exists.
+> **There is ONE location experience.** Every "where should we deliver?"
+> moment links to `/city/[slug]/location`; the navbar picker SELECTS an existing
+> address and never creates one.
 
 **The map draws no zones**, unlike the vendor picker, which draws them on
 purpose: a merchant choosing where to build needs the operating map, while
@@ -1372,8 +1510,8 @@ directory.
 `/` deliberately stays location-free: a first-time visitor has no cookie
 anyway, so personalising it would pay a per-request render to serve the global
 promotion almost every time. **No middleware redirect from `/` to a located
-page** — the cookie is not `httpOnly` precisely so the picker can read it in
-the browser and offer "Continue to Nairobi" instead. Revisit when returning
+page** — `db_market` is not `httpOnly` precisely so the navbar chip can name the
+customer's market and take them back in one click. Revisit when returning
 traffic dominates; it is one middleware line.
 
 City slugs are **globally unique**, so no country segment is needed. The route
@@ -1382,10 +1520,46 @@ root-level dynamic segment would catch every future route, and a city named
 "orders" would break the app. An unknown slug resolves from the shared market
 cache and 404s, so a bot probing paths costs one cached read.
 
-**Landing bands split by whether they need a point.** `Hero`, `Categories`,
-`EditorialBand`, `MealPlans` and `CtaBand` need none and render on both `/` and
-`/city/*`. Anything that needs a point — outlets, fees, ETAs, "popular near
-you" — lives in the feed under a market and nowhere else.
+**Landing bands split by whether they need a market.** `Hero`, `Categories`,
+`EditorialBand` and `CtaBand` render on both `/` and `/city/*`; `MealPlans`
+(the explainer) only on `/`. Anything about supply lives under a market, where
+the scope decides whether it is city-wide or narrowed to a point.
+
+### City inventory is not deliverable inventory
+
+`discoverCityOutlets` (`GET /customer/v1/discovery/cities/:citySlug/outlets`)
+answers "what does DailyBread sell in this city?" with NO point. Anonymous and
+cached per market, so it is safe on a static page.
+
+It enforces the same visibility as the located feed — the outlet must be
+sellable and its OWN zone must permit trading (`outletAreaAllowsSelling`, read
+through `ZONE_CAPABILITIES`, never `level >= X`) — and drops exactly one
+filter: the customer's distance. A kitchen 40 km from the centre is city
+inventory even though no address near the centre could order from it.
+
+`distanceMeters`, `eta` and `platformDelivers` come back **NULL**, never
+invented, and `DiscoveryOutlet` types them nullable for that reason;
+`OutletCard` drops the line rather than guessing. `maxDeliveryMinutes` is the
+one filter refused entry, because it needs an ETA — and it is refused entry
+rather than silently ignored.
+> The smoke proves the gap directly: a point in a live zone is SERVICEABLE and
+> the located feed still returns nothing (the outlet's radius does not reach
+> it) while the city browse lists that same outlet. It also routes a real
+> query object through the REAL controller, because a filter added to a
+> service can typecheck perfectly and never reach it (bug class #1) — verified
+> by deleting the mapper line and watching that assertion, and only that
+> assertion, fail.
+
+**A FACET MUST COVER THE SAME GROUND AS THE FILTER IT DRIVES.**
+`availableCuisines` counted VENDOR-PROFILE cuisine links alone, while
+`mergeCuisines` prints the vendor's cuisines **plus the cuisines of the dishes
+the outlet sells** on every card, and `buildFilterWhere` matches on both. A
+vendor who tagged their dishes and not their profile therefore got cuisines on
+every card, a working `?cuisineId=`, and **no chip to click** — the dev
+database produced an empty facet on every feed in the app. `countCuisines` now
+takes OUTLET ids and counts through `mergeCuisines`, once per outlet: the list
+is outlets, so the number beside a chip must be outlets. Same class of silent
+gap as a request field that never reaches its mapper.
 
 ### Cuisines — the storefront taxonomy
 
@@ -1461,6 +1635,32 @@ bad trade.
 > reported as missing. Rows now carry an explicit "See more". Worth
 > generalising: a row that has somewhere to go should say so in words.
 
+**THE CUISINE PAGES: global is the catalogue, the city is supply.**
+
+| route | shows | a tile leads to |
+|---|---|---|
+| `/cuisines` | `○` every active cuisine | `/cuisines/<slug>` |
+| `/cuisines/[slug]` | `●` per cuisine: what it is + "where to find it" (customer-open countries that enabled it × our cities) | that city's discover page, filtered |
+| `/city/[slug]/cuisines` | `ƒ` the COUNTRY's enabled catalogue × this market's SUPPLY in its scope ("3 places" / "3 places reach you") | discover filtered — only when something is cooked; otherwise a dimmed, non-link tile |
+
+> **The landing band's "All cuisines" goes to `/cuisines`, never to a city.**
+> It used to share the tiles' base path, so "see all" on `/` walked the visitor
+> into their default city's discover page — a question they had not asked.
+> `Categories` now takes `citySlug` and derives both links from it.
+>
+> **One global details URL, and places are NOT on it** (pushback on "one page
+> whose places vary by city"): a URL whose content changes with the reader's
+> cookie cannot be shared or indexed honestly. Places belong to a market, so
+> the city-scoped details page, when built, is `/city/<slug>/cuisines/<slug>`
+> (delivery-aware like every market page) and the global page links to it.
+>
+> The list read is PAGED with a TOTAL (`page`/`pageSize`, `limit` kept as an
+> alias); it used to stop silently at 48. Directories fetch every page, so
+> nothing is truncated and `/cuisines` stays static. `description` joined the
+> public payload deliberately — the cuisine-image smoke pins the key set.
+> `GET /catalog/cuisines/:slug` lists only countries READY FOR CUSTOMERS.
+> Smoke: `customer.cuisines.smoke.ts` (16).
+
 **Pagination is server-side at 10 a page** (`FoodTagsCatalog` PAGE_SIZE, the
 backend's `page`/`pageSize`/`totalPages`). Asserted in the smoke by checking
 page 2 shares no row with page 1 — a client-side slice of one over-fetched
@@ -1470,6 +1670,10 @@ list would pass every other check.
 1. **The `Order` model** — the single largest schema decision left, and the blocker for: discount redemption and cap enforcement, commission actually charged, `resolvePayoutDestination` having somewhere to send money, `getOutletMealPlanReadiness` gating anything, and the vendor order feed. Design it deliberately *with* the Payments boundary rather than incidentally as whatever checkout needs.
 2. **Payments module** — separate from tax and finance, per explicit direction. Finance keeps provider config/routing/credentials/adapters; Payments takes payment-intent/attempt/capture/refund orchestration, webhook reconciliation and `ProviderWebhookEvent`.
 3. **Meal-plan cleanup, before orders** — `MealPlan` is outlet-scoped while `MenuItem` is vendor-scoped, and `MealPlanMeal` has **no day column** despite the concept being one meal per delivery day. Meal plans are this platform's differentiator; an Order model designed without them in view will need reshaping.
+4. **The cart, with orders and not before** — recover `components/cart/*`, `lib/cart/*`, `app/api/cart/price` and `components/storefront/ItemSheet.tsx` from `30facf5` and put `MenuItemCard` back to `"use client"`. It was deliberately left out of the storefront recovery: a working "Add to cart" is a promise of a checkout that does not exist. The backend's `POST /cart/price` is already built and stateless.
+5. **The two market reads the sample layer stands in for** — city-scoped MEALS and MEAL PLANS, each in a city-wide and a point-scoped form, resolved through the outlet (city → zone → radius) exactly like places. Replace the bodies of `lib/data/market/meals.ts` / `meal-plans.ts`, move `lib/data/market/types.ts` into `@repo/types`, delete `lib/data/market/sample/`. Meal plans need the `MealPlanMeal` day column first.
+6. **Storefront scope** — `/store/[outletId]` sends no delivery point now (a per-market choice cannot be applied to a page that does not know its city). The storefront read should return its city and accept `addressId`, then the page can use that market's scope and say whether it delivers to you.
+7. **Cap on "your cities"** (planned): evict the oldest non-default `ConsumerMarket` row in `selectMarket`.
 
 ---
 

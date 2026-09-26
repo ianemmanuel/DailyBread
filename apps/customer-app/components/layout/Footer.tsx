@@ -3,7 +3,7 @@ import { Facebook, Instagram, Mail, Twitter } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { FOOTER_GROUPS, FOOTER_LEGAL } from "@/constants/links/footer-links"
+import { FOOTER_GROUPS, FOOTER_LEGAL, FOOTER_SOCIALS } from "@/constants/links/footer-links"
 import { Logo } from "./Logo"
 
 /*
@@ -17,11 +17,10 @@ import { Logo } from "./Logo"
  * ground in BOTH themes, so this needs no `dark:` utility of its own.
  */
 
-const SOCIALS = [
-  { href: "#", label: "DailyBread on Instagram", icon: Instagram },
-  { href: "#", label: "DailyBread on Facebook", icon: Facebook },
-  { href: "#", label: "DailyBread on Twitter", icon: Twitter },
-] as const
+/* Icons cross from the data file as NAMES and are resolved to components
+   here — the data file is imported by a Server Component and only
+   JSON-serializable values may cross that boundary (bug class #5). */
+const SOCIAL_ICONS = { instagram: Instagram, facebook: Facebook, twitter: Twitter } as const
 
 export function Footer() {
   return (
@@ -39,8 +38,15 @@ export function Footer() {
               Good food from great local kitchens, delivered to your door.
             </p>
 
+            {/* Dropped entirely until real profile URLs exist. An icon that
+                does nothing when tapped is the same dead link as a `#` in a
+                column, and on a phone this row is the most tapped part of a
+                footer. */}
+            {FOOTER_SOCIALS.length > 0 && (
             <ul className="flex items-center gap-2 pt-1">
-              {SOCIALS.map(({ href, label, icon: Icon }) => (
+              {FOOTER_SOCIALS.map(({ href, label, icon }) => {
+                const Icon = SOCIAL_ICONS[icon]
+                return (
                 <li key={label}>
                   <Link
                     href={href}
@@ -55,8 +61,10 @@ export function Footer() {
                     <Icon className="size-4" />
                   </Link>
                 </li>
-              ))}
+                )
+              })}
             </ul>
+            )}
           </div>
 
           {FOOTER_GROUPS.map((group) => (
@@ -127,6 +135,9 @@ export function Footer() {
                 trip hydration every January. */}
             © {new Date().getFullYear()} DailyBread. All rights reserved.
           </p>
+          {/* Absent rather than empty: a bare <ul> would still hold the
+              bottom bar's gap open on a phone. */}
+          {FOOTER_LEGAL.length > 0 && (
           <ul className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
             {FOOTER_LEGAL.map((link) => (
               <li key={link.label}>
@@ -139,6 +150,7 @@ export function Footer() {
               </li>
             ))}
           </ul>
+          )}
         </div>
       </div>
     </footer>

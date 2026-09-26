@@ -1,150 +1,106 @@
 import type { Metadata } from "next"
-import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowRight, CalendarDays, Compass, MapPin } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { MealPlanCard } from "@/components/market/MealPlanCard"
+import { ModeBanner } from "@/components/market/ModeBanner"
+import { ModeButton } from "@/components/market/ModeButton"
+import { SampleBadge } from "@/components/market/SampleBadge"
 import { getCityDetail } from "@/lib/data/cities"
-import { getMarketsSafe } from "@/lib/data/markets"
+import { getMarketMealPlans } from "@/lib/data/market/meal-plans"
+import { getMarketScope } from "@/lib/market/context"
 
 /*
- * `/city/[citySlug]/meal-plans` — meal plans, in a market.
+ * `/city/[citySlug]/meal-plans` — the plans in this market, or the plans whose
+ * kitchen can deliver to the customer's address through the week. Through
+ * `getMarketMealPlans`, which is sample data until the backend read exists.
  *
- * ── Why this is city-scoped ────────────────────────────────────────────────
- *
- * `MealPlan` hangs off an OUTLET, which sits in a city. There is no such thing
- * as a global meal plan, so a global page could only ever describe the idea —
- * which is what `/about` now does. Here the question is answerable: which
- * plans can I subscribe to, in this market, at my address.
- *
- * ── What it deliberately does not claim ────────────────────────────────────
- *
- * There is no customer meal-plan read yet, so this page lists NOTHING. It also
- * does not say "no plans in Nairobi", because that would be a claim about
- * inventory made by a page that has not asked — the honest statement is how
- * plans work and where they come from. When the read lands, the list drops
- * into the space below, scoped by this city and then narrowed by the
- * customer's point (plans are only real if a kitchen can reach them).
- *
- * Static, like the rest of the market shell: one cached read, no cookie.
+ * The short "how plans work" explainer stays under the list: plans are this
+ * platform's differentiator, and the idea is not yet familiar.
  */
 
-export const revalidate = 3600
+type Params = { citySlug: string }
 
-export async function generateStaticParams() {
-  const markets = await getMarketsSafe()
-  return markets.flatMap((market) => market.cities.map((city) => ({ citySlug: city.slug })))
-}
-
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ citySlug: string }>
-}): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { citySlug } = await params
   const detail = await getCityDetail(citySlug)
-
   if (!detail) return { title: "City not found" }
-
   return {
     title      : `Meal plans in ${detail.city.name}`,
-    description: `How weekly meal plans work in ${detail.city.name}: choose your meals, choose your days, and a kitchen near you cooks through the week.`,
+    description: `Weekly meal plans in ${detail.city.name}: choose your meals, choose your days, and a kitchen near you cooks through the week.`,
     alternates : { canonical: `/city/${detail.city.slug}/meal-plans` },
   }
 }
 
-export default async function CityMealPlansPage({
-  params,
-}: {
-  params: Promise<{ citySlug: string }>
-}) {
-  const { citySlug } = await params
-  const market = await getCityDetail(citySlug)
-  if (!market) notFound()
+const HOW_IT_WORKS = [
+  { title: "Each place publishes its own plans", body: "A plan belongs to one kitchen, with its own meals, days and price." },
+  { title: "Your address decides what you can pick", body: "A plan is only real if that kitchen can reach you on every one of its days." },
+  { title: "Subscribe once", body: "Meals arrive on the days you chose, from the same kitchen each time." },
+]
 
-  const { city } = market
+export default async function MealPlansPage({
+  params, searchParams,
+}: {
+  params      : Promise<Params>
+  searchParams: Promise<{ search?: string }>
+}) {
+  const [{ citySlug }, query] = await Promise.all([params, searchParams])
+  const scope = await getMarketScope(citySlug)
+  if (!scope) notFound()
+
+  const city = scope.context.market.city.name
+  const state = await getMarketMealPlans(scope, { search: query.search, limit: 48 })
 
   return (
-    <div className="band-tight space-y-8">
-      <header className="max-w-2xl space-y-3">
-        <p className="eyebrow">
-          <CalendarDays aria-hidden className="size-4" />
-          {city.name}
-        </p>
-        <h1 className="heading-xl text-balance">Meal plans in {city.name}</h1>
-        <p className="lede">
-          Choose your meals once, choose the days they arrive, and a kitchen
-          here cooks through the week. No deciding at six o&apos;clock every
-          evening.
-        </p>
-      </header>
+    <div className="space-y-10 py-6 sm:py-8">
+      <ModeBanner scope={scope} title={`Meal plans in ${city}`} />
 
-      <section aria-labelledby="plans-how-title" className="surface space-y-5 p-6 sm:p-8">
-        <h2 id="plans-how-title" className="heading-md text-foreground">
-          How plans work here
-        </h2>
-
-        <ol className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-          {[
-            {
-              title: "Each place publishes its own plans",
-              body : `Each plan belongs to one kitchen in ${city.name}, with its own meals, its own days and its own price.`,
-            },
-            {
-              title: "Your address decides what you can pick",
-              body : "A plan is only real if that kitchen can deliver to you through the week, so we check your delivery point first.",
-            },
-            {
-              title: "One subscription, delivered on schedule",
-              body : "Subscribe once and the meals arrive on the days you chose, from the same kitchen each time.",
-            },
-          ].map((step, index) => (
-            <li key={step.title} className="space-y-2">
-              <p className="flex items-baseline gap-2">
-                <span aria-hidden className="text-sm font-semibold text-primary-text">
-                  {index + 1}
-                </span>
-                <span className="font-display text-base font-semibold tracking-tight text-foreground">
-                  {step.title}
-                </span>
+      <section className="space-y-4">
+        {state.kind === "error" && (
+          <p className="surface px-6 py-8 text-sm text-muted-foreground">{state.message}</p>
+        )}
+        {state.kind === "not-available" && (
+          <p className="surface px-6 py-8 text-sm text-muted-foreground">
+            Meal plans are coming to {city} soon. When a kitchen here publishes one, you&apos;ll find it on this page.
+          </p>
+        )}
+        {state.kind === "ok" && (
+          <>
+            {state.source === "sample" && (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <SampleBadge /> These plans illustrate the page while the listing is built.
               </p>
+            )}
+            {state.items.length === 0 ? (
+              <div className="surface flex flex-col items-start gap-3 px-6 py-8 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  {scope.mode === "delivery" ? "No plan delivers to this address yet." : "No meal plans match."}
+                </p>
+                {scope.mode === "delivery" && (
+                  <ModeButton citySlug={scope.citySlug} browse label={`Browse all of ${city}`} />
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {state.items.map((plan) => <MealPlanCard key={plan.id} plan={plan} />)}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      <section aria-labelledby="plans-how" className="surface space-y-5 p-6 sm:p-8">
+        <h2 id="plans-how" className="heading-md text-foreground">How meal plans work</h2>
+        <ol className="grid gap-5 sm:grid-cols-3">
+          {HOW_IT_WORKS.map((step, index) => (
+            <li key={step.title} className="space-y-1.5">
+              <span className="flex size-7 items-center justify-center rounded-full bg-primary-subtle text-sm font-semibold text-primary-subtle-fg">
+                {index + 1}
+              </span>
+              <p className="font-medium text-foreground">{step.title}</p>
               <p className="text-sm leading-relaxed text-muted-foreground">{step.body}</p>
             </li>
           ))}
         </ol>
-      </section>
-
-      {/* Where the list will go. Until the backend can answer, the page says
-          what to do next rather than inventing plans to fill the space. */}
-      <section
-        aria-labelledby="plans-next-title"
-        className="surface flex flex-col gap-4 border-dashed p-6 sm:p-8"
-      >
-        <h2 id="plans-next-title" className="heading-md text-foreground">
-          Start with the places
-        </h2>
-        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Plans are published by the places that cook them, so the way in is to see which ones
-          cook for your address. Set your delivery point and browse what is
-          available in {city.name} — when a kitchen offers a plan, you will
-          find it on their page.
-        </p>
-
-        <div className="flex flex-wrap gap-3">
-          <Button asChild size="lg" className="h-11 rounded-full px-6">
-            <Link href={`/city/${city.slug}/places`}>
-              <Compass aria-hidden className="size-4" />
-              Browse places in {city.name}
-            </Link>
-          </Button>
-          <Button asChild variant="brand" size="lg" className="h-11 rounded-full px-6">
-            <Link href={`/city/${city.slug}/location`}>
-              <MapPin aria-hidden className="size-4" />
-              Set delivery location
-              <ArrowRight aria-hidden className="size-4" />
-            </Link>
-          </Button>
-        </div>
       </section>
     </div>
   )

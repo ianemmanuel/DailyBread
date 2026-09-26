@@ -1,89 +1,82 @@
-"use client"
-
 import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { CalendarDays, Compass, Store } from "lucide-react"
 
-import { LocationChip } from "@/components/layout/LocationChip"
+import { DeliveryPicker, type DeliveryPickerProps } from "@/components/city/DeliveryPicker"
+import { MarketTabs } from "@/components/city/MarketTabs"
+import { RememberMarket } from "@/components/city/RememberMarket"
+import type { MarketScope } from "@/lib/market/context"
+import { targetDetail, targetLabel } from "@/lib/market/resolve"
 
 /*
- * The market bar: which market you are in, and what there is to do in it.
+ * The market bar: WHERE you are browsing, and — inside that city — WHERE you
+ * are delivering. Two questions, two controls, and the split is the scope
+ * rule: the global navbar changes city, this bar never does.
  *
- * ── A second bar, not a bigger first one ───────────────────────────────────
+ *   desktop   [Nairobi · Kenya] [Overview Discover Meals …]   [Delivering to Home ▾]
+ *   phone     [Nairobi · Kenya]                [Delivering to Home ▾]
+ *             [Overview Discover Meals Meal plans …  → swipe]
  *
- * Kitchens, meal plans and a delivery location are meaningless outside a
- * market — there is no such thing as a global meal plan, because a plan is
- * sold by an outlet in a city. Putting them in the global navbar meant either
- * showing links that go nowhere useful from `/`, or a navbar that silently
- * changed its contents and left the customer to work out why. This bar simply
- * is not there until you are in a market, and then it names the market.
+ * On a phone the delivery control shares the city's row rather than hiding in
+ * the menu sheet: a Radix popover inside the sheet would open in a portal the
+ * sheet blocks clicks to, and "where am I delivering" is exactly what must
+ * stay visible.
  *
- * ── Client, but not client-FETCHED ─────────────────────────────────────────
- *
- * `cityName` arrives as a prop from the server layout above, so the bar is in
- * the HTML with the real name on the first paint. The only reason for
- * "use client" is `usePathname` for the active link — the router is already
- * loaded by any page carrying a <Link>, so this is a hook call, not a bundle.
- * `aria-current` is the single source of the active state, styled off the
- * attribute, so what a screen reader announces cannot drift from what is seen.
- *
- * On a phone the sections scroll sideways in a `.rail` rather than collapsing
- * into the menu: they are the page's own tabs, and burying the marketplace
- * behind a hamburger is what made discovery hard to find in the first place.
+ * A Server Component: every prop is from the one per-request market scope, so
+ * this bar and the page below it cannot disagree.
  */
-export function MarketNav({
-  citySlug,
-  cityName,
-}: {
-  citySlug: string
-  cityName: string
-}) {
-  const pathname = usePathname()
-  const home = `/city/${citySlug}`
+export function MarketNav({ scope }: { scope: MarketScope }) {
+  const { market, account, addresses, choice } = scope.context
+  const { city, country } = market
 
-  const sections = [
-    { href: home, label: "Overview", icon: Compass, exact: true },
-    { href: `${home}/places`, label: "Places", icon: Store, exact: false },
-    { href: `${home}/meal-plans`, label: "Meal plans", icon: CalendarDays, exact: false },
-  ]
+  const target = choice.target
+  const picker: Omit<DeliveryPickerProps, "className"> = {
+    citySlug   : city.slug,
+    cityName   : city.name,
+    account,
+    mode       : choice.mode,
+    unavailable: scope.mode === "unavailable",
+    target     : target
+      ? {
+          kind     : target.kind,
+          addressId: target.kind === "address" ? target.address.id : null,
+          label    : targetLabel(target),
+          detail   : targetDetail(target),
+        }
+      : null,
+    addresses  : addresses.map((address) => ({
+      id           : address.id,
+      label        : address.label ?? address.addressLine1,
+      detail       : address.serviceability.zoneName ?? (address.label ? address.addressLine1 : null),
+      isCityDefault: address.id === scope.context.cityDefaultAddressId,
+    })),
+  }
 
   return (
     <div className="full-bleed border-b border-border bg-surface-subtle">
-      <nav
-        aria-label={`${cityName} marketplace`}
-        className="shell flex h-14 items-center gap-4"
-      >
-        {/* The market itself, stated once. It is a link home rather than a
-            label so "back to the top of this market" is always one tap. */}
-        <Link
-          href={home}
-          className="flex shrink-0 items-center gap-1.5 rounded-sm text-sm font-semibold text-foreground hover:text-primary-text"
-        >
-          <span className="hidden text-muted-foreground sm:inline">DailyBread</span>
-          {cityName}
-        </Link>
+      <RememberMarket citySlug={city.slug} />
+      <nav aria-label={`${city.name} marketplace`} className="shell">
+        <div className="flex min-h-16 items-center gap-4 py-2">
+          <Link
+            href={`/city/${city.slug}`}
+            className="flex min-w-0 shrink-0 flex-col rounded-sm leading-tight"
+          >
+            <span className="truncate font-display text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+              {city.name}
+            </span>
+            <span className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+              {country.name}
+            </span>
+          </Link>
 
-        <ul className="rail min-w-0 flex-1 items-center gap-1 pb-0">
-          {sections.map(({ href, label, icon: Icon, exact }) => {
-            const active = exact ? pathname === href : pathname.startsWith(href)
-            return (
-              <li key={href}>
-                <Link
-                  href={href}
-                  aria-current={active ? "page" : undefined}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground aria-[current=page]:bg-card aria-[current=page]:text-foreground aria-[current=page]:shadow-xs"
-                >
-                  <Icon aria-hidden className="size-4" />
-                  {label}
-                </Link>
-              </li>
-            )
-          })}
-        </ul>
+          <div className="hidden min-w-0 flex-1 lg:flex">
+            <MarketTabs citySlug={city.slug} />
+          </div>
 
-        {/* The delivery location belongs beside the market it applies to, and
-            nowhere else. */}
-        <LocationChip citySlug={citySlug} className="max-sm:hidden" />
+          <DeliveryPicker {...picker} className="ml-auto" />
+        </div>
+
+        <div className="-mt-1 flex pb-2 lg:hidden">
+          <MarketTabs citySlug={city.slug} />
+        </div>
       </nav>
     </div>
   )

@@ -25,8 +25,46 @@ export interface CustomerAccount {
 export interface CustomerSessionData {
   customer : CustomerAccount
   addresses: CustomerAddress[]
-  /** The address discovery will anchor on unless the client says otherwise. */
+  /** "Your cities": every operating city the customer chose or holds an
+   *  address in. The default city first, then most recently selected. */
+  markets  : CustomerMarket[]
+  /** Where signing in lands. Explicit choice, else the most recently selected
+   *  city, else the newest address's city. Null for a brand-new customer. */
+  defaultCitySlug : string | null
+  /** The DEFAULT CITY's default address. Anything scoped to one market must
+   *  read that market's `defaultAddressId` instead. */
   defaultAddressId: string | null
+}
+
+/**
+ * One of the customer's cities, with its defaults already resolved by the
+ * backend (customer.markets.ts). The frontend never re-derives any of it.
+ */
+export interface CustomerMarket {
+  cityId          : string
+  citySlug        : string
+  cityName        : string
+  countryId       : string
+  /** The customer's default city — exactly one market has it whenever the
+   *  list is non-empty. */
+  isDefault       : boolean
+  /** This city's default delivery address, validated against where each pin
+   *  resolves today. Null only when the city holds no address. */
+  defaultAddressId: string | null
+  addressCount    : number
+  /** When the customer last chose this city. Null for a city known only
+   *  because an address resolves into it. */
+  lastSelectedAt  : string | null
+}
+
+export interface SelectCustomerMarketRequest {
+  /** Also make this the default city. Never implied by selecting. */
+  isDefault?: boolean
+}
+
+export interface CustomerMarketsResult {
+  markets        : CustomerMarket[]
+  defaultCitySlug: string | null
 }
 
 // ─── Addresses ───────────────────────────────────────────────────────────────
@@ -44,6 +82,8 @@ export interface CustomerAddress {
   countryId   : string
   latitude    : number
   longitude   : number
+  /** The default address FOR THE CITY this pin resolves into. Defaults are
+   *  per city — one in Nairobi, another in Mombasa. */
   isDefault   : boolean
   createdAt   : string
   /** Resolved on every READ, never stored: coverage changes when an admin
@@ -183,6 +223,8 @@ export interface CustomerCuisine {
   id   : string
   slug : string
   name : string
+  /** Admin-written copy. Null when the catalogue entry has none yet. */
+  description: string | null
   /** Null when no picture has been uploaded yet, or when the public bucket is
    *  unconfigured. The tile renders name-only rather than breaking. */
   image: {
@@ -196,6 +238,22 @@ export interface CustomerCuisine {
 
 export interface CustomerCuisinesResult {
   cuisines: CustomerCuisine[]
+  /** Every matching cuisine, not just this page — so a directory can never
+   *  present a truncated list as the whole catalogue. */
+  total   : number
+  page    : number
+  pageSize: number
+}
+
+/**
+ * One cuisine, for its details page. `countryIds` are the countries OPEN TO
+ * CUSTOMERS where it is switched on — the frontend intersects them with the
+ * market list to say which cities carry it. Nothing about supply: that is a
+ * property of a place and a point, and belongs to the city-scoped reads.
+ */
+export interface CustomerCuisineDetail {
+  cuisine   : CustomerCuisine
+  countryIds: string[]
 }
 
 // ─── Money ───────────────────────────────────────────────────────────────────
@@ -242,8 +300,11 @@ export interface DiscoveryOutlet {
   rating      : number
   reviewCount : number
   isFeatured  : boolean
-  distanceMeters: number
-  eta         : DeliveryEstimate
+  /** NULL when the answer was computed without a delivery point — city-wide
+   *  browsing. Distance and an ETA are functions of coordinates, and inventing
+   *  either would be a number we cannot stand behind (principle 11). */
+  distanceMeters: number | null
+  eta         : DeliveryEstimate | null
   isOpenNow   : boolean
   /** Null means the outlet has not set one, which is not the same as free. */
   deliveryFeeMinor : number | null
@@ -252,8 +313,10 @@ export interface DiscoveryOutlet {
   /** The best offer running on this outlet right now, for the feed badge.
    *  Null when nothing applies this minute. */
   offer       : DiscoveryOffer | null
-  /** True when the platform carries the food; false when the vendor does. */
-  platformDelivers: boolean
+  /** True when the platform carries the food; false when the vendor does.
+   *  NULL while browsing city-wide: it is the CUSTOMER's zone that decides,
+   *  and without a point there is no zone to ask. */
+  platformDelivers: boolean | null
 }
 
 export interface DiscoveryOffer {
@@ -285,6 +348,24 @@ export interface DiscoveryResult {
   pageSize: number
   /** The cuisines actually present in this result set, so the filter bar only
    *  ever offers a choice that can match something. */
+  availableCuisines: Array<{ id: string; name: string; slug: string; count: number }>
+}
+
+/**
+ * The city's inventory, answered WITHOUT a delivery point.
+ *
+ * "What does DailyBread offer in Nairobi?" — a different question from "what
+ * can reach this address", and one a customer is entitled to ask before giving
+ * anyone an address. It carries no `serviceability`, because there is no point
+ * to resolve: every outlet here is sellable and in a zone that may trade, and
+ * whether it can reach a particular door is unknowable and therefore unsaid.
+ */
+export interface CityDiscoveryResult {
+  city    : MarketCity
+  outlets : DiscoveryOutlet[]
+  total   : number
+  page    : number
+  pageSize: number
   availableCuisines: Array<{ id: string; name: string; slug: string; count: number }>
 }
 

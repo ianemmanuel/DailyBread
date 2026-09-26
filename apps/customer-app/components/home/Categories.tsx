@@ -1,6 +1,4 @@
-import Image from "next/image"
-import Link from "next/link"
-
+import { CuisineTile } from "@/components/cuisines/CuisineTile"
 import { getCuisines, HOME_CUISINE_LIMIT } from "@/lib/data/cuisines"
 import { CUISINES_TITLE } from "@/constants/home/categories-content"
 import { SectionHeader } from "./SectionHeader"
@@ -27,18 +25,32 @@ import { SectionHeader } from "./SectionHeader"
  */
 export async function Categories({
   countryId,
-  basePath = "/discover",
+  citySlug,
 }: {
   countryId?: string | null
-  /* Where a tile leads. A city page passes its OWN feed so the tile lands in
-   * the market the customer is already in; `/` has no market, so it passes
-   * nothing and the tiles go through the doorway, which resolves a market from
-   * the location cookie (or sends them to pick one) and forwards the filter. */
-  basePath?: string
+  /*
+   * Where the band lives, which decides where it LEADS:
+   *
+   *   `/` (no city)    "All cuisines" → /cuisines, a tile → /cuisines/<slug>.
+   *                    The landing page has no market, and sending a tile or
+   *                    "see all" into the visitor's default city's discover
+   *                    page answered a question they had not asked.
+   *   a city page      "All cuisines" → /city/<slug>/cuisines, a tile → that
+   *                    market's discover page filtered by the cuisine. The
+   *                    customer is already in a market, so that is where it is
+   *                    worth looking. The ID, not the slug: the filter goes to
+   *                    the backend as `cuisineId`.
+   */
+  citySlug?: string
 }) {
   const cuisines = await getCuisines({ countryId, limit: HOME_CUISINE_LIMIT })
 
   if (cuisines.length === 0) return null
+
+  const allHref = citySlug ? `/city/${citySlug}/cuisines` : "/cuisines"
+  const tileHref = (cuisine: (typeof cuisines)[number]) => citySlug
+    ? `/city/${citySlug}/discover?cuisine=${cuisine.id}`
+    : `/cuisines/${cuisine.slug}`
 
   return (
     <section aria-labelledby="categories-title" className="full-bleed bg-surface-subtle">
@@ -46,47 +58,14 @@ export async function Categories({
         <SectionHeader
           id="categories-title"
           title={CUISINES_TITLE}
-          href={basePath}
+          href={allHref}
           linkLabel="All cuisines"
         />
 
         <ul className="rail -mx-4 px-4 md:mx-0 md:grid md:grid-cols-4 md:gap-4 md:overflow-visible md:px-0 lg:grid-cols-8">
           {cuisines.map((cuisine) => (
             <li key={cuisine.id} className="w-28 shrink-0 md:w-auto">
-              <Link
-                /* The ID, not the slug: the feed forwards `cuisine` straight to
-                   the backend as `cuisineId`, and a slug there silently matches
-                   nothing — a tile leading to an empty feed. */
-                href={`${basePath}?cuisine=${cuisine.id}`}
-                className="surface-interactive group flex h-full flex-col items-center gap-3 px-3 py-4 text-center"
-              >
-                <span className="photo-frame photo-zoom flex size-16 items-center justify-center rounded-full sm:size-18">
-                  {cuisine.image ? (
-                    <Image
-                      src={cuisine.image.url}
-                      /* Empty: the name is right underneath, so describing the
-                         photo again is noise for a screen reader. */
-                      alt=""
-                      fill
-                      sizes="72px"
-                      className="object-cover"
-                      {...(cuisine.image.blurDataUrl
-                        ? { placeholder: "blur" as const, blurDataURL: cuisine.image.blurDataUrl }
-                        : {})}
-                    />
-                  ) : (
-                    /* No picture uploaded yet. A tinted initial keeps the row
-                       even rather than leaving a hole. */
-                    <span
-                      aria-hidden
-                      className="flex size-full items-center justify-center bg-primary/15 text-lg font-semibold text-primary-text"
-                    >
-                      {cuisine.name.charAt(0)}
-                    </span>
-                  )}
-                </span>
-                <span className="text-sm font-medium text-foreground">{cuisine.name}</span>
-              </Link>
+              <CuisineTile cuisine={cuisine} href={tileHref(cuisine)} />
             </li>
           ))}
         </ul>

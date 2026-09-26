@@ -1,50 +1,43 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, Check, Loader2, Star, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowRight, Check, Loader2, Plus, Star, Trash2 } from "lucide-react"
 import type { CustomerAddress } from "@repo/types/customer-app"
 
 import { AddressLine } from "@/components/account/AddressSummary"
 import { Button } from "@/components/ui/button"
 import { clientFetch } from "@/lib/api/client"
 import { customerErrorMessage } from "@/lib/api/error-copy"
+import { deliverToAddress } from "@/lib/market/actions"
 
 /*
- * Managing saved addresses.
+ * The address book, grouped BY CITY — because both of the things you can do to
+ * an address are per city:
  *
- * ── Three verbs, and two of them are not the same ──────────────────────────
+ *   Deliver here     this device, this city. Changes which address the city's
+ *                    pages use on this browser; touches no default.
+ *   Make default     durable, this city only. The address a city uses when a
+ *                    device has chosen nothing — on a new laptop, after
+ *                    clearing cookies. Making Kilimani the Nairobi default
+ *                    leaves the Mombasa default where it was.
  *
- *   DELIVER HERE — sets `addressId` in the location cookie. Per DEVICE, and
- *                  what the feed will resolve against on the next request.
- *   MAKE DEFAULT — a durable preference on the row itself.
- *   REMOVE       — gone; the customer asked.
- *
- * The first two look alike in a list and mean entirely different things, which
- * is exactly why they are separate buttons with separate wording rather than
- * one "select". Choosing where tonight's order goes must not silently rewrite
- * what every future device does.
- *
- * ── The server owns every one of them ──────────────────────────────────────
- *
- * Each button posts to an `app/api/**` handler; none of them writes the cookie
- * or mutates a row in the browser. `router.refresh()` then re-reads the page
- * from the server, so what is on screen is what the backend now says —
- * including the freshly resolved coverage for the chosen address.
+ * Adding an address is a link to that city's map, never a form here: an
+ * address is a pin, and the location page is the one place a pin is made.
  */
+
+export interface AddressGroup {
+  citySlug         : string | null
+  cityName         : string
+  addresses        : CustomerAddress[]
+  /** Which address this DEVICE is delivering to in this city, if any. */
+  selectedAddressId: string | null
+}
 
 type Busy = { id: string; action: "select" | "default" | "delete" } | null
 
-export function AddressBook({
-  addresses,
-  defaultAddressId,
-  selectedAddressId,
-}: {
-  addresses        : CustomerAddress[]
-  defaultAddressId : string | null
-  /** Read from the cookie on the server, so the first paint already knows. */
-  selectedAddressId: string | null
-}) {
+export function AddressBook({ groups }: { groups: AddressGroup[] }) {
   const router = useRouter()
   const [busy, setBusy] = React.useState<Busy>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -62,93 +55,107 @@ export function AddressBook({
     }
   }
 
-  const isBusy = (id: string, action: NonNullable<Busy>["action"]) =>
+  const spinner = (id: string, action: NonNullable<Busy>["action"]) =>
     busy?.id === id && busy.action === action
+      ? <Loader2 aria-hidden className="size-3.5 animate-spin" />
+      : null
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-10">
       {error && (
-        <p role="status" className="flex items-start gap-2 text-sm text-muted-foreground">
-          <AlertCircle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+        <p role="alert" className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive-bg px-4 py-3 text-sm text-destructive">
+          <AlertCircle aria-hidden className="size-4 shrink-0" />
           {error}
         </p>
       )}
 
-      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {addresses.map((address) => {
-          const selected = address.id === selectedAddressId
-          const isDefault = address.id === defaultAddressId
+      {groups.map((group) => (
+        <section key={group.citySlug ?? "elsewhere"} className="space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="space-y-0.5">
+              <h2 className="heading-md text-foreground">{group.cityName}</h2>
+              <p className="text-sm text-muted-foreground">
+                {group.citySlug
+                  ? `${group.addresses.length} ${group.addresses.length === 1 ? "address" : "addresses"}`
+                  : "These pins are no longer inside a city we operate in."}
+              </p>
+            </div>
+            {group.citySlug && (
+              <div className="flex flex-wrap gap-2">
+                <Button asChild variant="ghost" size="sm" className="rounded-full">
+                  <Link href={`/city/${group.citySlug}/location`}>
+                    <Plus aria-hidden className="size-3.5" />
+                    Add in {group.cityName}
+                  </Link>
+                </Button>
+                <Button asChild variant="ghost" size="sm" className="rounded-full">
+                  <Link href={`/city/${group.citySlug}`}>
+                    Open {group.cityName}
+                    <ArrowRight aria-hidden className="size-3.5" />
+                  </Link>
+                </Button>
+              </div>
+            )}
+          </div>
 
-          return (
-            <li key={address.id}>
-              <AddressLine address={address} isDefault={isDefault}>
-                <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
-                  {selected ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-semibold text-success">
-                      <Check aria-hidden className="size-3.5" />
-                      Delivering here
-                    </span>
-                  ) : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="rounded-full"
-                      disabled={busy !== null}
-                      onClick={() => run(address.id, "select", () =>
-                        clientFetch("/api/location/address", {
-                          method: "POST",
-                          body  : JSON.stringify({ addressId: address.id }),
-                        }),
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {group.addresses.map((address) => {
+              const selected = address.id === group.selectedAddressId
+              return (
+                <li key={address.id}>
+                  <AddressLine address={address} defaultLabel={`Default for ${group.cityName}`}>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {group.citySlug && (selected ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-semibold text-success">
+                          <Check aria-hidden className="size-3.5" />
+                          Delivering here on this device
+                        </span>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={busy !== null}
+                          onClick={() => run(address.id, "select", () => deliverToAddress(address.id))}
+                          className="rounded-full"
+                        >
+                          {spinner(address.id, "select")}
+                          Deliver here
+                        </Button>
+                      ))}
+                      {group.citySlug && !address.isDefault && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy !== null}
+                          onClick={() => run(address.id, "default", () =>
+                            clientFetch(`/api/account/addresses/${address.id}/default`, { method: "PATCH" }))}
+                          className="rounded-full"
+                        >
+                          {spinner(address.id, "default") ?? <Star aria-hidden className="size-3.5" />}
+                          Make default for {group.cityName}
+                        </Button>
                       )}
-                    >
-                      {isBusy(address.id, "select") && (
-                        <Loader2 aria-hidden className="size-3.5 animate-spin" />
-                      )}
-                      Deliver here
-                    </Button>
-                  )}
-
-                  {!isDefault && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="rounded-full"
-                      disabled={busy !== null}
-                      onClick={() => run(address.id, "default", () =>
-                        clientFetch(`/api/account/addresses/${address.id}/default`, {
-                          method: "PATCH",
-                        }),
-                      )}
-                    >
-                      {isBusy(address.id, "default")
-                        ? <Loader2 aria-hidden className="size-3.5 animate-spin" />
-                        : <Star aria-hidden className="size-3.5" />}
-                      Make default
-                    </Button>
-                  )}
-
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="ml-auto rounded-full text-muted-foreground hover:text-destructive"
-                    disabled={busy !== null}
-                    onClick={() => run(address.id, "delete", () =>
-                      clientFetch(`/api/account/addresses/${address.id}`, { method: "DELETE" }),
-                    )}
-                  >
-                    {isBusy(address.id, "delete")
-                      ? <Loader2 aria-hidden className="size-3.5 animate-spin" />
-                      : <Trash2 aria-hidden className="size-3.5" />}
-                    Remove
-                  </Button>
-                </div>
-              </AddressLine>
-            </li>
-          )
-        })}
-      </ul>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy !== null}
+                        onClick={() => run(address.id, "delete", () =>
+                          clientFetch(`/api/account/addresses/${address.id}`, { method: "DELETE" }))}
+                        className="rounded-full text-muted-foreground"
+                      >
+                        {spinner(address.id, "delete") ?? <Trash2 aria-hidden className="size-3.5" />}
+                        Remove
+                      </Button>
+                    </div>
+                  </AddressLine>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      ))}
     </div>
   )
 }

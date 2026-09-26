@@ -24,9 +24,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import { LocationChip } from "./LocationChip"
 import { Logo } from "./Logo"
 import { NavLinks } from "./NavLinks"
+import { useAfterAuthUrl } from "./useAfterAuthUrl"
 
 const THEMES: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light", label: "Light", icon: Sun },
@@ -49,6 +49,7 @@ export function MobileNav() {
   const [open, setOpen] = React.useState(false)
   const close = () => setOpen(false)
   const { theme, setTheme } = useTheme()
+  const afterAuth = useAfterAuthUrl()
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -80,14 +81,12 @@ export function MobileNav() {
         </SheetHeader>
 
         <div className="flex-1 space-y-7 overflow-y-auto px-3 py-5">
-          {/* The delivery location comes FIRST on a phone, above the links: it
-              is the thing that decides what every other screen can show, and
-              it is the one piece of state a customer returns to change. It
-              renders nothing outside a market. */}
-          <div className="px-3" onClick={close}>
-            <LocationChip className="w-full max-w-none" />
-          </div>
-
+          {/* No delivery control here, deliberately. It belongs beside the
+              market it applies to, and the market bar now carries it on its
+              own row at phone width — a popover inside this sheet would open
+              in a portal the sheet blocks clicks outside of, the same reason
+              <UserButton> cannot live here. Changing MARKET is global and is
+              the "Our cities" link below. */}
           <nav aria-label="Main" className="space-y-2">
             <p className="px-3 text-xs font-medium tracking-wider text-muted-foreground uppercase">
               Menu
@@ -131,10 +130,10 @@ export function MobileNav() {
           </ClerkLoading>
 
           <Show when="signed-out">
-            <SignUpButton>
+            <SignUpButton forceRedirectUrl={afterAuth}>
               <Button className="h-11 w-full rounded-full">Get Started</Button>
             </SignUpButton>
-            <SignInButton>
+            <SignInButton forceRedirectUrl={afterAuth}>
               <Button variant="brand" className="h-11 w-full rounded-full">
                 Sign in
               </Button>

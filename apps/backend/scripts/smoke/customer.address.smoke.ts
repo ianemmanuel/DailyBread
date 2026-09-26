@@ -13,7 +13,11 @@
  *   - a SELECTED address is authoritative: it beats any coordinates sent
  *     alongside it, and an address that cannot be used is an ERROR rather than
  *     a quiet fall back to a different location;
- *   - `isDefault` (durable preference) and the currently selected address
+ *   - defaults are PER CITY: each city holding addresses has exactly one
+ *     default address, and changing one city's never touches another's;
+ *   - "your cities" (ConsumerMarket) records chosen cities, and the default
+ *     CITY is only ever set on request — selecting a city never implies it;
+ *   - the default (durable preference) and the currently selected address
  *     (per-device) are separate things;
  *   - a country that is not readyForCustomerOperations resolves to no city;
  *   - customer-facing serviceability names a zone by its publicName.
@@ -35,6 +39,9 @@ import {
   updateAddress,
 } from "@/modules/customer/services/customer.address.service"
 import { resolveDiscoveryLocation } from "@/modules/customer/services/customer.discovery.service"
+import { loadAddressBook } from "@/modules/customer/services/customer.address.service"
+import { selectMarket } from "@/modules/customer/services/customer.market.service"
+import { handleSelectMarket } from "@/modules/customer/controllers/customer.account.controller"
 import {
   clearOperatingCityCache,
   getCityDetail,
@@ -397,15 +404,35 @@ async function main() {
       paused.serviceability.zoneName,
     )
 
-    // ── 6. isDefault is durable; the SELECTED address is not the same thing ─
+    // ── 6. Defaults are durable and PER CITY; selection is something else ─
     const book = await listAddresses(customer.id)
     check(
       "the book holds every address saved — four cities, two countries, serviceable or not",
       book.length === 6,
       book.length,
     )
-    check("the first address saved became the default", book.find((a) => a.id === home.id)?.isDefault === true)
-    check("a later address did not", book.find((a) => a.id === abroad.id)?.isDefault === false)
+    const isDefault = async (id: string) =>
+      (await listAddresses(customer.id)).find((a) => a.id === id)?.isDefault === true
+    check("the first address in city A became A's default", await isDefault(home.id))
+    check("the first address in city B became B's default — A's did not move", await isDefault(work.id))
+    check("and the first in city C became C's", await isDefault(abroad.id))
+
+    const perCity = new Map<string, number>()
+    for (const a of await listAddresses(customer.id)) {
+      const key = a.serviceability.cityId ?? "none"
+      if (a.isDefault) perCity.set(key, (perCity.get(key) ?? 0) + 1)
+    }
+    check(
+      "no city ever holds more than one default",
+      [...perCity.values()].every((n) => n === 1),
+      Object.fromEntries(perCity),
+    )
+
+    const secondA = await createAddress(customer.id, {
+      label: "Gym", addressLine1: "2 City A Street", city: "A",
+      latitude: CITY_A.inside.latitude + 0.01, longitude: CITY_A.inside.longitude + 0.01,
+    } as never)
+    check("a second address in a city is not its default", secondA.isDefault === false)
 
     /* A customer ordering to their Work address has NOT changed their default.
      * The selection is per-device state elsewhere; nothing here records it. */
@@ -414,18 +441,87 @@ async function main() {
       "a non-default address can be used as the delivery location",
       selectedWork.city?.id === cityB.id,
     )
+    check("and using it does not change any default", await isDefault(home.id) && await isDefault(work.id))
+
+    const promoted = await setDefaultAddress(customer.id, secondA.id)
+    check("setting a default moves it within its city", promoted.isDefault === true)
+    check("the city's previous default lost it", !(await isDefault(home.id)))
+    check("and another city's default was untouched", await isDefault(work.id))
+    await setDefaultAddress(customer.id, home.id)
+
+    // ── 6b. Your cities, and the default city ─────────────────────────────
+    let session = await loadAddressBook(customer.id)
     check(
-      "and using it does not change which address is the default",
-      (await listAddresses(customer.id)).find((a) => a.isDefault)?.id === home.id,
+      "every city holding an address is one of the customer's markets",
+      [cityA.id, cityB.id, cityC.id].every((id) => session.markets.some((m) => m.cityId === id)),
+      session.markets.map((m) => m.citySlug),
+    )
+    check(
+      "exactly one market is the default city",
+      session.markets.filter((m) => m.isDefault).length === 1,
+    )
+    check(
+      "each market reports its own default address",
+      session.markets.find((m) => m.cityId === cityA.id)?.defaultAddressId === home.id
+        && session.markets.find((m) => m.cityId === cityB.id)?.defaultAddressId === work.id,
     )
 
-    const promoted = await setDefaultAddress(customer.id, abroad.id)
-    check("setting a default moves it", promoted.isDefault === true)
+    await selectMarket(customer.id, cityB.slug, { isDefault: false })
+    session = await loadAddressBook(customer.id)
     check(
-      "and only one address holds it",
-      (await listAddresses(customer.id)).filter((a) => a.isDefault).length === 1,
+      "with no explicit default city, the most recently selected city is the default",
+      session.defaultCitySlug === cityB.slug,
+      session.defaultCitySlug,
     )
-    await setDefaultAddress(customer.id, home.id)
+
+    const chosen = await selectMarket(customer.id, cityA.slug, { isDefault: true })
+    check("asking for a default city sets it", chosen.defaultCitySlug === cityA.slug)
+    await selectMarket(customer.id, cityC.slug, { isDefault: false })
+    session = await loadAddressBook(customer.id)
+    check(
+      "and a later plain selection does NOT displace it",
+      session.defaultCitySlug === cityA.slug,
+      session.defaultCitySlug,
+    )
+    check("the default city is listed first", session.markets[0]?.cityId === cityA.id)
+    check(
+      "the session's defaultAddressId is the DEFAULT CITY's default address",
+      session.defaultAddressId === home.id,
+    )
+    const dbDefaults = await prisma.consumerMarket.count({
+      where: { consumerAccountId: customer.id, isDefault: true },
+    })
+    check("the database holds exactly one default-city row", dbDefaults === 1, dbDefaults)
+
+    await rejects("an unknown city cannot be selected", "CITY_NOT_FOUND", () =>
+      selectMarket(customer.id, `${MARKER}-nowhere`, { isDefault: false }))
+
+    /* Through the REAL controller, not a copy of its mapper (bug class #1): a
+     * body's isDefault must reach the service, and nothing else may. */
+    const viaController = async (citySlug: string, body: unknown) => {
+      let data: unknown = null
+      let error: unknown = null
+      const req = { params: { citySlug }, body, customer } as never
+      const res = {
+        status() { return this },
+        json(payload: { data?: unknown }) { data = payload?.data ?? null; return this },
+      } as never
+      await handleSelectMarket(req, res, ((err: unknown) => { error = err }) as never)
+      if (error) throw error
+      return data as { defaultCitySlug: string | null }
+    }
+    const routed = await viaController(cityB.slug, { isDefault: true, lastSelectedAt: "1999-01-01" })
+    check("isDefault in a request body reaches the service", routed.defaultCitySlug === cityB.slug, routed)
+    const stamped = await prisma.consumerMarket.findFirst({
+      where : { consumerAccountId: customer.id, cityId: cityB.id },
+      select: { lastSelectedAt: true },
+    })
+    check(
+      "and a client cannot set lastSelectedAt through it",
+      (stamped?.lastSelectedAt.getUTCFullYear() ?? 0) > 2000,
+      stamped?.lastSelectedAt,
+    )
+    await viaController(cityA.slug, { isDefault: true })
 
     // ── 7. A SELECTED address is authoritative ────────────────────────────
     const conflicting = await resolveDiscoveryLocation(
@@ -529,13 +625,17 @@ async function main() {
     })
     clearOperatingCityCache()
 
-    // ── 11. Deleting tidies the book without stranding the default ────────
+    // ── 11. Deleting tidies the book without stranding a city's default ──
     await deleteAddress(customer.id, home.id)
     const remaining = await listAddresses(customer.id)
     check("the deleted address is gone", !remaining.some((a) => a.id === home.id))
     check(
-      "and the book still has exactly one default",
-      remaining.filter((a) => a.isDefault).length === 1,
+      "and city A's default falls to its remaining address",
+      remaining.find((a) => a.id === secondA.id)?.isDefault === true,
+    )
+    check(
+      "while city C's default is untouched",
+      remaining.find((a) => a.id === abroad.id)?.isDefault === true,
     )
   } finally {
     await prisma.consumerAddress.deleteMany({ where: { consumer: { email: { startsWith: MARKER } } } })

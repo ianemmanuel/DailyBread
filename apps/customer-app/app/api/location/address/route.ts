@@ -1,45 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server"
-import type { CustomerSessionData } from "@repo/types/customer-app"
 
-import { backendFetch } from "@/lib/api/server"
-import { envelopeError, envelopeReject } from "@/lib/api/proxy"
+import { envelopeReject } from "@/lib/api/proxy"
+import { getAccount } from "@/lib/data/account"
 import {
-  LOCATION_COOKIE,
-  LOCATION_COOKIE_MAX_AGE,
-  serializeLocation,
-  type StoredLocation,
+  COOKIE_OPTIONS, DELIVERY_COOKIE, parseDeliveryCookie, serializeDeliveryCookie, withChoice,
 } from "@/lib/location/cookie"
 
 /*
- * POST /api/location/address — "deliver to this saved address, on this device".
+ * POST /api/location/address — "Deliver to this saved address".
  *
- * ── Why this is not just a cookie write in the browser ─────────────────────
+ * Per DEVICE and per MARKET: it changes which address THIS browser delivers to
+ * in the city that address is in, and nothing else. It never touches the
+ * durable default (that is `PATCH /api/account/addresses/:id/default`, an
+ * explicit "Make default"), and choosing a Mombasa address leaves the Nairobi
+ * choice exactly as it was.
  *
- * The cookie is client-writable, so nothing in it can be trusted on its own.
- * What makes `addressId` safe to act on is that the SERVER resolves it: this
- * handler reads the caller's own address book with their token and finds the
- * row. An id belonging to someone else simply is not in that list, so it is
- * refused here and would be refused again by the feed.
- *
- * Everything written into the cookie therefore comes from the BACKEND's answer
- * — the label from the resolved zone's publicName and city, the coordinates
- * from the stored row. Nothing is taken from the request but the id itself.
- *
- * ── The coordinates are a display snapshot, not authority ──────────────────
- *
- * They are stored so a header can render without a round trip. Every read that
- * DECIDES anything sends the `addressId` and lets the backend resolve the point
- * again, because a zone edit can change what that point means between now and
- * the next request. If the address later becomes unusable, the feed says so
- * rather than silently falling back to these (see `getFeed`).
- *
- * ── An unserviceable address may still be selected ─────────────────────────
- *
- * Deliberately. "Not launched here yet" and "paused right now" are temporary,
- * and the feed's job is to explain that for the chosen address — refusing the
- * selection here would leave the customer unable to even ask.
+ * The address is looked up in the caller's OWN book with their token, so an
+ * id that is not theirs is simply not found. The market key is the city the
+ * backend resolved the pin into — never one the request names.
  */
-
 export async function POST(req: NextRequest) {
   let payload: { addressId?: unknown }
   try {
@@ -49,56 +28,31 @@ export async function POST(req: NextRequest) {
   }
 
   const addressId = typeof payload.addressId === "string" ? payload.addressId.trim() : ""
-  if (!addressId) {
-    return envelopeReject(400, "ADDRESS_REQUIRED", "Choose an address to deliver to.")
+  if (!addressId) return envelopeReject(400, "ADDRESS_REQUIRED", "Choose an address to deliver to.")
+
+  const account = await getAccount()
+  if (account.kind === "error") return envelopeReject(502, "ACCOUNT_UNAVAILABLE", account.message)
+  if (account.kind !== "ok") {
+    return envelopeReject(401, "SIGN_IN_REQUIRED", "Sign in to use your saved addresses.")
   }
 
-  let session: CustomerSessionData
-  try {
-    session = await backendFetch<CustomerSessionData>("/api/customer/v1/auth/session")
-  } catch (err) {
-    return envelopeError(err)
+  const address = account.session.addresses.find((row) => row.id === addressId)
+  if (!address) return envelopeReject(404, "ADDRESS_NOT_FOUND", "We couldn't find that address.")
+
+  const citySlug = address.serviceability.citySlug
+  if (!citySlug) {
+    return envelopeReject(409, "ADDRESS_OUTSIDE_MARKETS", "That address is not inside a city we deliver in.")
   }
 
-  const address = session.addresses.find((row) => row.id === addressId)
-  /* Not theirs, or gone. 404 either way — an opaque id must not be probeable. */
-  if (!address) {
-    return envelopeReject(404, "ADDRESS_NOT_FOUND", "We couldn't find that address.")
-  }
-
-  const { serviceability } = address
-
-  const stored: StoredLocation = {
-    addressId : address.id,
-    latitude  : address.latitude,
-    longitude : address.longitude,
-    /* The customer's own name for the place when they gave one — it is what
-     * they will recognise in the header. Otherwise the resolved area, which is
-     * already customer-facing copy. */
-    label     : address.label
-      ?? (serviceability.zoneName && serviceability.cityName
-        ? `${serviceability.zoneName}, ${serviceability.cityName}`
-        : serviceability.cityName ?? address.addressLine1),
-    ...(serviceability.cityId    ? { cityId   : serviceability.cityId }    : {}),
-    ...(serviceability.citySlug  ? { citySlug : serviceability.citySlug }  : {}),
-    ...(serviceability.cityName  ? { cityName : serviceability.cityName }  : {}),
-    ...(serviceability.countryId ? { countryId: serviceability.countryId } : {}),
-  }
-
-  /* The verdict is RETURNED, never stored — coverage changes when an admin
-   * edits a zone, and a cached answer would start contradicting the pages
-   * rendered from it. */
-  const res = NextResponse.json({ status: "success", data: { serviceability } })
-
-  res.cookies.set(LOCATION_COOKIE, serializeLocation(stored), {
-    maxAge  : LOCATION_COOKIE_MAX_AGE,
-    path    : "/",
-    sameSite: "lax",
-    secure  : process.env.NODE_ENV === "production",
-    /* Not httpOnly, same as the anonymous point: the navbar chip reads the
-     * label in the browser. Nothing secret is in it. */
-    httpOnly: false,
+  const cookie = withChoice(
+    parseDeliveryCookie(req.cookies.get(DELIVERY_COOKIE)?.value),
+    citySlug,
+    { mode: "deliver", target: { kind: "address", addressId: address.id } },
+  )
+  const res = NextResponse.json({
+    status: "success",
+    data  : { citySlug, serviceability: address.serviceability },
   })
-
+  res.cookies.set(DELIVERY_COOKIE, serializeDeliveryCookie(cookie), COOKIE_OPTIONS)
   return res
 }

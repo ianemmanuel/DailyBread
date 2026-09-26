@@ -2,7 +2,7 @@ import { prisma } from "@repo/db"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
 import type { CustomerAccount, CustomerSessionData } from "@repo/types/backend"
-import { listAddresses } from "./customer.address.service"
+import { loadAddressBook } from "./customer.address.service"
 
 /*
  * The customer's own account.
@@ -24,13 +24,8 @@ import { listAddresses } from "./customer.address.service"
  * left to a second round trip before the first screen can render.
  */
 export async function getCustomerSession(customer: CustomerAccount): Promise<CustomerSessionData> {
-  const addresses = await listAddresses(customer.id)
-
-  return {
-    customer,
-    addresses,
-    defaultAddressId: addresses.find((a) => a.isDefault)?.id ?? addresses[0]?.id ?? null,
-  }
+  const { addresses, markets, defaultCitySlug, defaultAddressId } = await loadAddressBook(customer.id)
+  return { customer, addresses, markets, defaultCitySlug, defaultAddressId }
 }
 
 export interface UpdateCustomerProfileInput {

@@ -14,6 +14,14 @@ import type { DiscoveryOutlet } from "@repo/types/customer-app"
  * photograph carrying the appetite, then name, then the three facts that decide
  * between two restaurants — how long, how much to deliver, how good. Offers ride
  * on the image, where they are seen before anything is read.
+ *
+ * ── Two of those facts are only true when a delivery point exists ──────────
+ *
+ * An ETA and a distance are measured FROM somewhere. Browsing a whole city
+ * there is no somewhere, so the backend sends them as null and this card drops
+ * the line rather than guessing (principle 11) — the row simply carries fewer
+ * facts. The delivery fee stays: it is the outlet's own configured fee, not a
+ * function of where the customer is standing.
  */
 export function OutletCard({
   outlet, priority = false,
@@ -104,7 +112,9 @@ export function OutletCard({
             <Bike className="size-3.5" />
             {formatDeliveryFee(outlet.deliveryFeeMinor, outlet.currency)}
           </span>
-          <span>{formatDistance(outlet.distanceMeters)}</span>
+          {outlet.distanceMeters !== null && (
+            <span>{formatDistance(outlet.distanceMeters)}</span>
+          )}
         </div>
       </div>
     </Link>

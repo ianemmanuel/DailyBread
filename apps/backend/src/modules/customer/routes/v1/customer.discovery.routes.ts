@@ -3,6 +3,7 @@ import { attachCustomerContext } from "../../middlewares"
 import {
   handleCheckServiceability,
   handleDiscoverOutlets,
+  handleDiscoverCityOutlets,
   handleGetStorefront,
   handlePriceCart,
 } from "../../controllers/customer.discovery.controller"
@@ -29,8 +30,13 @@ discoveryRouter.use(attachCustomerContext)
 //* app can say "we are not here yet" without pretending to search.
 discoveryRouter.get("/discovery/serviceability", handleCheckServiceability)
 
-//* The feed.
+//* The feed, resolved from a POINT.
 discoveryRouter.get("/discovery/outlets", handleDiscoverOutlets)
+
+//* The city's inventory, resolved from NO point — city-wide browsing. A
+//* separate route because it answers a different question and returns a
+//* different shape; see the controller.
+discoveryRouter.get("/discovery/cities/:citySlug/outlets", handleDiscoverCityOutlets)
 
 //* One storefront and its menu.
 discoveryRouter.get("/outlets/:outletId", handleGetStorefront)

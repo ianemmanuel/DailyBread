@@ -1,7 +1,8 @@
 import "server-only"
+import { cache } from "react"
 import type { CustomerSessionData } from "@repo/types/customer-app"
 
-import { backendFetch, BackendApiError } from "@/lib/api/server"
+import { backendFetch, BackendApiError, isSignedIn } from "@/lib/api/server"
 
 /*
  * The signed-in customer: who they are and every address they hold.
@@ -35,7 +36,12 @@ export type AccountState =
   | { kind: "suspended"; message: string }
   | { kind: "error"; message: string }
 
-export async function getAccount(): Promise<AccountState> {
+/**
+ * Memoised per request: the market layout, the page under it and every section
+ * on that page all ask, and they must all see the SAME address book — two
+ * reads could straddle a write and disagree about the default.
+ */
+export const getAccount = cache(async function getAccount(): Promise<AccountState> {
   try {
     const session = await backendFetch<CustomerSessionData>("/api/customer/v1/auth/session")
     return { kind: "ok", session }
@@ -49,4 +55,16 @@ export async function getAccount(): Promise<AccountState> {
     }
     return { kind: "error", message: "We couldn't load your account just now." }
   }
-}
+})
+
+export type AccountOrAnonymous = AccountState | { kind: "anonymous" }
+
+/**
+ * The account, or `anonymous` WITHOUT a backend round trip when nobody is
+ * signed in. Every market page renders for signed-out visitors, and they must
+ * not pay for a session call that can only fail.
+ */
+export const getAccountIfSignedIn = cache(async (): Promise<AccountOrAnonymous> => {
+  if (!(await isSignedIn())) return { kind: "anonymous" }
+  return getAccount()
+})

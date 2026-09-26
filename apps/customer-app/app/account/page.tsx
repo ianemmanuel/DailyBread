@@ -4,6 +4,7 @@ import { ArrowRight, MapPin } from "lucide-react"
 
 import { AccountError, AccountPending, AccountSuspended } from "@/components/account/AccountStates"
 import { AddressSummary } from "@/components/account/AddressSummary"
+import { YourCities } from "@/components/account/YourCities"
 import { Button } from "@/components/ui/button"
 import { getAccount } from "@/lib/data/account"
 
@@ -37,7 +38,7 @@ export default async function AccountPage() {
   if (state.kind === "suspended") return <div className="band-tight"><AccountSuspended message={state.message} /></div>
   if (state.kind === "error")     return <div className="band-tight"><AccountError message={state.message} /></div>
 
-  const { customer, addresses, defaultAddressId } = state.session
+  const { customer, addresses, markets } = state.session
 
   return (
     <div className="band-tight space-y-8">
@@ -47,6 +48,19 @@ export default async function AccountPage() {
         </h1>
         <p className="lede">{customer.email}</p>
       </header>
+
+      {markets.length > 0 && (
+        <section aria-labelledby="account-cities-title" className="space-y-4">
+          <div className="space-y-1">
+            <h2 id="account-cities-title" className="heading-lg">Your cities</h2>
+            <p className="text-sm text-muted-foreground">
+              Signing in takes you to your default city. Each city keeps its own
+              default delivery address.
+            </p>
+          </div>
+          <YourCities markets={markets} />
+        </section>
+      )}
 
       <section aria-labelledby="account-addresses-title" className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -68,7 +82,7 @@ export default async function AccountPage() {
           </Button>
         </div>
 
-        <AddressSummary addresses={addresses} defaultAddressId={defaultAddressId} />
+        <AddressSummary addresses={addresses} />
       </section>
 
       {addresses.length === 0 && (
