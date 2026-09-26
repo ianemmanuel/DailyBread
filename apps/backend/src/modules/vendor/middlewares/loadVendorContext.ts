@@ -77,7 +77,7 @@ export async function loadVendorContext(req: Request, _res: Response, next: Next
 
   // Stage 1
   const vendorUser = await prisma.vendorUser.findUnique({
-    where : { clerkId: vendorClerkUserId },
+    where : { externalAuthId: vendorClerkUserId },
     select: {
       id       : true,
       email    : true,

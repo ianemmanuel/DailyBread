@@ -62,7 +62,8 @@ export async function verifyClerkJwt(token: string): Promise<VerifiedClerkToken>
     throw new Error("Invalid JWT — missing iss, sub, or kid claims")
   }
 
-  // Identify which Clerk app issued this token by matching the issuer
+  // Identify which Clerk app issued this token by matching the issuer. Exact
+  // string, deliberately — the configured side is canonicalised in env.ts.
   const appEntry = Object.entries(projects).find(([, cfg]) => cfg.issuer === iss)
 
   if (!appEntry) {

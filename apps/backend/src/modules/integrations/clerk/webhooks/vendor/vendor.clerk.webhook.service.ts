@@ -57,9 +57,9 @@ async function handleVendorUserCreated(data: any): Promise<void> {
   // Vendors self-register — upsert is correct here.
   // update: {} is intentional — we don't overwrite anything on retry.
   await prisma.vendorUser.upsert({
-    where : { clerkId },
+    where : { externalAuthId: clerkId },
     update: {},
-    create: { clerkId, email },
+    create: { externalAuthId: clerkId, email },
   })
 
   console.info(`[webhook:vendor] Created/confirmed vendor user: ${email}`)
@@ -73,7 +73,7 @@ async function handleVendorUserDeleted(clerkId: string): Promise<void> {
   }
 
   const result = await prisma.vendorUser.updateMany({
-    where: { clerkId },
+    where: { externalAuthId: clerkId },
     data : { isActive: false },   // adjust field name to match your VendorUser model
   })
 

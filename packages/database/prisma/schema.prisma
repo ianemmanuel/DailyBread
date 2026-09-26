@@ -11,7 +11,11 @@ datasource db {
 
 model AdminUser {
   id                  String                  @id @default(uuid())
-  clerkUserId         String?                 @unique
+  //* The identity provider's subject for this person — a Clerk user id today.
+  //* Named for the ROLE it plays, not the vendor that fills it: the provider is
+  //* swappable (verification is plain JWT + JWKS), and a column called after
+  //* one supplier is how a supplier quietly becomes part of the schema.
+  externalAuthId      String?                 @unique
   roleId              String?
   email               String                  @unique
   firstName           String
@@ -43,7 +47,7 @@ model AdminUser {
   auditLogs     AuditLog[]
   notifications AdminNotification[]
 
-  @@index([clerkUserId])
+  @@index([externalAuthId])
   @@index([roleId])
   @@index([status])
   @@index([email])
@@ -1322,21 +1326,22 @@ model VendorCommissionRateHistory {
 }
 
 model VendorUser {
-  id        String    @id @default(uuid())
-  clerkId   String    @unique
-  email     String    @unique
-  isActive  Boolean   @default(true)
-  isDeleted Boolean   @default(false)
-  isBanned  Boolean   @default(false)
-  banReason String?
-  bannedAt  DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id             String    @id @default(uuid())
+  //* The identity provider's subject — see AdminUser.externalAuthId.
+  externalAuthId String    @unique
+  email          String    @unique
+  isActive       Boolean   @default(true)
+  isDeleted      Boolean   @default(false)
+  isBanned       Boolean   @default(false)
+  banReason      String?
+  bannedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   vendorAccount VendorAccount?
   application   VendorApplication?
 
-  @@index([clerkId])
+  @@index([externalAuthId])
   @@index([email])
 }
 
@@ -2061,14 +2066,14 @@ model OutletDocumentInheritance {
 // taxonomy on a store for the same reason.
 
 model Cuisine {
-  id               String         @id @default(uuid())
-  code             String         @unique
+  id          String         @id @default(uuid())
+  code        String         @unique
   //* URL identity for the admin detail page, same convention as
   //* VendorType.slug — regenerated on rename via ensureUniqueSlug.
-  slug             String         @unique
-  name             String
-  description      String?
-  status           TaxonomyStatus @default(ACTIVE)
+  slug        String         @unique
+  name        String
+  description String?
+  status      TaxonomyStatus @default(ACTIVE)
 
   //* ── Imagery ──────────────────────────────────────────────────────────
   //* A cuisine tile is a photograph; a dietary tag is a badge. DietaryTag is
@@ -2090,8 +2095,8 @@ model Cuisine {
   imageAlt         String?
   createdByAdminId String?
   deletedAt        DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   menuItems      MenuItemCuisine[]
   //* Kept from the original model and still unused: a single "primary"
@@ -2690,7 +2695,8 @@ model MealPlanSubscription {
 
 model ConsumerAccount {
   id               String         @id @default(uuid())
-  clerkId          String         @unique
+  //* The identity provider's subject — see AdminUser.externalAuthId.
+  externalAuthId   String         @unique
   email            String         @unique
   fullName         String?
   phone            String?
@@ -2704,7 +2710,7 @@ model ConsumerAccount {
 
   addresses ConsumerAddress[]
 
-  @@index([clerkId])
+  @@index([externalAuthId])
   @@index([email])
   @@index([status])
 }

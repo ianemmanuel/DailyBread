@@ -1,5 +1,3 @@
-import type { CustomerCurrency } from "@repo/types/customer-app"
-
 /*
  * Shared helpers for the landing page's STATIC placeholder content. Delete this
  * file once every section loads real data from the backend.
@@ -13,12 +11,4 @@ import type { CustomerCurrency } from "@repo/types/customer-app"
 export function pexels(id: number, width: number, height?: number): string {
   const size = height ? `&w=${width}&h=${height}&fit=crop` : `&w=${width}`
   return `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb${size}`
-}
-
-/** Prices are integer minor units, like the backend sends them. Kenya shillings
- *  because the dev data is in Nairobi. */
-export const PLACEHOLDER_CURRENCY: CustomerCurrency = {
-  code: "KES",
-  symbol: "KSh",
-  minorUnitDigits: 2,
 }

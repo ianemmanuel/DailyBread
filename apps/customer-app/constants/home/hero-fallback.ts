@@ -18,13 +18,10 @@ import { pexels } from "./placeholder-data"
  * carried around waiting to be forgotten about.
  */
 
-export const SEARCH_PLACEHOLDER = "Enter your delivery address"
-
 export const FALLBACK_HERO: HeroContent = {
   eyebrow: "Good food, made simple",
   headline: "Good food, right when you want it",
   lede: "Discover meals from great local kitchens, delivered fresh to your door.",
-  searchPlaceholder: SEARCH_PLACEHOLDER,
   image: {
     src: pexels(1640772, 1600, 1600),
     alt: "A bowl of roasted sweet potato wedges topped with beans, fresh salsa and yoghurt",

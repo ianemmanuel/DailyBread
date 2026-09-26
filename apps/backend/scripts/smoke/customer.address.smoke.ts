@@ -37,6 +37,7 @@ import {
 import { resolveDiscoveryLocation } from "@/modules/customer/services/customer.discovery.service"
 import {
   clearOperatingCityCache,
+  getCityDetail,
   resolveCustomerLocation,
 } from "@/modules/customer/services/customer.geo.service"
 
@@ -64,6 +65,31 @@ function square(west: number, south: number) {
 const CITY_A = square(-150, -30) // country 1
 const CITY_B = square(-148, -30) // country 1, a second market
 const CITY_C = square(-146, -30) // country 2
+
+/*
+ * A city whose zone covers only its EASTERN half, and whose stored centroid
+ * sits in the WESTERN half — outside every zone. That is not a contrived
+ * shape: the dev database's Nairobi zones do not tile the city either, which
+ * is exactly why the centroid is a map viewport and never a delivery point.
+ *
+ *   west half  → inside the city, in NO zone   → AREA_NOT_LAUNCHED
+ *   east half  → inside the city, PAUSED zone  → AREA_PAUSED
+ *
+ * Both are Case B: geography we know, operations we cannot currently offer.
+ */
+const CITY_D = square(-144, -30)
+const CITY_D_CENTROID = { latitude: -29.5, longitude: -143.75 } // west half, no zone
+const CITY_D_PAUSED   = { latitude: -29.5, longitude: -143.25 } // east half, paused zone
+const CITY_D_EAST_HALF = {
+  type       : "Polygon",
+  coordinates: [[
+    [-143.5, -30.0],
+    [-143.0, -30.0],
+    [-143.0, -29.0],
+    [-143.5, -29.0],
+    [-143.5, -30.0],
+  ]],
+}
 
 let passed = 0
 let failed = 0
@@ -148,6 +174,16 @@ async function main() {
     },
   })
 
+  const cityD = await prisma.city.create({
+    data: {
+      countryId: countryOne.id, name: "ZZ Address City D", slug: `${MARKER}-city-d`,
+      timezone: "Pacific/Pitcairn", status: "ACTIVE",
+      boundary: CITY_D.boundary, boundingBox: CITY_D.box,
+      /* The stored centroid, deliberately in the half no zone covers. */
+      latitude: CITY_D_CENTROID.latitude, longitude: CITY_D_CENTROID.longitude,
+    },
+  })
+
   /* The two names differ on purpose: an assertion that reads the right one
    * must not be able to pass by accident. */
   await prisma.zone.create({
@@ -157,11 +193,19 @@ async function main() {
     },
   })
 
+  await prisma.zone.create({
+    data: {
+      cityId: cityD.id, name: "ZZ-OPS-CITYD-EAST-01", publicName: "ZZ City D East",
+      boundaries: CITY_D_EAST_HALF, level: "MARKETPLACE",
+      status: "ACTIVE", operationalStatus: "SUSPENDED",
+    },
+  })
+
   const customer = await prisma.consumerAccount.create({
-    data: { clerkId: `${MARKER}-clerk-1`, email: `${MARKER}-one@example.test`, fullName: "ZZ Smoke One" },
+    data: { externalAuthId: `${MARKER}-auth-1`, email: `${MARKER}-one@example.test`, fullName: "ZZ Smoke One" },
   })
   const stranger = await prisma.consumerAccount.create({
-    data: { clerkId: `${MARKER}-clerk-2`, email: `${MARKER}-two@example.test`, fullName: "ZZ Smoke Two" },
+    data: { externalAuthId: `${MARKER}-auth-2`, email: `${MARKER}-two@example.test`, fullName: "ZZ Smoke Two" },
   })
 
   clearOperatingCityCache()
@@ -185,6 +229,11 @@ async function main() {
       } as never),
     )
 
+    /* CASE C — outside every known city. Refused, and nothing is written:
+     * there is no Country row to point at, so the row could not even be typed
+     * honestly, and persistence of points outside our geography waits for the
+     * account work. */
+    const beforeOutside = await prisma.consumerAddress.count()
     await rejects(
       "a pin outside every operating city is refused",
       "OUTSIDE_COVERAGE",
@@ -192,6 +241,10 @@ async function main() {
         addressLine1: "1 Ocean Road", city: "Atlantis",
         latitude: 0, longitude: 0,
       } as never),
+    )
+    check(
+      "and nothing was persisted for it",
+      (await prisma.consumerAddress.count()) === beforeOutside,
     )
 
     // ── 2. The PIN decides the geography, not the typed city ──────────────
@@ -265,9 +318,92 @@ async function main() {
       account?.countryId !== countryTwo.id,
     )
 
+    // ── 5b. CASE B — known geography, no operations. KEEP the coordinates ──
+    /*
+     * The distinction this whole block exists to hold:
+     *
+     *   "we know where this is and cannot serve it"  ≠  "we do not know where
+     *                                                    this is"
+     *
+     * The first is a delivery address we can store, and a demand signal in a
+     * place we might open next. The second has no country to belong to.
+     */
+    const viewport = (await getCityDetail(`${MARKER}-city-d`))?.viewport
+    check(
+      "a city exposes its stored centroid as a map VIEWPORT",
+      viewport?.center?.latitude === CITY_D_CENTROID.latitude &&
+      viewport?.center?.longitude === CITY_D_CENTROID.longitude,
+      viewport?.center,
+    )
+    check(
+      "and the boundary's box, for fitting the initial view",
+      viewport?.bounds?.north === CITY_D.box.north && viewport?.bounds?.west === CITY_D.box.west,
+      viewport?.bounds,
+    )
+
+    /* THE REASON THE CENTROID IS NEVER A DELIVERY POINT: this city's own
+     * centroid is inside its boundary and inside no zone at all. Handing it to
+     * a customer as their location would report a city we serve as unavailable
+     * — or, worse, quote a fee measured from a place nobody lives. */
+    const atCentroid = await resolveCustomerLocation(CITY_D_CENTROID)
+    check("the city centroid resolves to its own city", atCentroid.city?.id === cityD.id)
+    check(
+      "but is NOT serviceable — it lies outside every zone",
+      atCentroid.serviceability.isServiceable === false,
+    )
+    check(
+      "and says so as AREA_NOT_LAUNCHED, not as unknown geography",
+      atCentroid.serviceability.status === "AREA_NOT_LAUNCHED",
+      atCentroid.serviceability.status,
+    )
+
+    const unlaunched = await createAddress(customer.id, {
+      label: "Future home", addressLine1: "1 City D West", city: "City D",
+      latitude: CITY_D_CENTROID.latitude, longitude: CITY_D_CENTROID.longitude,
+    } as never)
+    check(
+      "an address inside a known city but in NO zone is still saved",
+      unlaunched.serviceability.cityId === cityD.id,
+    )
+    check(
+      "its coordinates are stored exactly as given — nothing snaps to a centroid or a zone",
+      unlaunched.latitude === CITY_D_CENTROID.latitude &&
+      unlaunched.longitude === CITY_D_CENTROID.longitude,
+    )
+    check(
+      "and it is reported honestly as not currently serviceable",
+      unlaunched.serviceability.isServiceable === false &&
+      unlaunched.serviceability.status === "AREA_NOT_LAUNCHED",
+      unlaunched.serviceability.status,
+    )
+
+    const paused = await createAddress(customer.id, {
+      label: "Paused side", addressLine1: "1 City D East", city: "City D",
+      latitude: CITY_D_PAUSED.latitude, longitude: CITY_D_PAUSED.longitude,
+    } as never)
+    check(
+      "an address in a PAUSED zone is saved too — a pause is temporary, the address is not",
+      paused.serviceability.cityId === cityD.id,
+    )
+    check(
+      "and reports the pause rather than pretending to be deliverable",
+      paused.serviceability.status === "AREA_PAUSED" &&
+      paused.serviceability.isServiceable === false,
+      paused.serviceability.status,
+    )
+    check(
+      "a paused zone is still named by its publicName",
+      paused.serviceability.zoneName === "ZZ City D East",
+      paused.serviceability.zoneName,
+    )
+
     // ── 6. isDefault is durable; the SELECTED address is not the same thing ─
     const book = await listAddresses(customer.id)
-    check("the book holds every city and country saved", book.length === 4, book.length)
+    check(
+      "the book holds every address saved — four cities, two countries, serviceable or not",
+      book.length === 6,
+      book.length,
+    )
     check("the first address saved became the default", book.find((a) => a.id === home.id)?.isDefault === true)
     check("a later address did not", book.find((a) => a.id === abroad.id)?.isDefault === false)
 

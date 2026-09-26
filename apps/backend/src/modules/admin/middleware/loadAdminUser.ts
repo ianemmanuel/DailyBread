@@ -25,7 +25,7 @@ export async function loadAdminUser(req: Request, _res: Response, next: NextFunc
   }
 
   const adminUser = await prisma.adminUser.findUnique({
-    where  : { clerkUserId: adminClerkUserId },
+    where  : { externalAuthId: adminClerkUserId },
     include: {
       role: true,
       // Individual permission grants — what this user CAN DO

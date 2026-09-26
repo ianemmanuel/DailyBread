@@ -8,8 +8,7 @@ import * as React from "react"
  * next-themes renders its blocking <script> INSIDE the React tree, from a
  * Client Component. React 19 / Next 16 warns on exactly that — "Encountered a
  * script tag while rendering React component" — and 0.4.6 (the latest release)
- * has no prop to turn it off, so the warning is structural rather than
- * something we configured wrong.
+ * has no prop to turn it off
  *
  * The fix is to move the script where it belongs: <ThemeScript /> is rendered
  * by the SERVER layout, so it lands in the HTML, runs before first paint, and
@@ -41,7 +40,6 @@ export function ThemeScript() {
 }
 
 const ThemeContext = React.createContext<{
-  /** What the visitor chose, "system" included. */
   theme: Theme
   setTheme: (theme: Theme) => void
   /** What is actually painted. `undefined` until mounted. */

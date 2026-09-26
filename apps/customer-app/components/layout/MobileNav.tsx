@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Menu, Monitor, Moon, Sun, X } from "lucide-react"
+import { ChevronRight, CircleUser, MapPin, Menu, Monitor, Moon, Sun, X } from "lucide-react"
 import {
   ClerkLoading,
   Show,
@@ -24,6 +24,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
+import { LocationChip } from "./LocationChip"
 import { Logo } from "./Logo"
 import { NavLinks } from "./NavLinks"
 
@@ -79,6 +80,14 @@ export function MobileNav() {
         </SheetHeader>
 
         <div className="flex-1 space-y-7 overflow-y-auto px-3 py-5">
+          {/* The delivery location comes FIRST on a phone, above the links: it
+              is the thing that decides what every other screen can show, and
+              it is the one piece of state a customer returns to change. It
+              renders nothing outside a market. */}
+          <div className="px-3" onClick={close}>
+            <LocationChip className="w-full max-w-none" />
+          </div>
+
           <nav aria-label="Main" className="space-y-2">
             <p className="px-3 text-xs font-medium tracking-wider text-muted-foreground uppercase">
               Menu
@@ -133,14 +142,31 @@ export function MobileNav() {
           </Show>
 
           <Show when="signed-in">
-            <div className="flex items-center gap-3">
-              <UserAvatar />
-              <span className="flex-1 text-sm font-medium">Your account</span>
-              <SignOutButton>
-                <Button variant="ghost" size="sm">
-                  Sign out
-                </Button>
-              </SignOutButton>
+            {/* The sheet cannot host <UserButton> — its menu portals outside
+                the dialog, which blocks clicks — so the destinations that live
+                in that dropdown on desktop are spelled out here instead.
+                Without them the account is unreachable on a phone. */}
+            <div className="w-full space-y-1">
+              <div className="flex items-center gap-3 px-1 pb-1">
+                <UserAvatar />
+                <span className="flex-1 truncate text-sm font-medium">Your account</span>
+                <SignOutButton>
+                  <Button variant="ghost" size="sm">
+                    Sign out
+                  </Button>
+                </SignOutButton>
+              </div>
+
+              <Link href="/account" className="nav-row">
+                <CircleUser className="size-5 shrink-0" />
+                Account
+                <ChevronRight className="ml-auto size-4 opacity-50" />
+              </Link>
+              <Link href="/account/addresses" className="nav-row">
+                <MapPin className="size-5 shrink-0" />
+                Delivery addresses
+                <ChevronRight className="ml-auto size-4 opacity-50" />
+              </Link>
             </div>
           </Show>
         </SheetFooter>

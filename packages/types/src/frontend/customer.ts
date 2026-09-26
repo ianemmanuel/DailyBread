@@ -24,6 +24,8 @@ export type {
   MarketCity,
   MarketsResult,
   CityMarket,
+  /** Map viewport for a city page — presentation only, never a location. */
+  CityViewport,
   CustomerCuisine,
   CustomerCuisinesResult,
 

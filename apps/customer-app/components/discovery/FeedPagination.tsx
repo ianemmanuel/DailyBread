@@ -17,17 +17,21 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
  * Rendered only when there is more than one page — a control that can do
  * nothing is noise.
  *
- * Recovered from 30facf5, where the feed lived at `/`. It now lives at
- * `/discover`, and every href is built against that.
+ * Recovered from 30facf5, where the feed lived at `/`. It now lives under a
+ * market, which is why the feed's path is PASSED IN rather than written here.
  */
 export function FeedPagination({
-  page, pageSize, total, params,
+  page, pageSize, total, params, basePath,
 }: {
   page    : number
   pageSize: number
   total   : number
   /** The feed's current searchParams, so paging preserves the filters. */
   params  : Record<string, string | undefined>
+  /** This market's feed. It used to be a hard-coded "/discover", which would
+   *  have walked the customer out of the city they were browsing the moment
+   *  the route moved under a market. */
+  basePath: string
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   if (totalPages <= 1) return null
@@ -41,7 +45,7 @@ export function FeedPagination({
       if (key !== "page" && value) next.set(key, value)
     }
     if (target > 1) next.set("page", String(target))
-    return next.size > 0 ? `/discover?${next}` : "/discover"
+    return next.size > 0 ? `${basePath}?${next}` : basePath
   }
 
   return (

@@ -78,7 +78,7 @@ export async function createApplication(vendorUser: VendorUser, input: CreateApp
       },
     })
 
-    await ClerkVendorStateService.setVendorApplicationStatus(vendorUser.clerkId, VendorApplicationStatus.DRAFT)
+    await ClerkVendorStateService.setVendorApplicationStatus(vendorUser.externalAuthId, VendorApplicationStatus.DRAFT)
 
     return { application, created: true as const }
   } catch (err) {
@@ -120,7 +120,7 @@ export async function updateApplication(
   })
 
   if (wasNeedsRevision) {
-    await ClerkVendorStateService.setVendorApplicationStatus(vendorUser.clerkId, VendorApplicationStatus.DRAFT)
+    await ClerkVendorStateService.setVendorApplicationStatus(vendorUser.externalAuthId, VendorApplicationStatus.DRAFT)
   }
 
   return updated
@@ -248,7 +248,7 @@ export async function submitApplication(
     },
   })
 
-  await ClerkVendorStateService.setVendorApplicationStatus(vendorUser.clerkId, VendorApplicationStatus.SUBMITTED)
+  await ClerkVendorStateService.setVendorApplicationStatus(vendorUser.externalAuthId, VendorApplicationStatus.SUBMITTED)
 
   // Only a genuine resubmission after NEEDS_REVISION, not the vendor's
   // first submit. Ownership (assignedReviewerId/assignedAt) is

@@ -2,7 +2,7 @@ import { prisma } from '../../index'
 import { SYSTEM_USER_ID } from '../../constants'
 import { SYSTEM_USER_EMAIL } from './data/system-data'
 
-// Not a real person, never logs in, has no clerkUserId and never will.
+// Not a real person, never logs in, has no externalAuthId and never will.
 // Exists only so automated writes (cron jobs, background flags) have a
 // valid AdminUser row to satisfy required foreign keys like
 // AuditLog.adminUserId and AdminUserPermission.grantedById.

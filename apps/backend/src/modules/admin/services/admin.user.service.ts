@@ -488,8 +488,8 @@ export async function suspendAdminUser(
   if (user.status === AdminUserStatus.deactivated) throw new ApiError(400, "Cannot suspend deactivated user", "INVALID_STATUS")
   if (user.status === AdminUserStatus.pending || user.status === AdminUserStatus.invited)
     throw new ApiError(400, "Cannot suspend a user who has not activated their account", "INVALID_STATUS")
-  if (user.clerkUserId) {
-    try { await ClerkAdminStateService.banUser(user.clerkUserId) }
+  if (user.externalAuthId) {
+    try { await ClerkAdminStateService.banUser(user.externalAuthId) }
     catch (err) { throw new ApiError(502, `Clerk ban failed: ${(err as Error).message}`, "CLERK_ERROR") }
   }
   await prisma.adminUser.update({ where: { id: adminUserId }, data: { status: AdminUserStatus.suspended, isActive: false, deactivationReason: reason } })
@@ -511,8 +511,8 @@ export async function reinstateAdminUser(
   assertNotActingOnSelf(actorId, adminUserId, "reinstate")
   assertTargetNotSuperAdmin(user.role?.name, "reinstated")
   if (user.status !== AdminUserStatus.suspended) throw new ApiError(400, "Only suspended users can be reinstated", "INVALID_STATUS")
-  if (user.clerkUserId) {
-    try { await ClerkAdminStateService.unbanUser(user.clerkUserId) }
+  if (user.externalAuthId) {
+    try { await ClerkAdminStateService.unbanUser(user.externalAuthId) }
     catch (err) { throw new ApiError(502, `Clerk unban failed: ${(err as Error).message}`, "CLERK_ERROR") }
   }
   await prisma.adminUser.update({ where: { id: adminUserId }, data: { status: AdminUserStatus.active, isActive: true, deactivationReason: null } })
@@ -533,13 +533,13 @@ export async function deactivateAdminUser(
   assertNotActingOnSelf(actorId, adminUserId, "deactivate")
   assertTargetNotSuperAdmin(user.role?.name, "deactivated")
   if (user.status === AdminUserStatus.deactivated) throw new ApiError(400, "Already deactivated", "ALREADY_DEACTIVATED")
-  if (user.clerkUserId) {
-    try { await ClerkAdminStateService.deleteUser(user.clerkUserId) }
+  if (user.externalAuthId) {
+    try { await ClerkAdminStateService.deleteUser(user.externalAuthId) }
     catch (err) { serviceLog.error({ err, adminUserId }, "Clerk deletion failed — continuing with DB deactivation") }
   }
   const clearedPermissions = user.permissions.map((p) => p.permission.key)
   await prisma.$transaction([
-    prisma.adminUser.update({ where: { id: adminUserId }, data: { status: AdminUserStatus.deactivated, isActive: false, deactivatedAt: new Date(), deactivationReason: reason, clerkUserId: null } }),
+    prisma.adminUser.update({ where: { id: adminUserId }, data: { status: AdminUserStatus.deactivated, isActive: false, deactivatedAt: new Date(), deactivationReason: reason, externalAuthId: null } }),
     // A deactivated admin retains their DB record (offboarding, not deletion)
     // but must hold no live permission grants — re-granted on re-invite if
     // the account is ever reactivated.
@@ -552,8 +552,8 @@ export async function deactivateAdminUser(
     entityType : "AdminUser",
     entityId   : adminUserId,
     changes    : {
-      before: { status: user.status, clerkUserId: user.clerkUserId, permissions: clearedPermissions },
-      after : { status: "deactivated", clerkUserId: null, permissions: [] },
+      before: { status: user.status, externalAuthId: user.externalAuthId, permissions: clearedPermissions },
+      after : { status: "deactivated", externalAuthId: null, permissions: [] },
     },
     metadata: { reason, permissionsCleared: clearedPermissions.length },
   })

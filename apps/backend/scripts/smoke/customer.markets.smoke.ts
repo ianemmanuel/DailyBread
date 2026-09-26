@@ -112,6 +112,9 @@ async function main() {
       status     : "ACTIVE",
       boundary   : BOUNDARY,
       boundingBox: BOX,
+      /* Stored centroid — a MAP VIEWPORT, never a delivery point. */
+      latitude   : INSIDE.latitude,
+      longitude  : INSIDE.longitude,
     },
   })
 
@@ -215,6 +218,27 @@ async function main() {
     check(
       "a slug we do not serve resolves to nothing",
       (await getCityDetail("zz-no-such-city")) === null,
+    )
+
+    /* The map viewport. Presentation only — the location page opens looking at
+     * the city, and what the customer pins is the only thing that becomes a
+     * delivery point. Asserted here because a null centroid would silently
+     * drop the map to the middle of the ocean. */
+    check(
+      "the city carries its stored centroid as a viewport",
+      detail?.viewport.center?.latitude === INSIDE.latitude &&
+      detail?.viewport.center?.longitude === INSIDE.longitude,
+      detail?.viewport.center,
+    )
+    check(
+      "and its bounding box, for fitting the initial view",
+      detail?.viewport.bounds?.north === BOX.north && detail?.viewport.bounds?.south === BOX.south,
+      detail?.viewport.bounds,
+    )
+    check(
+      "the viewport carries no geometry — a box is a view, not the coverage footprint",
+      Object.keys(detail?.viewport ?? {}).sort().join(",") === "bounds,center",
+      detail?.viewport,
     )
 
     await prisma.zone.deleteMany({ where: { cityId: city.id } })

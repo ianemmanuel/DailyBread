@@ -1,5 +1,5 @@
 import { backendFetch } from "@/lib/api/server"
-import { FALLBACK_HERO, SEARCH_PLACEHOLDER } from "@/constants/home/hero-fallback"
+import { FALLBACK_HERO } from "@/constants/home/hero-fallback"
 
 /*
  * The hero's content — a BACKEND read, which is why it lives in lib/data and
@@ -73,7 +73,6 @@ export interface HeroContent {
   /** Shown in uppercase by `.heading-hero`; a brand-coloured full stop is appended. */
   headline: string
   lede: string | null
-  searchPlaceholder: string
   image: HeroImage
   /** The promotion's call to action, rendered over the photograph. */
   cta: { label: string; href: string } | null
@@ -150,7 +149,6 @@ export async function getHeroContent(location?: {
     eyebrow: promotion.eyebrow,
     headline: promotion.headline,
     lede: promotion.subheadline,
-    searchPlaceholder: SEARCH_PLACEHOLDER,
     /* Its own imagery when it has some; otherwise the built-in photograph,
      * carrying the alt text that actually describes THAT photo. */
     image: promotion.image

@@ -1,32 +1,36 @@
-import { MapPin } from "lucide-react"
+import Link from "next/link"
+import { ArrowRight, Compass, MapPin } from "lucide-react"
 
-import { LocationPicker } from "@/components/location/LocationPicker"
+import { Button } from "@/components/ui/button"
 
 /*
- * The band that tells a visitor which city page they are on, names the areas
- * we cover, and asks for the one thing the page still does not know.
+ * "Welcome to this market" — and the two things there are to do in it.
  *
- * A city is a MARKET, not a delivery point. Everything above this band —
- * the promotion, the imagery — is resolved from the city and is correct. A
- * feed, a delivery fee and an estimate are not: those need coordinates, and
- * guessing them from a city centroid would be inventing a location and then
- * quoting prices against it.
+ * ── Two actions, in the order most customers want them ─────────────────────
  *
- * So the page says plainly what it knows, shows where we operate, and asks
- * for the rest — rather than showing numbers it cannot stand behind
- * (principle 11).
+ * BROWSE KITCHENS is primary. Someone who has just chosen Nairobi wants to see
+ * food, and making them set a delivery point first is a toll gate in front of
+ * the thing they came for — the feed asks for a location itself, at the moment
+ * it genuinely needs one, and that is a far easier request to understand.
  *
- * `children` is the area list, passed in rather than fetched here so this
- * stays a presentational Server Component with no data access of its own.
+ * SET A DELIVERY LOCATION is the second action rather than the first, and it
+ * is spelled out rather than hidden behind "Get started": a customer who
+ * already knows they want to check an address can go straight there, and
+ * everyone else meets it when the feed asks.
+ *
+ * Neither is a dialog. Both are real routes, so both survive a refresh, can be
+ * linked to, and read as places rather than as modes.
  */
 export function CityIntro({
+  citySlug,
   cityName,
   countryName,
   children,
 }: {
-  cityName: string
+  citySlug   : string
+  cityName   : string
   countryName: string
-  children?: React.ReactNode
+  children?  : React.ReactNode
 }) {
   return (
     <section aria-labelledby="city-intro-title" className="band-tight">
@@ -37,17 +41,31 @@ export function CityIntro({
             {cityName}, {countryName}
           </p>
           <h2 id="city-intro-title" className="heading-lg text-balance">
-            We deliver in {cityName}
+            Welcome to DailyBread {cityName}
           </h2>
           <p className="lede max-w-xl">
-            Share your exact address and we will show the kitchens that can reach
-            you, what delivery costs and how long it takes.
+            Browse the places cooking here, then tell us where to deliver —
+            we will show you what can actually reach your address, what it
+            costs and how long it takes.
           </p>
         </div>
 
         {children}
 
-        <LocationPicker placeholder={`Your address in ${cityName}`} />
+        <div className="flex flex-wrap gap-3">
+          <Button asChild size="lg" className="h-12 rounded-full px-7 text-base">
+            <Link href={`/city/${citySlug}/places`}>
+              <Compass aria-hidden className="size-4" />
+              Browse places in {cityName}
+            </Link>
+          </Button>
+          <Button asChild variant="brand" size="lg" className="h-12 rounded-full px-6 text-base">
+            <Link href={`/city/${citySlug}/location`}>
+              Set delivery location
+              <ArrowRight aria-hidden className="size-4" />
+            </Link>
+          </Button>
+        </div>
       </div>
     </section>
   )
