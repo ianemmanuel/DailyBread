@@ -3,24 +3,32 @@ import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { R2Service } from "@/lib/r2/r2.service"
 import { getModerationProvider } from "@/lib/moderation"
-import { getVendorFoodTagOptions, resolveSelectedFoodTags } from "./vendor.foodTags"
+import { getAvailableFoodTags, resolveSelectedFoodTags } from "@/lib/catalog/foodTags"
+import { normalizeOptionalText } from "@/lib/text/optionalText"
 import {
-  MAX_MEAL_IMAGES, MAX_MEAL_CUISINES, MAX_MEAL_DIETARY_TAGS,
+  MAX_MEAL_CUISINES, MAX_MEAL_DIETARY_TAGS,
   MAX_MEAL_DESCRIPTION_LENGTH, MAX_PORTION_SIZE_LENGTH,
-  assertMealName, normalizeOptionalText, assertValidPriceMinor, normalizePriceOverride,
-  normalizeMealImages, orphanedImageKeys, resolveSelectedOutlets,
-  assertOwnedMealImageKey,
-} from "./vendor.menu"
-import { resolveImageExtension } from "./vendor.profileMedia"
-import { resolveGroupSelection, assertGroupCannotZeroOutDish } from "./vendor.modifiers"
+  assertMealName, assertValidPriceMinor, normalizePriceOverride,
+  resolveSelectedOutlets,
+} from "../lib/menu.rules"
+import {
+  MAX_MEAL_IMAGES, assertOwnedStagedKey, diffMealImages, mealUploadPrefix, planMealImages,
+} from "../lib/images.rules"
+import {
+  IMAGE_SELECT, clearStaged, deleteImageObjects, discardPublished, presentMealImage,
+  publishStagedImages, writeImageRows,
+} from "./images.service"
+import { buildOriginalKey } from "@/lib/images/publicImage"
+import { resolveImageExtension } from "@/lib/images/uploadType"
+import { resolveGroupSelection, assertGroupCannotZeroOutDish } from "../lib/modifiers"
 import {
   recomputeModifierFlagsForItems, MODIFIER_CONTENT_FLAG,
-} from "./vendor.modifierGroup.service"
-import { getDiscountsForMenuItems, type MenuItemDiscount } from "./vendor.discount.service"
+} from "./modifierGroup.service"
 import {
   normalizePrepTime, resolveOrdering, nextPosition, assertSectionName,
-} from "./vendor.menuStructure"
+} from "../lib/menuStructure"
 import { getCountryTaxProfile, resolveRateBps, type CountryTaxProfile } from "@/modules/tax"
+import { getCurrencyForCountry } from "@/modules/finance"
 import { computeTax, formatRateBps } from "@/lib/pricing/tax"
 
 /*
@@ -69,11 +77,9 @@ async function loadActiveVendor(vendorId: string) {
 export async function getMenuContext(vendorId: string) {
   const vendor = await loadActiveVendor(vendorId)
 
-  const [country, outlets, sections, tagOptions, taxProfile, taxCategories] = await Promise.all([
-    prisma.country.findUnique({
-      where : { id: vendor.countryId },
-      select: { currencyCode: true, currency: true, currencySymbol: true },
-    }),
+  const [currency, outlets, sections, tagOptions, taxProfile, taxCategories] = await Promise.all([
+    // Finance's answer, never a guess — see getCurrencyForCountry.
+    getCurrencyForCountry(vendor.countryId),
     prisma.outlet.findMany({
       where  : { vendorId, deletedAt: null },
       orderBy: [{ isMainOutlet: "desc" }, { name: "asc" }],
@@ -84,7 +90,7 @@ export async function getMenuContext(vendorId: string) {
       orderBy: [{ position: "asc" }, { name: "asc" }],
       select : { id: true, name: true, position: true },
     }),
-    getVendorFoodTagOptions(vendor.countryId),
+    getAvailableFoodTags(vendor.countryId),
     // Tax is a property of the vendor's market, so the form is TOLD what a
     // typed price means rather than assuming a convention.
     getCountryTaxProfile(vendor.countryId),
@@ -102,20 +108,8 @@ export async function getMenuContext(vendorId: string) {
     }),
   ])
 
-  const code = country?.currencyCode ?? country?.currency ?? "USD"
-  const currencyRow = await prisma.currency.findUnique({
-    where : { code },
-    select: { code: true, symbol: true, minorUnitDigits: true },
-  })
-
   return {
-    currency: {
-      code,
-      symbol: currencyRow?.symbol ?? country?.currencySymbol ?? code,
-      // Default 2 only when the reference row is genuinely missing; a real
-      // country always resolves, and 2 is the least-surprising fallback.
-      minorUnitDigits: currencyRow?.minorUnitDigits ?? 2,
-    },
+    currency,
     outlets,
     sections,
     cuisines      : tagOptions.cuisines,
@@ -308,8 +302,7 @@ const ITEM_SELECT = {
   description   : true,
   basePriceMinor: true,
   taxCategoryId : true,
-  mainImageKey  : true,
-  imageKeys     : true,
+  images        : IMAGE_SELECT,
   portionSize   : true,
   position      : true,
   prepTimeMinutes: true,
@@ -352,27 +345,23 @@ const ITEM_SELECT = {
 
 type ItemRow = Awaited<ReturnType<typeof prisma.menuItem.findFirstOrThrow<{ select: typeof ITEM_SELECT }>>>
 
-/** Keys become short-lived signed URLs at the response boundary, never before
- *  — the same single-exit-point rule presentVendorProfile follows. */
+/** A photo is shown by its processed PUBLIC master — a stable URL, never a
+ *  signed one — and identified to the form by its original's key, which is
+ *  what the next save sends back to mean "keep this one". */
 async function presentMenuItem(
   item      : ItemRow,
   taxProfile: CountryTaxProfile,
-  /** Offers covering this dish. Resolved once for the whole page by the
-   *  caller, never once per row. */
-  discounts : MenuItemDiscount[] = [],
 ) {
-  const imageUrls = await Promise.all(
-    item.imageKeys.map(async (key) => {
-      try {
-        return { storageKey: key, url: await R2Service.generateViewUrl(key) }
-      } catch (err) {
-        // One unreadable object degrades to a null URL rather than failing the
-        // whole page, same as the profile's media signing.
-        serviceLog.warn({ err, key }, "Failed to sign meal image URL")
-        return { storageKey: key, url: null }
-      }
-    }),
-  )
+  const imageUrls = item.images.map((image) => {
+    const view = presentMealImage(image)
+    return {
+      storageKey : image.originalKey,
+      url        : view?.url ?? null,
+      width      : image.width,
+      height     : image.height,
+      blurDataUrl: image.blurDataUrl,
+    }
+  })
 
   /*
    * What the price actually breaks down to, computed here rather than in the
@@ -395,14 +384,9 @@ async function presentMenuItem(
   return {
     ...rest,
     tax,
-    /*
-     * What a customer would see on this dish right now. An offer that is
-     * scheduled or paused is still listed — the vendor wants to know it is
-     * coming, or why it is not running — but only one with appliesNow true is
-     * actually changing the price, and the UI leans on that distinction rather
-     * than showing a struck-through price for an offer nobody can use yet.
-     */
-    discounts,
+    // `discounts` (the offer preview) is NOT added here: offers belong to the
+    // vendor module, which composes them onto this at its own boundary — see
+    // OfferPreview in controllers/meals.vendor.controller.ts.
     images     : imageUrls,
     mainImageUrl: imageUrls[0]?.url ?? null,
     cuisines   : cuisines.map((c) => c.cuisine),
@@ -481,13 +465,8 @@ export async function listMenuItems(
     prisma.menuItem.count({ where }),
   ])
 
-  // One discount read for the whole page, same rule as the tax profile.
-  const discountsByItem = await getDiscountsForMenuItems(vendorId, items.map((i) => i.id))
-
   return {
-    items     : await Promise.all(
-      items.map((i) => presentMenuItem(i, taxProfile, discountsByItem.get(i.id) ?? [])),
-    ),
+    items     : await Promise.all(items.map((i) => presentMenuItem(i, taxProfile))),
     total,
     page,
     pageSize,
@@ -505,8 +484,7 @@ export async function getMenuItem(vendorId: string, itemId: string) {
     getCountryTaxProfile(vendor.countryId),
   ])
   if (!item) throw new ApiError(404, "Meal not found", "NOT_FOUND")
-  const discountsByItem = await getDiscountsForMenuItems(vendorId, [item.id])
-  return presentMenuItem(item, taxProfile, discountsByItem.get(item.id) ?? [])
+  return presentMenuItem(item, taxProfile)
 }
 
 // ─── Images ───────────────────────────────────────────────────────────────────
@@ -519,38 +497,46 @@ export async function presignMealImage(
   if (typeof input.contentType !== "string") {
     throw new ApiError(400, "contentType is required", "MISSING_FIELDS")
   }
+  // The declared type and size are an early guard only — the object the
+  // browser actually stores is size-checked and decoded when the meal is
+  // saved (processPublicBoundedImage). Uploads land in STAGING, which an R2
+  // lifecycle rule expires if they are never attached.
   const extension  = resolveImageExtension(input.contentType, Number(input.fileSize))
-  const storageKey = R2Service.generateMealImageKey(vendorId, extension)
+  const storageKey = buildOriginalKey(mealUploadPrefix(vendorId), extension)
   const uploadUrl  = await R2Service.generateUploadUrl(storageKey, input.contentType)
 
   return { storageKey, uploadUrl }
 }
 
 /**
- * Removes an image the vendor discarded before saving.
+ * Removes an upload the vendor discarded before saving.
  *
- * Refuses any key a SAVED meal still points at, so a stale tab cannot delete a
- * live photo out from under the row. Deleting a key that was never uploaded is
- * a no-op success — the vendor's intent is satisfied either way.
+ * Only a STAGED upload can go this way. A photo on a saved dish — live,
+ * archived or deleted alike — is managed through that dish (removing it from
+ * the gallery and saving), never as a loose key, so a stale tab cannot delete
+ * a photo out from under a row. Deleting a staged key that was never uploaded
+ * is a no-op success — the vendor's intent is satisfied either way.
  */
 export async function discardMealImage(vendorId: string, storageKey: unknown) {
   await loadActiveVendor(vendorId)
-  const key = assertOwnedMealImageKey(storageKey, vendorId)
 
-  const inUse = await prisma.menuItem.findFirst({
-    where : { vendorId, deletedAt: null, imageKeys: { has: key } },
-    select: { id: true },
-  })
-  if (inUse) {
-    throw new ApiError(
-      409,
-      "That photo is still on a saved meal. Remove it there and save first.",
-      "IMAGE_IN_USE",
-    )
+  if (typeof storageKey === "string") {
+    const saved = await prisma.menuItemImage.findFirst({
+      where : { originalKey: storageKey, menuItem: { vendorId } },
+      select: { id: true },
+    })
+    if (saved) {
+      throw new ApiError(
+        409,
+        "That photo is on a saved meal. Remove it there and save instead.",
+        "IMAGE_IN_USE",
+      )
+    }
   }
 
+  const key = assertOwnedStagedKey(storageKey, vendorId)
   await R2Service.deleteObject(key).catch((err) => {
-    serviceLog.warn({ err, key }, "Failed to delete discarded meal image")
+    serviceLog.warn({ err, key }, "Failed to delete discarded meal upload")
   })
   return { discarded: true }
 }
@@ -625,7 +611,8 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
   const portionSize    = normalizeOptionalText(input.portionSize, MAX_PORTION_SIZE_LENGTH, "Portion size")
   const prepTimeMinutes = normalizePrepTime(input.prepTimeMinutes)
   const basePriceMinor = assertValidPriceMinor(input.basePriceMinor)
-  const { mainImageKey, imageKeys } = normalizeMealImages(input.imageKeys, vendorId)
+  // A new dish has nothing attached, so every photo must be a staged upload.
+  const imagePlan = planMealImages(input.imageKeys, vendorId, [])
 
   await assertNameAvailable(vendorId, name)
 
@@ -654,6 +641,12 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
   })
   const position = nextPosition(last?.position)
 
+  // Photos are processed and published BEFORE the transaction — external I/O
+  // never runs inside one. Everything cheap has already been validated, so a
+  // request that was going to be refused anyway never processes an image.
+  const { staged } = diffMealImages([], imagePlan)
+  const published = await publishStagedImages(vendorId, staged)
+
   // The item and every outlet it is sold at are one transaction: a dish that
   // exists but is sold nowhere is invisible, and half-created is worse than
   // not created.
@@ -669,8 +662,6 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
         prepTimeMinutes,
         position,
         basePriceMinor,
-        mainImageKey,
-        imageKeys,
         flagReasons,
         reviewStatus   : flagReasons.length > 0 ? ProfileReviewStatus.FLAGGED : ProfileReviewStatus.AUTO_APPROVED,
         flaggedAt      : flagReasons.length > 0 ? new Date() : null,
@@ -709,8 +700,16 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
       })),
     })
 
+    await writeImageRows(tx, item.id, { removedIds: [], keep: [], published })
+
     return item
+  }).catch(async (err) => {
+    // Nothing references what was just published — take it back down.
+    await discardPublished(published)
+    throw err
   })
+
+  await clearStaged(published)
 
   serviceLog.info(
     { vendorId, menuItemId: created.id, outlets: outletIds.length, flagged: flagReasons.length > 0 },
@@ -726,8 +725,9 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
   const existing = await prisma.menuItem.findFirst({
     where : { id: itemId, vendorId, deletedAt: null },
     select: {
-      id: true, name: true, description: true, imageKeys: true,
+      id: true, name: true, description: true,
       reviewStatus: true, flagReasons: true, adminStatus: true, taxCategoryId: true,
+      images: { select: { id: true, originalKey: true, imageKey: true } },
     },
   })
   if (!existing) throw new ApiError(404, "Meal not found", "NOT_FOUND")
@@ -740,7 +740,12 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
   const portionSize    = normalizeOptionalText(input.portionSize, MAX_PORTION_SIZE_LENGTH, "Portion size")
   const prepTimeMinutes = normalizePrepTime(input.prepTimeMinutes)
   const basePriceMinor = assertValidPriceMinor(input.basePriceMinor)
-  const { mainImageKey, imageKeys } = normalizeMealImages(input.imageKeys, vendorId)
+  // Kept photos are identified by their original's key, new ones by their
+  // staging key; anything else is refused.
+  const imageDiff = diffMealImages(
+    existing.images,
+    planMealImages(input.imageKeys, vendorId, existing.images.map((i) => i.originalKey)),
+  )
 
   await assertNameAvailable(vendorId, name, itemId)
 
@@ -793,12 +798,17 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
     ? (flagReasons.length > 0 ? ProfileReviewStatus.FLAGGED : ProfileReviewStatus.AUTO_APPROVED)
     : existing.reviewStatus
 
+  // New photos only — a kept photo is never reprocessed, a reorder is a
+  // position change. Before the transaction, for the reason createMenuItem
+  // gives.
+  const published = await publishStagedImages(vendorId, imageDiff.staged)
+
   await prisma.$transaction(async (tx) => {
     await tx.menuItem.update({
       where: { id: itemId },
       data : {
         sectionId, taxCategoryId, name, description, portionSize, prepTimeMinutes,
-        basePriceMinor, mainImageKey, imageKeys,
+        basePriceMinor,
         flagReasons,
         reviewStatus,
         ...(textChanged
@@ -871,18 +881,21 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
       })
     }
     await recomputeModifierFlagsForItems([itemId], tx)
+
+    await writeImageRows(tx, itemId, {
+      removedIds: imageDiff.removed.map((r) => r.id),
+      keep      : imageDiff.keep.map((k) => ({ id: k.row.id, position: k.position })),
+      published,
+    })
+  }).catch(async (err) => {
+    await discardPublished(published)
+    throw err
   })
 
   // After the transaction and best-effort: a storage hiccup must never roll
-  // back a save the vendor was already told succeeded.
-  const orphans = orphanedImageKeys(existing.imageKeys, imageKeys)
-  await Promise.all(
-    orphans.map((key) =>
-      R2Service.deleteObject(key).catch((err) =>
-        serviceLog.warn({ err, key }, "Failed to delete orphaned meal image"),
-      ),
-    ),
-  )
+  // back a save the vendor was already told succeeded. A removed photo's
+  // master and original go; the uploads this save consumed are cleared.
+  await Promise.all([deleteImageObjects(imageDiff.removed), clearStaged(published)])
 
   serviceLog.info({ vendorId, menuItemId: itemId, outlets: outletIds.length }, "Menu item updated")
   return getMenuItem(vendorId, itemId)
@@ -965,6 +978,69 @@ async function resolveSectionId(vendorId: string, value: unknown): Promise<strin
   return section.id
 }
 
+// ─── Lifecycle: archive and delete ───────────────────────────────────────────
+
+/*
+ * Two vendor verbs, both SOFT, both whole-dish:
+ *
+ *   archive  isArchived — "stopped selling everywhere", reversible. Off every
+ *            customer surface (SELLABLE_MENU_ITEM_WHERE), still on the
+ *            vendor's own menu to bring back.
+ *   delete   deletedAt  — gone from the vendor's menu too. Terminal for the
+ *            vendor; the row stays, and the live-rows-only name index frees
+ *            the name for a new dish.
+ *
+ * Neither touches anything else, deliberately: outlet rows (and their prices
+ * and availability), modifier attachments, images and meal-plan references
+ * all survive. A dish in a meal plan or, later, an order must stay resolvable,
+ * and what a plan does about a withdrawn dish is the meal-plan domain's call.
+ *
+ * Moderation is a separate axis and is left alone. A BANNED dish is refused
+ * exactly as an edit of it is — the platform removed it, and the vendor's
+ * lifecycle switches do not apply to it.
+ */
+
+async function findOwnedLiveItem(vendorId: string, itemId: string) {
+  const item = await prisma.menuItem.findFirst({
+    where : { id: itemId, vendorId, deletedAt: null },
+    select: { id: true, adminStatus: true, isArchived: true },
+  })
+  if (!item) throw new ApiError(404, "Meal not found", "NOT_FOUND")
+  if (item.adminStatus === "BANNED") {
+    throw new ApiError(403, "This meal has been removed by DailyBread and can't be edited.", "MEAL_BANNED")
+  }
+  return item
+}
+
+/** Idempotent, like availability: setting the state it is already in is a
+ *  success, not an error — a double-tap should not produce a scary toast. */
+export async function setMenuItemArchived(vendorId: string, itemId: string, isArchived: boolean) {
+  await loadActiveVendor(vendorId)
+  const item = await findOwnedLiveItem(vendorId, itemId)
+
+  if (item.isArchived !== isArchived) {
+    await prisma.menuItem.update({
+      where: { id: itemId },
+      data : { isArchived, vendorUpdatedAt: new Date() },
+    })
+    serviceLog.info({ vendorId, menuItemId: itemId, isArchived }, isArchived ? "Menu item archived" : "Menu item unarchived")
+  }
+  return { id: itemId, isArchived }
+}
+
+export async function deleteMenuItem(vendorId: string, itemId: string) {
+  await loadActiveVendor(vendorId)
+  await findOwnedLiveItem(vendorId, itemId)
+
+  await prisma.menuItem.update({
+    where: { id: itemId },
+    data : { deletedAt: new Date(), vendorUpdatedAt: new Date() },
+  })
+
+  serviceLog.info({ vendorId, menuItemId: itemId }, "Menu item deleted")
+  return { id: itemId, deleted: true }
+}
+
 // ─── Per-outlet availability (86-ing) ────────────────────────────────────────
 
 /**
@@ -976,8 +1052,10 @@ async function resolveSectionId(vendorId: string, value: unknown): Promise<strin
 export async function setMealAvailability(vendorId: string, mealId: string, isAvailable: boolean) {
   await loadActiveVendor(vendorId)
 
+  // A deleted dish's Meal rows are preserved, not gone, so the dish's own
+  // deletedAt is checked too — a deleted dish has nothing left to 86.
   const meal = await prisma.meal.findFirst({
-    where : { id: mealId, deletedAt: null, menuItem: { vendorId } },
+    where : { id: mealId, deletedAt: null, menuItem: { vendorId, deletedAt: null } },
     select: { id: true },
   })
   if (!meal) throw new ApiError(404, "Meal not found", "NOT_FOUND")

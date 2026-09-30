@@ -9,7 +9,7 @@ import {
   updateModifierGroup,
   deleteModifierGroup,
   setModifierOptionAvailability,
-} from "../services/vendor.modifierGroup.service"
+} from "../services/modifierGroup.service"
 import {
   getMenuContext,
   listMenuSections,
@@ -25,13 +25,22 @@ import {
   presignMealImage,
   discardMealImage,
   setMealAvailability,
-} from "../services/vendor.menu.service"
+  setMenuItemArchived,
+  deleteMenuItem,
+} from "../services/menu.service"
 
 /*
  * Every handler destructures the body field by field rather than spreading it.
  * A spread would let a client set reviewStatus, adminStatus or flagReasons —
  * the exact latent bug upsertVendorProfile had before it was rewritten this
  * way, where an unknown column reached Prisma as a runtime validation error.
+ */
+
+/*
+ * Identity arrives ALREADY AUTHORIZED. The vendor module's auth chain and its
+ * requireVendorState("ACTIVE") gate run at the mount (vendor/routes/v1), so
+ * nothing here re-checks who the caller is — every service call then scopes
+ * by this vendor id, which is the domain's own ownership check.
  */
 
 /** The vendor ACCOUNT id, resolved the same way every other vendor controller
@@ -63,26 +72,81 @@ export const handleCreateMenuSection: RequestHandler = async (req, res, next) =>
   } catch (err) { next(err) }
 }
 
-//* GET /vendor/v1/menu/items?search=&sectionId=&outletId=&page=&pageSize=
-export const handleListMenuItems: RequestHandler = async (req, res, next) => {
-  try {
-    const result = await listMenuItems(await vendorIdOf(req), {
-      search   : typeof req.query.search    === "string" ? req.query.search    : undefined,
-      sectionId: typeof req.query.sectionId === "string" ? req.query.sectionId : undefined,
-      outletId : typeof req.query.outletId  === "string" ? req.query.outletId  : undefined,
-      page     : req.query.page     ? Number(req.query.page)     : undefined,
-      pageSize : req.query.pageSize ? Number(req.query.pageSize) : undefined,
-    })
-    return sendSuccess(res, result, "Meals fetched")
-  } catch (err) { next(err) }
+/*
+ * ─── The offer preview, composed at the vendor boundary ──────────────────────
+ *
+ * Every dish the vendor reads back carries `discounts`: which of their offers
+ * cover it and what it costs under each. Offers belong to the VENDOR module
+ * (they are not part of this domain), and meals imports nothing from vendor,
+ * so the vendor module supplies this function when it mounts the router —
+ * the one place the two are composed. Phase 6 (pricing) decides its final
+ * home; until then this is a pass-through of the vendor's own preview,
+ * deliberately unchanged, including its known pricing gaps.
+ */
+export type OfferPreview = (
+  vendorId: string,
+  itemIds : readonly string[],
+) => Promise<Map<string, unknown[]>>
+
+async function withOffers<T extends { id: string }>(
+  offerPreview: OfferPreview,
+  vendorId    : string,
+  items       : T[],
+): Promise<Array<T & { discounts: unknown[] }>> {
+  // One read for the whole page, never one per dish.
+  const byItem = await offerPreview(vendorId, items.map((i) => i.id))
+  return items.map((item) => ({ ...item, discounts: byItem.get(item.id) ?? [] }))
 }
 
-//* GET /vendor/v1/menu/items/:itemId
-export const handleGetMenuItem: RequestHandler = async (req, res, next) => {
-  try {
-    const item = await getMenuItem(await vendorIdOf(req), req.params.itemId!)
-    return sendSuccess(res, item, "Meal fetched")
-  } catch (err) { next(err) }
+/** The four handlers whose response is a dish, and so carries its offers. */
+export function menuItemHandlers(offerPreview: OfferPreview) {
+  //* GET /vendor/v1/menu/items?search=&sectionId=&outletId=&page=&pageSize=
+  const handleListMenuItems: RequestHandler = async (req, res, next) => {
+    try {
+      const vendorId = await vendorIdOf(req)
+      const result = await listMenuItems(vendorId, {
+        search   : typeof req.query.search    === "string" ? req.query.search    : undefined,
+        sectionId: typeof req.query.sectionId === "string" ? req.query.sectionId : undefined,
+        outletId : typeof req.query.outletId  === "string" ? req.query.outletId  : undefined,
+        page     : req.query.page     ? Number(req.query.page)     : undefined,
+        pageSize : req.query.pageSize ? Number(req.query.pageSize) : undefined,
+      })
+      const items = await withOffers(offerPreview, vendorId, result.items)
+      return sendSuccess(res, { ...result, items }, "Meals fetched")
+    } catch (err) { next(err) }
+  }
+
+  //* GET /vendor/v1/menu/items/:itemId
+  const handleGetMenuItem: RequestHandler = async (req, res, next) => {
+    try {
+      const vendorId = await vendorIdOf(req)
+      const item = await getMenuItem(vendorId, req.params.itemId!)
+      const [withPreview] = await withOffers(offerPreview, vendorId, [item])
+      return sendSuccess(res, withPreview, "Meal fetched")
+    } catch (err) { next(err) }
+  }
+
+  //* POST /vendor/v1/menu/items
+  const handleCreateMenuItem: RequestHandler = async (req, res, next) => {
+    try {
+      const vendorId = await vendorIdOf(req)
+      const item = await createMenuItem(vendorId, menuItemInputFrom(req.body))
+      const [withPreview] = await withOffers(offerPreview, vendorId, [item])
+      return sendSuccess(res, withPreview, "Meal created", 201)
+    } catch (err) { next(err) }
+  }
+
+  //* PUT /vendor/v1/menu/items/:itemId
+  const handleUpdateMenuItem: RequestHandler = async (req, res, next) => {
+    try {
+      const vendorId = await vendorIdOf(req)
+      const item = await updateMenuItem(vendorId, req.params.itemId!, menuItemInputFrom(req.body))
+      const [withPreview] = await withOffers(offerPreview, vendorId, [item])
+      return sendSuccess(res, withPreview, "Meal updated")
+    } catch (err) { next(err) }
+  }
+
+  return { handleListMenuItems, handleGetMenuItem, handleCreateMenuItem, handleUpdateMenuItem }
 }
 
 /** The shape both create and update accept, pulled out so the two can never
@@ -103,22 +167,6 @@ function menuItemInputFrom(body: Record<string, unknown> | undefined) {
     priceOverrides: body?.priceOverrides,
     modifierGroupIds: body?.modifierGroupIds,
   }
-}
-
-//* POST /vendor/v1/menu/items
-export const handleCreateMenuItem: RequestHandler = async (req, res, next) => {
-  try {
-    const item = await createMenuItem(await vendorIdOf(req), menuItemInputFrom(req.body))
-    return sendSuccess(res, item, "Meal created", 201)
-  } catch (err) { next(err) }
-}
-
-//* PUT /vendor/v1/menu/items/:itemId
-export const handleUpdateMenuItem: RequestHandler = async (req, res, next) => {
-  try {
-    const item = await updateMenuItem(await vendorIdOf(req), req.params.itemId!, menuItemInputFrom(req.body))
-    return sendSuccess(res, item, "Meal updated")
-  } catch (err) { next(err) }
 }
 
 //* POST /vendor/v1/menu/images/presign
@@ -148,6 +196,26 @@ export const handleSetMealAvailability: RequestHandler = async (req, res, next) 
     }
     const result = await setMealAvailability(await vendorIdOf(req), req.params.mealId!, req.body.isAvailable)
     return sendSuccess(res, result, "Availability updated")
+  } catch (err) { next(err) }
+}
+
+//* PATCH /vendor/v1/menu/items/:itemId/archive — { isArchived }. Stop (or
+//* resume) selling a dish everywhere without losing anything about it.
+export const handleSetMenuItemArchived: RequestHandler = async (req, res, next) => {
+  try {
+    if (typeof req.body?.isArchived !== "boolean") {
+      throw new ApiError(400, "isArchived must be true or false", "MISSING_FIELDS")
+    }
+    const result = await setMenuItemArchived(await vendorIdOf(req), req.params.itemId!, req.body.isArchived)
+    return sendSuccess(res, result, result.isArchived ? "Meal archived" : "Meal restored")
+  } catch (err) { next(err) }
+}
+
+//* DELETE /vendor/v1/menu/items/:itemId — soft delete; nothing it references goes.
+export const handleDeleteMenuItem: RequestHandler = async (req, res, next) => {
+  try {
+    const result = await deleteMenuItem(await vendorIdOf(req), req.params.itemId!)
+    return sendSuccess(res, result, "Meal deleted")
   } catch (err) { next(err) }
 }
 

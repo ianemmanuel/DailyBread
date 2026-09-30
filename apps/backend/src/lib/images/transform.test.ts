@@ -6,6 +6,7 @@ import {
   ImageRejected,
   MIN_SOURCE_EDGE,
   inspectImage,
+  normaliseBoundedImage,
   normaliseSquareImage,
   toBlurDataUrl,
   toSquareWebp,
@@ -147,5 +148,64 @@ describe("normaliseSquareImage", () => {
     await expect(normaliseSquareImage(await photo(300, 300), SPEC)).rejects.toMatchObject({
       code: "IMAGE_TOO_SMALL",
     })
+  })
+})
+
+describe("normaliseBoundedImage", () => {
+  const BOUNDED = { maxEdge: 1600, minEdge: 600, quality: 82 } as const
+
+  it("fits a large landscape photo inside the box, keeping its aspect ratio", async () => {
+    const result = await normaliseBoundedImage(await photo(4000, 3000), BOUNDED)
+    expect(result).toMatchObject({ width: 1600, height: 1200, contentType: "image/webp" })
+    const meta = await sharp(result.buffer).metadata()
+    expect(meta).toMatchObject({ format: "webp", width: 1600, height: 1200 })
+  })
+
+  it("fits a portrait photo by its long edge", async () => {
+    const result = await normaliseBoundedImage(await photo(1200, 2400), BOUNDED)
+    expect(result).toMatchObject({ width: 800, height: 1600 })
+  })
+
+  it("never enlarges a photo already inside the box", async () => {
+    const result = await normaliseBoundedImage(await photo(900, 700), BOUNDED)
+    expect(result).toMatchObject({ width: 900, height: 700 })
+  })
+
+  /* The decompression-bomb guard, reported as itself: ~42 megapixels of flat
+   * colour is tiny in bytes, and must be refused as too large — not as an
+   * unreadable file. */
+  it("refuses an image over the pixel ceiling as IMAGE_TOO_LARGE", async () => {
+    const huge = await sharp({ create: { width: 7000, height: 6000, channels: 3, background: "#c87828" } }).png().toBuffer()
+    await expect(normaliseBoundedImage(huge, BOUNDED)).rejects.toMatchObject({ code: "IMAGE_TOO_LARGE" })
+  })
+
+  it("refuses a photo whose short edge is below the floor", async () => {
+    await expect(normaliseBoundedImage(await photo(2000, 599), BOUNDED)).rejects.toMatchObject({
+      code: "IMAGE_TOO_SMALL",
+    })
+  })
+
+  /* The privacy point of the whole pipeline: a phone photo carries where it
+   * was taken. The master must carry nothing — and the camera's rotation is
+   * applied to the pixels rather than left as a tag a viewer might ignore. */
+  it("strips metadata and applies the orientation tag", async () => {
+    const tagged = await sharp({ create: { width: 1200, height: 800, channels: 3, background: "#c87828" } })
+      .jpeg()
+      .withMetadata({ orientation: 6, exif: { IFD0: { Copyright: "secret", Artist: "phone" } } })
+      .toBuffer()
+    expect((await sharp(tagged).metadata()).exif).toBeDefined()
+
+    const result = await normaliseBoundedImage(tagged, BOUNDED)
+    const meta = await sharp(result.buffer).metadata()
+    expect(meta.exif).toBeUndefined()
+    expect(meta.orientation).toBeUndefined()
+    // Orientation 6 is a 90° turn: the landscape source comes out portrait.
+    expect(result).toMatchObject({ width: 800, height: 1200 })
+  })
+
+  it("makes a small blur placeholder", async () => {
+    const result = await normaliseBoundedImage(await photo(1000, 800), BOUNDED)
+    expect(result.blurDataUrl.startsWith("data:image/webp;base64,")).toBe(true)
+    expect(result.blurDataUrl.length).toBeLessThan(2000)
   })
 })

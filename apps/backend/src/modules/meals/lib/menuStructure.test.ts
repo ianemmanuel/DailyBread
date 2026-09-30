@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   normalizePrepTime, resolveOrdering, nextPosition, assertSectionName,
   MAX_PREP_TIME_MINUTES,
-} from "./vendor.menuStructure"
+} from "./menuStructure"
 
 /* Pure — every input supplied here, no DB. */
 

@@ -2,7 +2,7 @@ import { ApiError } from "@/middleware/error"
 
 /*
  * Modifier-group rules. Pure — no I/O, no Prisma — the same convention as
- * vendor.menu.ts, vendor.placement.ts and vendor.operatingHours.ts.
+ * menu.rules.ts here and the vendor module's placement and operatingHours rules.
  *
  * Everything here exists to stop a vendor saving a group that cannot be
  * satisfied. A group demanding two options from one option, or a required

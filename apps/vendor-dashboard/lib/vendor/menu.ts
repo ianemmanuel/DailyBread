@@ -1,4 +1,5 @@
 import "server-only"
+import { revalidateTag } from "next/cache"
 import { backendFetch, BackendApiError } from "@/lib/api/server"
 import type { MenuContext, MenuItem, MenuItemListResult } from "@/lib/queries/menu"
 
@@ -13,6 +14,14 @@ import type { MenuContext, MenuItem, MenuItemListResult } from "@/lib/queries/me
 
 export const MENU_TAG = "vendor-menu"
 export const menuItemTag = (id: string) => `vendor-menu-item-${id}`
+
+/** After a lifecycle or availability change: the list and the dish page are
+ *  server-rendered from cached reads, and a change the vendor just made must
+ *  show on the next render, not a minute later. */
+export function revalidateMenuItem(itemId?: string) {
+  revalidateTag(MENU_TAG, "default")
+  if (itemId) revalidateTag(menuItemTag(itemId), "default")
+}
 
 const LIST_REVALIDATE = 60
 

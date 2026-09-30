@@ -55,6 +55,18 @@ export {
  * admin.country.service.ts (country launch checklist + activation gate)
  * and, in later phases, by vendor payout onboarding and customer checkout.
  */
+/*
+ * A country's currency and its minor-unit scale — the one resolver every
+ * module prices through. Fails loudly (CURRENCY_NOT_CONFIGURED) rather than
+ * assume a scale.
+ */
+export {
+  getCurrencyForCountry,
+  getCurrenciesForCountries,
+  clearCurrencyCache,
+  type CountryCurrency,
+} from "./services/finance.countryCurrency.service"
+
 export {
   getFinancialReadiness,
   isCollectionReady,

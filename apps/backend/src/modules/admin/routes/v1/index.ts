@@ -23,11 +23,19 @@ import financeRouter from "./admin.finance.routes"
 import { financeAdminRouter } from "@/modules/finance"
 import { taxAdminRouter } from "@/modules/tax"
 import { marketingAdminRouter } from "@/modules/marketing"
+import { mealsAdminRouter } from "@/modules/meals"
 
 const v1Router: Router = Router()
 
 v1Router.use("/auth", authRouter)
 v1Router.use("/users", usersRouter)
+/*
+ * Meal moderation — owned by the meals module, at the URL it always had. It
+ * must be mounted BEFORE the vendors router: /vendors/meals would otherwise be
+ * offered to the vendors router first, whose parameterised routes could claim
+ * it. Same auth inheritance as tax and marketing below.
+ */
+v1Router.use("/vendors/meals", mealsAdminRouter)
 v1Router.use("/vendors", vendorsRouter)
 v1Router.use("/customers", customersRouter)
 v1Router.use("/delivery-zones", deliveryzoneRouter)

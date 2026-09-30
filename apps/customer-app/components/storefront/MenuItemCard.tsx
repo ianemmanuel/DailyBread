@@ -86,9 +86,9 @@ export function MenuItemCard({
       </div>
 
       <div className="photo-frame size-24 shrink-0 rounded-xl sm:size-28">
-        {item.imageUrl ? (
+        {item.image ? (
           <Image
-            src={item.imageUrl}
+            src={item.image.url}
             /* Empty: the dish's name is right beside it, so describing the
                photograph again is noise for a screen reader. */
             alt=""
@@ -96,6 +96,8 @@ export function MenuItemCard({
             className="object-cover"
             sizes="112px"
             quality={75}
+            placeholder="blur"
+            blurDataURL={item.image.blurDataUrl}
           />
         ) : (
           <div className="flex size-full items-center justify-center">

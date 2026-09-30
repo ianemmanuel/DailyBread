@@ -3,8 +3,8 @@ import { ApiError } from "@/middleware/error"
 /*
  * Menu structure rules — prep time, and reordering.
  *
- * Pure: no I/O, no Prisma. Same convention as vendor.menu.ts,
- * vendor.modifiers.ts and vendor.operatingHours.ts.
+ * Pure: no I/O, no Prisma. Same convention as menu.rules.ts and
+ * modifiers.ts here, and the vendor module's operatingHours rules.
  */
 
 // ─── Prep time ────────────────────────────────────────────────────────────────

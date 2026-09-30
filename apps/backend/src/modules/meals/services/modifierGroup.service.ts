@@ -6,8 +6,8 @@ import { getModerationProvider } from "@/lib/moderation"
 import {
   assertGroupName, normalizeOptions, normalizeSelectionRule,
   MAX_GROUP_DESCRIPTION_LENGTH, type NormalizedOption,
-} from "./vendor.modifiers"
-import { normalizeOptionalText } from "./vendor.menu"
+} from "../lib/modifiers"
+import { normalizeOptionalText } from "@/lib/text/optionalText"
 
 /*
  * The vendor's library of modifier groups.

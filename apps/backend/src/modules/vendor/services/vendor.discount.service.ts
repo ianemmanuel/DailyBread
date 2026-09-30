@@ -3,11 +3,12 @@ import type { Prisma, DiscountType } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { getCountryTaxProfile, resolveRateBps } from "@/modules/tax"
+import { getCurrencyForCountry } from "@/modules/finance"
 import {
   deriveDiscountState, isWithinWindow, percentageOffLine, MAX_DISCOUNT_BPS,
   type DiscountState,
 } from "@/lib/pricing/discount"
-import { normalizeOptionalText } from "./vendor.menu"
+import { normalizeOptionalText } from "@/lib/text/optionalText"
 import {
   assertDiscountName, normalizeDiscountValue, normalizeSchedule,
   normalizeCaps, normalizeTargets, MAX_DISCOUNT_DESCRIPTION_LENGTH,
@@ -96,11 +97,9 @@ export type PresentedDiscount = ReturnType<typeof presentDiscount>
 export async function getDiscountContext(vendorId: string) {
   const vendor = await loadActiveVendor(vendorId)
 
-  const [country, outlets, items, taxProfile] = await Promise.all([
-    prisma.country.findUnique({
-      where : { id: vendor.countryId },
-      select: { currencyCode: true, currency: true, currencySymbol: true },
-    }),
+  const [currency, outlets, items, taxProfile] = await Promise.all([
+    // Finance's answer, never a guess — see getCurrencyForCountry.
+    getCurrencyForCountry(vendor.countryId),
     prisma.outlet.findMany({
       where  : { vendorId, deletedAt: null },
       orderBy: [{ isMainOutlet: "desc" }, { name: "asc" }],
@@ -114,18 +113,8 @@ export async function getDiscountContext(vendorId: string) {
     getCountryTaxProfile(vendor.countryId),
   ])
 
-  const code = country?.currencyCode ?? country?.currency ?? "USD"
-  const currencyRow = await prisma.currency.findUnique({
-    where : { code },
-    select: { symbol: true, minorUnitDigits: true },
-  })
-
   return {
-    currency: {
-      code,
-      symbol         : currencyRow?.symbol ?? country?.currencySymbol ?? code,
-      minorUnitDigits: currencyRow?.minorUnitDigits ?? 2,
-    },
+    currency,
     outlets,
     items,
     /** Null when no rate is set. The preview then says so rather than showing

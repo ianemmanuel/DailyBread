@@ -3,7 +3,7 @@ import { ApiError } from "@/middleware/error"
 /*
  * Menu rules. Pure — no I/O, no Prisma — so pricing, image ownership and
  * outlet selection are unit-testable on their own, the same convention as
- * vendor.profileMedia.ts, vendor.payoutProof.ts and vendor.placement.ts.
+ * the vendor module's profileMedia, payoutProof and placement rules.
  *
  * The two things worth not re-deriving later live here: money is only ever an
  * integer in minor units, and a storage key is only ever accepted after it has
@@ -11,11 +11,6 @@ import { ApiError } from "@/middleware/error"
  */
 
 // ─── Caps ─────────────────────────────────────────────────────────────────────
-
-/** One hero shot plus a small gallery. Uber Eats and DoorDash both show a
- *  single dish photo in the list and allow a handful on the item page; more
- *  than this is an unmanaged photo dump rather than a curated set. */
-export const MAX_MEAL_IMAGES = 6
 
 export const MAX_MEAL_NAME_LENGTH        = 80
 export const MAX_MEAL_DESCRIPTION_LENGTH = 500
@@ -67,6 +62,21 @@ export function normalizePriceOverride(value: unknown): number | null {
   return assertValidPriceMinor(value, "priceOverride")
 }
 
+/**
+ * What a dish is listed at, at one outlet, before any offer or tax: the
+ * outlet's own price when it set one, otherwise the catalog price.
+ *
+ * The ONE implementation. Offers, tax and the cart all start from this figure,
+ * so a second copy is exactly how two screens end up quoting the same dish at
+ * two prices.
+ */
+export function effectiveListPriceMinor(
+  basePriceMinor    : number,
+  priceMinorOverride: number | null | undefined,
+): number {
+  return priceMinorOverride ?? basePriceMinor
+}
+
 // ─── Text ─────────────────────────────────────────────────────────────────────
 
 export function assertMealName(value: unknown): string {
@@ -84,95 +94,7 @@ export function assertMealName(value: unknown): string {
   return name
 }
 
-export function normalizeOptionalText(value: unknown, max: number, label: string): string | null {
-  if (value === undefined || value === null) return null
-  if (typeof value !== "string") throw new ApiError(400, `${label} must be text.`, "INVALID_FIELD")
-  const text = value.trim()
-  if (!text) return null
-  if (text.length > max) {
-    throw new ApiError(400, `${label} is too long — keep it under ${max} characters.`, "INVALID_FIELD")
-  }
-  return text
-}
-
-// ─── Images ───────────────────────────────────────────────────────────────────
-
-/**
- * Proves a storage key belongs to this vendor before anything is done with it.
- *
- * Same security model as assertOwnedProfileMediaKey, and load-bearing for the
- * same reason: without it, "discard this key" is a delete-anything primitive
- * and a vendor could pass another vendor's photo, a payout proof, or an
- * application document. The key must match exactly what generateMealImageKey
- * produces for THIS vendor — one path segment after the vendor id, no
- * traversal, and no prefix collision (`vendor-1` must not match
- * `vendor-1-extra`, which a startsWith check would allow).
- */
-export function assertOwnedMealImageKey(storageKey: unknown, vendorId: string): string {
-  if (typeof storageKey !== "string" || !storageKey) {
-    throw new ApiError(400, "storageKey is required", "MISSING_FIELDS")
-  }
-  if (storageKey.includes("..") || storageKey.includes("//")) {
-    throw new ApiError(400, "Invalid storage key", "INVALID_STORAGE_KEY")
-  }
-
-  const [root, keyVendorId, filename, ...rest] = storageKey.split("/")
-
-  if (root !== "meal-images" || keyVendorId !== vendorId || !filename || rest.length > 0) {
-    throw new ApiError(403, "That image does not belong to you", "FORBIDDEN")
-  }
-
-  return storageKey
-}
-
-export interface NormalizedMealImages {
-  /** The one shown in listings. Null only when the vendor uploaded nothing. */
-  mainImageKey: string | null
-  /** Every key the item references, main first. Stored whole so the row is the
-   *  single source of truth for what to keep in the bucket. */
-  imageKeys   : string[]
-}
-
-/**
- * Validates the submitted image set and settles which one is the hero.
- *
- * The main image is the FIRST key rather than a separate field the client
- * sends, so reordering in the form is the same gesture as choosing the hero —
- * which is how Uber Eats, Square and Toast all present it. Two fields would
- * let a client submit a main image that is not in the gallery, and then the
- * cleanup pass could orphan an object the row still renders.
- */
-export function normalizeMealImages(keys: unknown, vendorId: string): NormalizedMealImages {
-  if (keys === undefined || keys === null) return { mainImageKey: null, imageKeys: [] }
-  if (!Array.isArray(keys)) {
-    throw new ApiError(400, "images must be a list of storage keys", "INVALID_FIELD")
-  }
-  if (keys.length > MAX_MEAL_IMAGES) {
-    throw new ApiError(
-      400,
-      `You can add up to ${MAX_MEAL_IMAGES} photos to a meal.`,
-      "TOO_MANY_IMAGES",
-    )
-  }
-
-  const owned = keys.map((k) => assertOwnedMealImageKey(k, vendorId))
-  const unique = [...new Set(owned)]
-  if (unique.length !== owned.length) {
-    throw new ApiError(400, "The same photo was added twice.", "DUPLICATE_IMAGE")
-  }
-
-  return { mainImageKey: unique[0] ?? null, imageKeys: unique }
-}
-
-/**
- * Keys the previous save referenced that this one does not — the objects to
- * delete from the bucket. Removing a photo has to actually remove it, or every
- * replacement leaks a paid-for object nothing can ever reach again.
- */
-export function orphanedImageKeys(before: string[], after: string[]): string[] {
-  const kept = new Set(after)
-  return before.filter((key) => !kept.has(key))
-}
+// Images: see images.rules.ts.
 
 // ─── Outlet selection ─────────────────────────────────────────────────────────
 

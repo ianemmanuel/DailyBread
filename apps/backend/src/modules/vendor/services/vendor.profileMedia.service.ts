@@ -6,9 +6,9 @@ import {
   assertOwnedProfileMediaKey,
   currentProfileKeys,
   isProfileMediaKind,
-  resolveImageExtension,
   type ProfileMediaKind,
 } from "./vendor.profileMedia"
+import { resolveImageExtension } from "@/lib/images/uploadType"
 import type { ProfileMediaPresignResponse } from "@repo/types/backend"
 
 /*

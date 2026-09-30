@@ -4,6 +4,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  CopyObjectCommand,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import crypto from "node:crypto"
@@ -95,33 +96,7 @@ export const R2Service = {
     return `profile-media/${kind}/${vendorId}/${uuid}${ext}`
   },
 
-  /*
-   * Menu photography:
-   *
-   *   meal-images/<vendorId>/<uuid>.jpg
-   *
-   * Keyed on the vendor account id, per explicit product direction, and NOT on
-   * the outlet. A dish is authored once by the vendor and sold at any number of
-   * its outlets (see MenuItem / Meal), so an outlet segment would either force
-   * the same photo to be re-uploaded per branch or leave the key pointing at
-   * whichever outlet happened to be first — both wrong.
-   *
-   * No kind segment either, unlike profile media: the main image and the
-   * gallery are the same kind of thing here, and which one a key is currently
-   * serving as is a property of the row, not of the object. That also means
-   * promoting a gallery shot to the main image is a column change and never a
-   * copy.
-   *
-   * The vendorId segment is load-bearing for the same reason it is on profile
-   * media: it is what lets the discard endpoint prove a key belongs to the
-   * caller before deleting it.
-   */
-  generateMealImageKey(vendorId: string, extension: string) {
-    const uuid = crypto.randomUUID()
-    const ext = extension ? `.${extension}` : ""
-
-    return `meal-images/${vendorId}/${uuid}${ext}`
-  },
+  // Menu photography keys are owned by the meals module (meals/lib/images.rules.ts).
 
   async generateUploadUrl(storageKey: string, contentType: string) {
     const command = new PutObjectCommand({
@@ -171,6 +146,30 @@ export const R2Service = {
       throw new Error(`Object has no body: ${storageKey}`)
     }
     return Buffer.from(await result.Body.transformToByteArray())
+  },
+
+  /**
+   * The size the bucket actually holds for a key, or null when there is no such
+   * object. Read before downloading anything a browser uploaded: a declared
+   * size is only a claim, and this is what stops a 500 MB "5 MB photo" being
+   * pulled into memory.
+   */
+  async objectSize(storageKey: string): Promise<number | null> {
+    try {
+      const head = await r2.send(new HeadObjectCommand({ Bucket: BUCKET, Key: storageKey }))
+      return head.ContentLength ?? 0
+    } catch {
+      return null
+    }
+  },
+
+  /** Server-side copy within the private bucket — the bytes never leave R2. */
+  async copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+    await r2.send(new CopyObjectCommand({
+      Bucket    : BUCKET,
+      CopySource: `${BUCKET}/${encodeURIComponent(sourceKey).replace(/%2F/g, "/")}`,
+      Key       : destinationKey,
+    }))
   },
 
   async objectExists(storageKey: string) {

@@ -1,4 +1,6 @@
-import { Prisma, ProfileReviewStatus, MealStatus, OutletAdminStatus, OutletReviewStatus } from "@repo/db"
+import { Prisma, OutletAdminStatus, OutletReviewStatus } from "@repo/db"
+import { CUSTOMER_VISIBLE_REVIEW_STATUSES } from "@/lib/moderation/customerVisibility"
+import { SELLABLE_MEAL_WHERE } from "@/modules/meals"
 
 /*
  * What a customer is allowed to see.
@@ -8,45 +10,11 @@ import { Prisma, ProfileReviewStatus, MealStatus, OutletAdminStatus, OutletRevie
  * shows up is the worst kind: a dish a customer can add to a basket but cannot
  * be charged for, or an outlet in the feed whose storefront 404s.
  *
- * ─── Why FLAGGED content is hidden ───────────────────────────────────────────
- *
- * Moderation flags are non-blocking for the VENDOR — a flagged save always
- * succeeds, which is the platform-wide stance — but flagged content is not
- * shown to customers. The schema says so for profiles ("FLAGGED … cannot be
- * published") and the vendor dashboard already tells a vendor that a flagged
- * dish is "not selling" and that editing puts it back in review. Showing it
- * here would make that message a lie and would put unreviewed text and
- * photography in front of customers. So: AUTO_APPROVED and MANUALLY_APPROVED
- * are visible, FLAGGED and MANUALLY_REJECTED are not.
+ * The DISH half — SELLABLE_MENU_ITEM_WHERE / SELLABLE_MEAL_WHERE — is owned by
+ * the meals module and imported from its barrel; the review-status rule shared
+ * by profiles and dishes lives in lib/moderation/customerVisibility.ts. What
+ * stays here is the OUTLET half, which composes both.
  */
-
-export const CUSTOMER_VISIBLE_REVIEW_STATUSES: ProfileReviewStatus[] = [
-  ProfileReviewStatus.AUTO_APPROVED,
-  ProfileReviewStatus.MANUALLY_APPROVED,
-]
-
-/**
- * A dish that may be shown at all.
- *
- * Note what is NOT here: Meal.isAvailable. A dish that is 86'd today is still
- * SHOWN, greyed out with a reason — exactly as Uber Eats and DoorDash do —
- * because hiding it makes a regular think the restaurant stopped selling their
- * usual. Availability is a presentation flag, not a visibility one. The cart is
- * where it becomes a refusal.
- */
-export const SELLABLE_MENU_ITEM_WHERE = {
-  deletedAt   : null,
-  isArchived  : false,
-  adminStatus : MealStatus.ACTIVE,
-  reviewStatus: { in: CUSTOMER_VISIBLE_REVIEW_STATUSES },
-} satisfies Prisma.MenuItemWhereInput
-
-/** One dish AT one outlet. The outlet-level row plus its catalog entry. */
-export const SELLABLE_MEAL_WHERE = {
-  deletedAt  : null,
-  adminStatus: MealStatus.ACTIVE,
-  menuItem   : SELLABLE_MENU_ITEM_WHERE,
-} satisfies Prisma.MealWhereInput
 
 /**
  * An outlet a customer may be offered.

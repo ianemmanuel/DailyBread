@@ -15,11 +15,13 @@ import {
   getOperatingCities, resolveCustomerLocation, resolveOutletArea,
   type OperatingCity, type ResolvedLocation,
 } from "./customer.geo.service"
-import { SELLABLE_OUTLET_WHERE, SELLABLE_MEAL_WHERE, SELLABLE_MENU_ITEM_WHERE } from "./customer.visibility"
+import { SELLABLE_MEAL_WHERE, SELLABLE_MENU_ITEM_WHERE } from "@/modules/meals"
+import { SELLABLE_OUTLET_WHERE } from "./customer.visibility"
 import {
-  OFFER_SELECT, getCurrencyForCountry, offerAppliesNow, signKey, toDiscountOffer,
+  OFFER_SELECT, offerAppliesNow, signKey, toDiscountOffer,
   type OfferRow,
 } from "./customer.presentation"
+import { getCurrencyForCountry } from "@/modules/finance"
 
 /*
  * The discovery feed — which restaurants can serve this address, ranked.

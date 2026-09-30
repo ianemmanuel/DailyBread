@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ImageOff, AlertTriangle, Store } from "lucide-react"
+import { ImageOff, AlertTriangle, Store, Archive } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatPrice, type MenuCurrency } from "@/lib/menu/money"
 import type { MenuItem } from "@/lib/queries/menu"
@@ -50,7 +50,10 @@ export function MealCard({ item, currency }: Props) {
           <img
             src={item.mainImageUrl}
             alt=""
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+            className={cn(
+              "h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]",
+              item.isArchived && "opacity-60 grayscale",
+            )}
           />
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-[var(--muted-foreground)]">
@@ -59,7 +62,14 @@ export function MealCard({ item, currency }: Props) {
           </div>
         )}
 
-        {needsAttention && (
+        {/* Archived wins over a review badge: it is the reason it isn't
+            selling, and it is the vendor's own choice to undo. */}
+        {item.isArchived ? (
+          <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+            <Archive className="size-3" />
+            Archived
+          </span>
+        ) : needsAttention && (
           <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-[var(--warning)] px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
             <AlertTriangle className="size-3" />
             {item.reviewStatus === "MANUALLY_REJECTED" ? "Needs changes" : "In review"}

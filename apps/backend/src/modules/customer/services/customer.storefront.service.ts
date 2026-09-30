@@ -10,11 +10,15 @@ import {
 } from "./customer.discovery"
 import { outletAreaAllowsSelling } from "./customer.serviceability"
 import { getOperatingCities, resolveOutletArea, type OperatingCity } from "./customer.geo.service"
-import { SELLABLE_OUTLET_WHERE, SELLABLE_MEAL_WHERE } from "./customer.visibility"
 import {
-  OFFER_SELECT, bestOfferForItem, breakdownFor, getCountryTaxProfile, getCurrencyForCountry,
-  offerAppliesNow, signKey, signKeys, toDiscountOffer, type OfferRow,
+  SELLABLE_MEAL_WHERE, effectiveListPriceMinor, MEAL_IMAGE_SELECT, presentMealImage,
+} from "@/modules/meals"
+import { SELLABLE_OUTLET_WHERE } from "./customer.visibility"
+import {
+  OFFER_SELECT, bestOfferForItem, breakdownFor, getCountryTaxProfile,
+  offerAppliesNow, signKey, toDiscountOffer, type OfferRow,
 } from "./customer.presentation"
+import { getCurrencyForCountry } from "@/modules/finance"
 
 /*
  * One storefront, and everything on its menu.
@@ -34,7 +38,7 @@ import {
 const MENU_ITEM_SELECT = {
   id: true, name: true, description: true, portionSize: true,
   basePriceMinor: true, taxCategoryId: true,
-  mainImageKey: true, imageKeys: true, prepTimeMinutes: true,
+  images: MEAL_IMAGE_SELECT, prepTimeMinutes: true,
   sectionId: true, position: true,
   section: { select: { id: true, name: true, position: true } },
   cuisines   : { select: { cuisine   : { select: { id: true, name: true, slug: true } } } },
@@ -262,15 +266,17 @@ async function presentItem(
    * Null on the override means "use the catalog price" and is the common case —
    * precisely the distinction duplicating a dish per outlet would lose.
    */
-  const listPriceMinor = meal?.priceMinorOverride ?? item.basePriceMinor
+  const listPriceMinor = effectiveListPriceMinor(item.basePriceMinor, meal?.priceMinorOverride)
 
   const best = bestOfferForItem(context.liveOffers, item.id, listPriceMinor, context.currency)
   const priceMinor = best ? best.discountedMinor : listPriceMinor
 
-  const [mainImageUrl, imageUrls] = await Promise.all([
-    signKey(item.mainImageKey ?? item.imageKeys[0]),
-    signKeys(item.imageKeys),
-  ])
+  // Processed public masters at stable URLs — never a signed link to the
+  // vendor's original, and identical on every render, so next/image and the
+  // CDN can actually cache them.
+  const images = item.images
+    .map((image) => presentMealImage(image))
+    .filter((image): image is NonNullable<typeof image> => image !== null)
 
   const available = meal?.isAvailable !== false
   return {
@@ -278,8 +284,8 @@ async function presentItem(
     name        : item.name,
     description : item.description,
     portionSize : item.portionSize,
-    imageUrl    : mainImageUrl,
-    imageUrls,
+    image       : images[0] ?? null,
+    images,
     prepTimeMinutes: item.prepTimeMinutes,
     cuisines    : item.cuisines.map((c) => c.cuisine),
     dietaryTags : item.dietaryTags.map((d) => d.dietaryTag),

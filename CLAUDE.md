@@ -381,9 +381,12 @@ vendor photos need it, not for this.
 >    the ERP throws *"hostname is not configured under images"* the moment a
 >    promotion has a picture. `next.config.js` reads it at **boot**, so it needs
 >    a dev-server restart, not a page reload.
-> 6. On the PRIVATE bucket, add a lifecycle rule deleting `marketing/hero-originals/`
->    objects older than N days **only if** you decide not to keep originals for re-crops;
->    otherwise add one for abandoned uploads once the upload flow exists.
+> 6. On the PRIVATE bucket (`R2_BUCKET_NAME`) → Settings → Object lifecycle rules →
+>    Add rule: prefix **`meal-uploads/`**, delete objects **2 days** after upload.
+>    That prefix is meal-photo STAGING — what the browser PUTs before the dish is
+>    saved; a save copies the original to `meal-images/` and clears it, so anything
+>    still there is abandoned. The code relies on this rule and has no cron for it.
+>    (`marketing/hero-originals/` needs a rule only if originals are not kept for re-crops.)
 >
 > **`r2.dev` is the DEVELOPMENT origin, on explicit direction** — a custom domain
 > comes when the backend is deployed. Cloudflare rate-limits `r2.dev` and does not

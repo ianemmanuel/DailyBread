@@ -11,7 +11,7 @@ import {
   sendBackMenuItem,
   setMenuItemStatus,
   type MenuItemFilters,
-} from "../services/admin.menuItem.service"
+} from "../services/moderation.service"
 
 function filtersFrom(req: Parameters<RequestHandler>[0]): MenuItemFilters {
   const review = req.query.reviewStatus

@@ -3,17 +3,10 @@ import { ApiError } from "@/middleware/error"
 import {
   assertValidPriceMinor,
   normalizePriceOverride,
-  assertOwnedMealImageKey,
-  normalizeMealImages,
-  orphanedImageKeys,
+  effectiveListPriceMinor,
   resolveSelectedOutlets,
   assertMealName,
-  MAX_MEAL_IMAGES,
-} from "./vendor.menu"
-
-const VENDOR = "11111111-1111-1111-1111-111111111111"
-const OTHER  = "22222222-2222-2222-2222-222222222222"
-const key    = (v: string, f = "abc.jpg") => `meal-images/${v}/${f}`
+} from "./menu.rules"
 
 describe("assertValidPriceMinor", () => {
   it("accepts a positive integer", () => {
@@ -49,65 +42,15 @@ describe("normalizePriceOverride", () => {
   })
 })
 
-describe("assertOwnedMealImageKey", () => {
-  it("accepts this vendor's own key", () => {
-    expect(assertOwnedMealImageKey(key(VENDOR), VENDOR)).toBe(key(VENDOR))
+describe("effectiveListPriceMinor", () => {
+  it("uses the catalog price when the outlet set none", () => {
+    expect(effectiveListPriceMinor(10000, null)).toBe(10000)
+    expect(effectiveListPriceMinor(10000, undefined)).toBe(10000)
   })
 
-  it("refuses another vendor's key", () => {
-    expect(() => assertOwnedMealImageKey(key(OTHER), VENDOR)).toThrow(ApiError)
-  })
-
-  /* A startsWith check would let `vendor-1-extra` match `vendor-1`. */
-  it("refuses a prefix collision", () => {
-    expect(() => assertOwnedMealImageKey(`meal-images/${VENDOR}-extra/a.jpg`, VENDOR)).toThrow(ApiError)
-  })
-
-  it("refuses traversal and nested segments", () => {
-    expect(() => assertOwnedMealImageKey(`meal-images/${VENDOR}/../x.jpg`, VENDOR)).toThrow(ApiError)
-    expect(() => assertOwnedMealImageKey(`meal-images/${VENDOR}/a/b.jpg`, VENDOR)).toThrow(ApiError)
-  })
-
-  /* The discard endpoint must not reach objects from any other pipeline. */
-  it("refuses keys from the profile, payout and document prefixes", () => {
-    expect(() => assertOwnedMealImageKey(`profile-media/logo/${VENDOR}/a.jpg`, VENDOR)).toThrow(ApiError)
-    expect(() => assertOwnedMealImageKey(`payout-docs/bank-account/${VENDOR}/a.pdf`, VENDOR)).toThrow(ApiError)
-  })
-})
-
-describe("normalizeMealImages", () => {
-  it("makes the first key the hero, so ordering and choosing are one gesture", () => {
-    const a = key(VENDOR, "a.jpg")
-    const b = key(VENDOR, "b.jpg")
-    expect(normalizeMealImages([a, b], VENDOR)).toEqual({ mainImageKey: a, imageKeys: [a, b] })
-  })
-
-  it("treats no images as valid — a meal can be saved before its photo", () => {
-    expect(normalizeMealImages(undefined, VENDOR)).toEqual({ mainImageKey: null, imageKeys: [] })
-  })
-
-  it("refuses more than the cap", () => {
-    const many = Array.from({ length: MAX_MEAL_IMAGES + 1 }, (_, i) => key(VENDOR, `${i}.jpg`))
-    expect(() => normalizeMealImages(many, VENDOR)).toThrow(ApiError)
-  })
-
-  it("refuses the same photo twice", () => {
-    const a = key(VENDOR, "a.jpg")
-    expect(() => normalizeMealImages([a, a], VENDOR)).toThrow(ApiError)
-  })
-
-  it("refuses a set containing another vendor's key", () => {
-    expect(() => normalizeMealImages([key(VENDOR), key(OTHER)], VENDOR)).toThrow(ApiError)
-  })
-})
-
-describe("orphanedImageKeys", () => {
-  it("returns only what the new save dropped", () => {
-    expect(orphanedImageKeys(["a", "b", "c"], ["b"])).toEqual(["a", "c"])
-  })
-
-  it("never reports an unchanged image", () => {
-    expect(orphanedImageKeys(["a"], ["a", "b"])).toEqual([])
+  it("uses the outlet's own price when it set one, higher or lower", () => {
+    expect(effectiveListPriceMinor(10000, 12000)).toBe(12000)
+    expect(effectiveListPriceMinor(10000, 8000)).toBe(8000)
   })
 })
 

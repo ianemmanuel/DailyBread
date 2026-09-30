@@ -6,10 +6,11 @@ import outletRouter from "./vendor.outlet.routes"
 import cityRouter from "./vendor.city.routes"
 import payoutRouter from "./vendor.payout.routes"
 import profileRouter from "./vendor.profile.routes"
-import menuRouter from './vendor.menu.routes'
 import discountRouter from './vendor.discount.routes'
 import authRouter from "../vendor.auth.routes"
 import { requireVendorState, NON_BANNED_STATES } from "../../middlewares"
+import { createMealsVendorRouter } from "@/modules/meals"
+import { getDiscountsForMenuItems } from "../../services/vendor.discount.service"
 
 const v1Router: Router = Router()
 
@@ -29,7 +30,14 @@ v1Router.use('/outlets',outletRouter)
 v1Router.use('/cities',cityRouter)
 v1Router.use('/payouts',payoutRouter)
 v1Router.use('/profile',profileRouter)
-v1Router.use('/menu',menuRouter)
+/*
+ * The menu API is owned by the meals module; the vendor module keeps what is
+ * genuinely its own at this mount: the ACTIVE authoring gate (a vendor builds
+ * their menu while banking is still being verified — authoring, not go-live),
+ * and its offer preview, composed onto every dish response. Offers stay a
+ * vendor concern until pricing (Phase 6) settles their home.
+ */
+v1Router.use('/menu', requireVendorState("ACTIVE"), createMealsVendorRouter({ offerPreview: getDiscountsForMenuItems }))
 //* Merchant-funded offers. Authoring tier, like the menu.
 v1Router.use('/discounts', discountRouter)
 
