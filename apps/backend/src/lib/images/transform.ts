@@ -123,7 +123,12 @@ export async function inspectImage(input: Buffer): Promise<{
 
   let meta: Metadata
   try {
-    meta = await sharp(input, { limitInputPixels: MAX_INPUT_PIXELS }).metadata()
+    /* Header only — metadata() decodes no pixels, so reading it is safe
+     * without the pixel ceiling. The ceiling is applied explicitly below, so an
+     * oversized image is refused as TOO LARGE; with sharp's own limit here it
+     * threw first and was misreported as "not an image". Every call that
+     * actually DECODES keeps limitInputPixels. */
+    meta = await sharp(input, { limitInputPixels: false }).metadata()
   } catch {
     /* A failure to even read the header means it is not an image we can
      * handle, whatever its extension said. */
@@ -225,6 +230,74 @@ export async function normaliseSquareImage(
 
   const [derived, blurDataUrl] = await Promise.all([
     toSquareWebp(input, spec),
+    toBlurDataUrl(input),
+  ])
+
+  return { ...derived, blurDataUrl, sourceMimeType: source.mimeType }
+}
+
+// ─── Bounded (uncropped) images ──────────────────────────────────────────────
+
+/*
+ * A photograph that keeps its own composition: fitted INSIDE a bounding box,
+ * never cropped and never enlarged. For images shown at several aspect ratios
+ * — a dish is a square on the storefront menu and a 4:3 card on the vendor's —
+ * where each consumer crops with CSS. Cropping the master to one of them would
+ * throw away what the others need.
+ */
+export interface BoundedImageSpec {
+  /** Longest edge of the output, in pixels. A smaller source keeps its size. */
+  maxEdge: number
+  /** Shortest source edge accepted — below it the photo would look soft. */
+  minEdge: number
+  /** WebP quality; see SquareCropSpec. */
+  quality: number
+}
+
+/*
+ * Dish photography. 1600px on the long edge covers an 800px detail view on a
+ * 2x screen; next/image derives every smaller width (and AVIF) from it. 600px
+ * on the short edge is the floor below which a photo reads as a thumbnail
+ * someone found rather than a picture of the dish. Image policy, not a meals
+ * rule — which is why it lives here beside the pipeline that applies it.
+ */
+export const DISH_PHOTO_SPEC: BoundedImageSpec = { maxEdge: 1600, minEdge: 600, quality: 82 }
+
+/** Fits within `maxEdge` × `maxEdge` preserving aspect, re-encoded as WebP.
+ *  Metadata is dropped (sharp keeps none unless asked), rotation is applied
+ *  first, and WebP for the same master-not-delivery reason as toSquareWebp. */
+export async function toBoundedWebp(input: Buffer, spec: BoundedImageSpec): Promise<DerivedImage> {
+  const { data, info } = await sharp(input, { limitInputPixels: MAX_INPUT_PIXELS })
+    .rotate()
+    .resize(spec.maxEdge, spec.maxEdge, { fit: "inside", withoutEnlargement: true })
+    .webp({ quality: spec.quality, effort: 5 })
+    .toBuffer({ resolveWithObject: true })
+
+  return {
+    buffer     : data,
+    width      : info.width,
+    height     : info.height,
+    contentType: "image/webp",
+    byteSize   : data.byteLength,
+  }
+}
+
+/** The whole pipeline for one bounded image: verify, fit, encode, blur. */
+export async function normaliseBoundedImage(
+  input: Buffer,
+  spec : BoundedImageSpec,
+): Promise<NormalisedImage> {
+  const source = await inspectImage(input)
+
+  if (Math.min(source.width, source.height) < spec.minEdge) {
+    throw new ImageRejected(
+      `That image is too small — its shortest side must be at least ${spec.minEdge}px.`,
+      "IMAGE_TOO_SMALL",
+    )
+  }
+
+  const [derived, blurDataUrl] = await Promise.all([
+    toBoundedWebp(input, spec),
     toBlurDataUrl(input),
   ])
 

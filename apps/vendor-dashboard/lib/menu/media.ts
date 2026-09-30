@@ -16,8 +16,10 @@ import {
 export { validateImage, releasePreview, ALLOWED_IMAGE_LABEL, ALLOWED_IMAGE_TYPES, MAX_IMAGE_SIZE_BYTES }
 
 export interface UploadedMealImage {
+  /** A STAGING key. The server checks and processes the upload when the meal
+   *  is saved, and an unsaved one expires on its own. */
   storageKey: string
-  /** Object URL for instant preview; the signed URL arrives on the next read. */
+  /** Object URL for instant preview; the processed image arrives on the next read. */
   previewUrl: string
 }
 

@@ -6,7 +6,7 @@ import type { DayOfWeek, DiscountType } from "@repo/db"
 
 /*
  * Rules for defining a discount. Pure — no I/O, no Prisma — the same convention
- * as vendor.menu.ts, vendor.modifiers.ts and vendor.menuStructure.ts.
+ * as the meals module's menu.rules.ts, modifiers.ts and menuStructure.ts.
  *
  * Everything here exists to stop a vendor publishing an offer that either costs
  * them more than they meant or can never be reached by anyone. Both failures are

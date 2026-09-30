@@ -389,13 +389,29 @@ export interface StorefrontModifierGroup {
   options    : StorefrontOption[]
 }
 
+/**
+ * A dish photograph as a customer receives it: the processed public master at
+ * a STABLE URL (immutable, long-cached — never a signed link), with what a
+ * renderer needs to reserve its space and blur it in. The master keeps the
+ * photo's own aspect ratio; each surface crops it with CSS.
+ */
+export interface MenuImage {
+  url        : string
+  width      : number
+  height     : number
+  /** ~20px WebP data URI for placeholder="blur". */
+  blurDataUrl: string
+}
+
 export interface StorefrontMenuItem {
   id          : string
   name        : string
   description : string | null
   portionSize : string | null
-  imageUrl    : string | null
-  imageUrls   : string[]
+  /** The main image (the vendor's first), or null when the dish has none. */
+  image       : MenuImage | null
+  /** Every photo, main first. */
+  images      : MenuImage[]
   prepTimeMinutes: number | null
   cuisines    : Array<{ id: string; name: string; slug: string }>
   dietaryTags : Array<{ id: string; name: string; slug: string }>

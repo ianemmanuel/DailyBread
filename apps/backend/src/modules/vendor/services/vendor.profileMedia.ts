@@ -22,48 +22,8 @@ import { ApiError } from "@/middleware/error"
 export const PROFILE_MEDIA_KINDS = ["logo", "cover"] as const
 export type ProfileMediaKind = (typeof PROFILE_MEDIA_KINDS)[number]
 
-/*
- * Images only — deliberately narrower than the document pipeline's
- * ALLOWED_MIME_TYPES, which also accepts PDF. A PDF logo is never what a
- * vendor meant, and it would render as a broken image to every customer.
- */
-export const ALLOWED_IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const
-
-/** Smaller than the 10MB document ceiling: these are display images that get
- *  downloaded by every customer viewing the profile, not archival evidence. */
-export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
-
-const EXTENSION_BY_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png" : "png",
-  "image/webp": "webp",
-}
-
 export function isProfileMediaKind(value: unknown): value is ProfileMediaKind {
   return typeof value === "string" && (PROFILE_MEDIA_KINDS as readonly string[]).includes(value)
-}
-
-/**
- * Validates an upload request and returns the file extension to key it under.
- * The extension comes from the MIME type, never from the supplied filename —
- * a filename is attacker-controlled and would otherwise decide part of the key.
- */
-export function resolveImageExtension(contentType: string, fileSize: number): string {
-  const ext = EXTENSION_BY_MIME[contentType]
-  if (!ext) {
-    throw new ApiError(
-      400,
-      "Unsupported image type — upload a JPEG, PNG or WebP.",
-      "UNSUPPORTED_MEDIA_TYPE",
-    )
-  }
-  if (!Number.isFinite(fileSize) || fileSize <= 0) {
-    throw new ApiError(400, "fileSize is required", "MISSING_FIELDS")
-  }
-  if (fileSize > MAX_IMAGE_SIZE_BYTES) {
-    throw new ApiError(400, "Image is too large — the maximum size is 5MB.", "FILE_TOO_LARGE")
-  }
-  return ext
 }
 
 /**

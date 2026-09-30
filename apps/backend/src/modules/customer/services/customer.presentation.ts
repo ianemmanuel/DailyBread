@@ -1,4 +1,4 @@
-import { prisma, DiscountType } from "@repo/db"
+import { DiscountType } from "@repo/db"
 import type { DayOfWeek } from "@repo/db"
 import { R2Service } from "@/lib/r2/r2.service"
 import { logger } from "@/lib/pino/logger"
@@ -26,53 +26,10 @@ const presentLog = logger.child({ module: "customer-presentation" })
 // ─── Currency ─────────────────────────────────────────────────────────────────
 
 /*
- * A country's currency, cached for the process.
- *
- * Currency is reference data — ISO 4217 codes and their minor-unit scale — and
- * a country's assignment changes essentially never. Reading it per request
- * would be two joins on the hot path of every feed and every cart price.
+ * Which currency a country prices in is FINANCE's answer —
+ * getCurrencyForCountry from "@/modules/finance". What stays here is only how
+ * a customer surface formats an amount once it has one.
  */
-const currencyCache = new Map<string, CustomerCurrency>()
-
-/**
- * The currency a country prices in.
- *
- * minorUnitDigits comes from the Currency reference row and is NEVER assumed to
- * be 2 — KES and USD are 2, UGX and JPY are 0, KWD is 3. The symbol likewise
- * comes from Currency, not from Country.currencySymbol, which holds the less
- * specific value (Kenya's is "Sh" where the Currency row says "KSh"). Worth
- * knowing before anyone "fixes" that precedence.
- */
-export async function getCurrencyForCountry(countryId: string): Promise<CustomerCurrency> {
-  const cached = currencyCache.get(countryId)
-  if (cached) return cached
-
-  const country = await prisma.country.findUnique({
-    where : { id: countryId },
-    select: { currencyCode: true, currency: true, currencySymbol: true },
-  })
-
-  const code = country?.currencyCode ?? country?.currency ?? "USD"
-  const row = await prisma.currency.findUnique({
-    where : { code },
-    select: { code: true, symbol: true, minorUnitDigits: true },
-  })
-
-  const resolved: CustomerCurrency = {
-    code,
-    symbol         : row?.symbol ?? country?.currencySymbol ?? code,
-    minorUnitDigits: row?.minorUnitDigits ?? 2,
-  }
-
-  currencyCache.set(countryId, resolved)
-  return resolved
-}
-
-/** Drop the currency cache — for tests and smoke scripts that change reference
- *  data mid-run. */
-export function clearCurrencyCache(): void {
-  currencyCache.clear()
-}
 
 /** Minor units as a decimal string in the currency's own scale. Used only for
  *  building human-readable offer labels; every transported figure stays an

@@ -2232,7 +2232,9 @@ model MenuSection {
   vendor VendorAccount @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   items  MenuItem[]
 
-  @@unique([vendorId, name])
+  //* (vendorId, name) is unique among LIVE rows only — a partial unique index
+  //* (WHERE "deletedAt" IS NULL) in the migration, since Prisma cannot express
+  //* one. A deleted section no longer occupies its name.
   @@index([vendorId])
   @@index([deletedAt])
 }
@@ -2255,14 +2257,7 @@ model MenuItem {
   //* country taxes prepared food at", resolved via the country's standard
   //* CountryTaxRate. A vendor in a flat-rate market never sees this field.
   taxCategoryId  String?
-  //* R2 storage KEYS, not URLs — the bucket is private, so reads go out as
-  //* short-lived signed URLs. Named ...Key for the same reason the profile's
-  //* media columns were renamed: a key in a column called ...Url invites an
-  //* <img src> and a 403.
-  mainImageKey   String?
-  //* The gallery. Food photography, so none of the premises-disclosure
-  //* reasoning that removed the profile gallery applies here.
-  imageKeys      String[]
+  //* Photographs live in MenuItemImage — position 0 is the main image.
   portionSize    String?
 
   //* Where this dish sits INSIDE its section. Authored, never alphabetical —
@@ -2312,8 +2307,11 @@ model MenuItem {
   outletMeals    Meal[]
   modifierGroups MenuItemModifierGroup[]
   discounts      DiscountMenuItem[]
+  images         MenuItemImage[]
 
-  @@unique([vendorId, name])
+  //* (vendorId, name) is unique among LIVE rows only — a partial unique index
+  //* (WHERE "deletedAt" IS NULL) in the migration, since Prisma cannot express
+  //* one. A deleted dish no longer occupies its name.
   @@index([vendorId])
   @@index([sectionId])
   @@index([sectionId, position])
@@ -2322,6 +2320,41 @@ model MenuItem {
   @@index([adminStatus])
   @@index([deletedAt])
   @@index([createdAt])
+}
+
+//* One photograph of a dish, in the vendor's order; position 0 is the main
+//* image. Food photography, so none of the premises-disclosure reasoning that
+//* removed the profile gallery applies here.
+//*
+//* TWO objects per photo, in two buckets, and the split is the security point:
+//*   originalKey — the vendor's upload, PRIVATE bucket, never served. Kept so
+//*                 a new master size or crop can be produced without asking
+//*                 the vendor again. Still carries the camera's metadata.
+//*   imageKey    — the master THIS SERVER produced (re-encoded WebP, metadata
+//*                 stripped, ≤1600px), PUBLIC bucket, uuid-named, immutable.
+//*                 The only one any client ever sees.
+//* A replaced photo is a new row with new keys; bytes at a key never change,
+//* which is what makes the year-long cache safe with no purge.
+//*
+//* Both keys are unique: a stored object belongs to exactly one row, so
+//* removing a photo can delete its objects without asking who else uses them.
+model MenuItemImage {
+  id          String   @id @default(uuid())
+  menuItemId  String
+  position    Int
+  originalKey String   @unique
+  imageKey    String   @unique
+  //* The master's own dimensions, so a consumer can reserve the space.
+  width       Int
+  height      Int
+  //* ~20px WebP data URI for placeholder="blur" — a remote image cannot be
+  //* statically imported, so the blur-up has to be stored.
+  blurDataUrl String
+  createdAt   DateTime @default(now())
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, position])
 }
 
 model MenuItemCuisine {

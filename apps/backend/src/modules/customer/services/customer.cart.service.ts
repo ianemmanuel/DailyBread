@@ -8,12 +8,15 @@ import type {
   PriceCartRequest, PricedCart, PricedCartLine, CartProblem,
 } from "@repo/types/backend"
 import { isOpenAt, type TradingDay } from "./customer.discovery"
-import { SELLABLE_MEAL_WHERE, SELLABLE_MENU_ITEM_WHERE } from "./customer.visibility"
+import {
+  SELLABLE_MEAL_WHERE, SELLABLE_MENU_ITEM_WHERE, effectiveListPriceMinor, MEAL_IMAGE_SELECT, presentMealImage,
+} from "@/modules/meals"
 import { assertSellableOutlet } from "./customer.storefront.service"
 import {
-  OFFER_SELECT, getCountryTaxProfile, getCurrencyForCountry, offerAppliesNow,
-  offerCoversItem, resolveRateBps, signKey, type OfferRow,
+  OFFER_SELECT, getCountryTaxProfile, offerAppliesNow,
+  offerCoversItem, resolveRateBps, type OfferRow,
 } from "./customer.presentation"
+import { getCurrencyForCountry } from "@/modules/finance"
 
 /*
  * Pricing a basket.
@@ -213,7 +216,7 @@ export async function priceCustomerCart(
       menuItemId    : item.id,
       name          : item.name,
       // The outlet's own price where it has one, otherwise the catalog price.
-      unitPriceMinor: meal.priceMinorOverride ?? item.basePriceMinor,
+      unitPriceMinor: effectiveListPriceMinor(item.basePriceMinor, meal.priceMinorOverride),
       taxCategoryId : item.taxCategoryId,
       options       : chosen.map(({ groupId: _groupId, ...option }) => option),
     })
@@ -259,9 +262,11 @@ export async function priceCustomerCart(
     })
   }
 
-  const images = await Promise.all(
-    resolvedItems.map((item) => signKey(itemsById.get(item.menuItemId)?.mainImageKey)),
-  )
+  // The main image's public master — a stable URL, never a signed original.
+  const images = resolvedItems.map((item) => {
+    const main = itemsById.get(item.menuItemId)?.images[0]
+    return main ? presentMealImage(main)?.url ?? null : null
+  })
 
   const pricedLines: PricedCartLine[] = totals.lines.map((line, i) => ({
     lineIndex    : keptIndexes[i]!,
@@ -393,7 +398,8 @@ async function loadCartItems(vendorId: string, outletId: string, menuItemIds: re
       outletMeals: { some: { ...SELLABLE_MEAL_WHERE, outletId } },
     },
     select: {
-      id: true, name: true, basePriceMinor: true, taxCategoryId: true, mainImageKey: true,
+      id: true, name: true, basePriceMinor: true, taxCategoryId: true,
+      images: { ...MEAL_IMAGE_SELECT, take: 1 },
       outletMeals: {
         where : { outletId, deletedAt: null },
         select: { isAvailable: true, priceMinorOverride: true },

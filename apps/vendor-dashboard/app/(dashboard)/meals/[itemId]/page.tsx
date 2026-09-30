@@ -6,6 +6,8 @@ import { PageHeader } from "@/components/dashboard/layout/PageHeader"
 import { MealForm } from "@/components/meals/MealForm"
 import { MealReviewNotice } from "@/components/meals/MealReviewNotice"
 import { MealDiscountNotice } from "@/components/meals/MealDiscountNotice"
+import { MealOutletAvailability } from "@/components/meals/MealOutletAvailability"
+import { MealLifecycleActions } from "@/components/meals/MealLifecycleActions"
 import { getMenuItem, getMenuContext } from "@/lib/vendor/menu"
 import { requireSetupAccess } from "@/lib/vendor/guards"
 
@@ -39,7 +41,9 @@ export default async function EditMealPage({ params }: { params: Promise<{ itemI
         currency={context.currency}
         basePriceMinor={item.basePriceMinor}
       />
+      <MealOutletAvailability item={item} />
       <MealForm item={item} />
+      <MealLifecycleActions item={item} />
     </PageGrid>
   )
 }

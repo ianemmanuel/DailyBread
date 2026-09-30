@@ -7,7 +7,7 @@ import { getModerationProvider, checkImpersonation, type ModerationFlag } from "
 import { notifyAdminsProfileFlagged } from "@/lib/moderation/profile-flag-notify"
 import { R2Service } from "@/lib/r2/r2.service"
 import { normalizeSingleKey } from "./vendor.profileMedia"
-import { resolveSelectedFoodTags } from "./vendor.foodTags"
+import { resolveProfileFoodTags } from "./vendor.foodTags"
 import type {
   UpsertVendorProfileRequest, VendorGoLiveStatus, VendorGoLiveBlocker, VendorFoodTag,
 } from "@repo/types/backend"
@@ -238,7 +238,7 @@ export async function upsertVendorProfile(vendorId: string, input: UpsertVendorP
 
   // Rejects anything not currently enabled in the vendor's own country rather
   // than silently dropping it — see resolveSelectedFoodTags.
-  const { cuisineIds, dietaryTagIds } = await resolveSelectedFoodTags(vendor.countryId, input)
+  const { cuisineIds, dietaryTagIds } = await resolveProfileFoodTags(vendor.countryId, input)
 
   const data = {
     displayName,

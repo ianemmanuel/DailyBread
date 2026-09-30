@@ -82,9 +82,15 @@ export interface MenuContext {
   maxDietaryTags: number
 }
 
+/** One saved photo. `storageKey` identifies it to the form (sent back on save
+ *  to mean "keep this one"); `url` is the processed public master — stable,
+ *  never a signed link. */
 export interface MenuItemImage {
-  storageKey: string
-  url       : string | null
+  storageKey : string
+  url        : string | null
+  width      : number
+  height     : number
+  blurDataUrl: string
 }
 
 export interface MenuItemOutlet {
@@ -304,6 +310,50 @@ export function useUpdateMenuItem(itemId: string) {
   return useMutation({
     mutationFn: (body: UpsertMenuItemRequest) =>
       clientFetch<MenuItem>(`/api/menu/items/${itemId}`, { method: "PUT", body: JSON.stringify(body) }),
+    onSuccess : () => {
+      queryClient.invalidateQueries({ queryKey: menuKeys.items })
+      queryClient.invalidateQueries({ queryKey: menuKeys.item(itemId) })
+    },
+  })
+}
+
+/** Archive or restore a dish everywhere. Nothing about it is lost either way —
+ *  outlets, prices, availability and options all come back as they were. */
+export function useSetMenuItemArchived(itemId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (isArchived: boolean) =>
+      clientFetch<{ id: string; isArchived: boolean }>(`/api/menu/items/${itemId}/archive`, {
+        method: "PATCH", body: JSON.stringify({ isArchived }),
+      }),
+    onSuccess : () => {
+      queryClient.invalidateQueries({ queryKey: menuKeys.items })
+      queryClient.invalidateQueries({ queryKey: menuKeys.item(itemId) })
+    },
+  })
+}
+
+/** Soft delete: the dish leaves the menu; the backend keeps the row. */
+export function useDeleteMenuItem(itemId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      clientFetch<{ id: string; deleted: true }>(`/api/menu/items/${itemId}`, { method: "DELETE" }),
+    onSuccess : () => {
+      queryClient.invalidateQueries({ queryKey: menuKeys.items })
+      queryClient.removeQueries({ queryKey: menuKeys.item(itemId) })
+    },
+  })
+}
+
+/** 86-ing one dish at ONE outlet, addressed by that outlet's Meal id. */
+export function useSetMealAvailability(itemId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ mealId, isAvailable }: { mealId: string; isAvailable: boolean }) =>
+      clientFetch<{ id: string; isAvailable: boolean }>(`/api/menu/meals/${mealId}/availability`, {
+        method: "PATCH", body: JSON.stringify({ isAvailable }),
+      }),
     onSuccess : () => {
       queryClient.invalidateQueries({ queryKey: menuKeys.items })
       queryClient.invalidateQueries({ queryKey: menuKeys.item(itemId) })

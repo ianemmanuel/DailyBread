@@ -32,6 +32,7 @@ export type {
   StorefrontOption,
   StorefrontModifierGroup,
   StorefrontMenuItem,
+  MenuImage,
   StorefrontSection,
   StorefrontHours,
   Storefront,

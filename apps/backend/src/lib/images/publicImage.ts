@@ -4,7 +4,9 @@ import { R2Service } from "@/lib/r2/r2.service"
 import { publicMediaStorage } from "@/lib/storage/publicMedia.storage"
 import {
   ImageRejected,
+  normaliseBoundedImage,
   normaliseSquareImage,
+  type BoundedImageSpec,
   type SquareCropSpec,
 } from "./transform"
 
@@ -174,6 +176,70 @@ export async function processPublicSquareImage(input: {
     imageBlurDataUrl: derived.blurDataUrl,
     originalImageKey: input.originalKey,
   }
+}
+
+export interface ProcessedBoundedImage {
+  imageKey   : string
+  width      : number
+  height     : number
+  blurDataUrl: string
+}
+
+/**
+ * Same round trip for a photograph that keeps its own shape (see
+ * normaliseBoundedImage): verify the object the browser ACTUALLY stored,
+ * re-encode it, publish the master.
+ *
+ * The stored size is read with a HEAD before a single byte is downloaded — a
+ * declared size is a claim, and a presigned PUT does not hold the browser to
+ * it. Then the bytes are decoded and the real format and dimensions checked;
+ * only then is anything published.
+ *
+ * Never deletes its source: for a fresh upload that is the caller's staging
+ * object to clear, and for a backfill it is a permanent original.
+ */
+export async function processPublicBoundedImage(input: {
+  sourceKey   : string
+  /** The prefix the source MUST sit under. The guard, not a hint. */
+  sourcePrefix: string
+  publicPrefix: string
+  spec        : BoundedImageSpec
+  maxBytes    : number
+}): Promise<ProcessedBoundedImage> {
+  publicMediaStorage.assertConfigured()
+  assertKeyUnderPrefix(input.sourceKey, input.sourcePrefix)
+
+  const size = await R2Service.objectSize(input.sourceKey)
+  if (size === null) {
+    throw new ApiError(400, "That upload could not be found. Try uploading the image again.", "UPLOAD_NOT_FOUND")
+  }
+  if (size > input.maxBytes) {
+    throw new ApiError(
+      400,
+      `Image is too large — the maximum size is ${Math.floor(input.maxBytes / (1024 * 1024))}MB.`,
+      "FILE_TOO_LARGE",
+    )
+  }
+
+  let original: Buffer
+  try {
+    original = await R2Service.getObjectBuffer(input.sourceKey)
+  } catch {
+    throw new ApiError(400, "That upload could not be found. Try uploading the image again.", "UPLOAD_NOT_FOUND")
+  }
+
+  let derived
+  try {
+    derived = await normaliseBoundedImage(original, input.spec)
+  } catch (err) {
+    if (err instanceof ImageRejected) throw new ApiError(400, err.message, err.code)
+    throw err
+  }
+
+  const imageKey = buildPublicKey(input.publicPrefix)
+  await publicMediaStorage.put(imageKey, derived.buffer, derived.contentType)
+
+  return { imageKey, width: derived.width, height: derived.height, blurDataUrl: derived.blurDataUrl }
 }
 
 /** Best-effort cleanup of an image a row no longer points at. A failure here

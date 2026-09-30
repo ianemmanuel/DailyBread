@@ -3,9 +3,10 @@ import type { AdminScopeContext } from "@repo/types/backend"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
-import { R2Service } from "@/lib/r2/r2.service"
-import { getCountryIdFromSlug } from "../helpers/get-country-id.helper"
+import { IMAGE_SELECT, mealImageUrl } from "./images.service"
+import { resolveCountryIdInScope } from "@/modules/admin/lib/scope/resolve-country-id"
 import { toCsv } from "@/lib/csv"
+import { getCurrencyForCountry, getCurrenciesForCountries } from "@/modules/finance"
 
 /*
  * Admin-side meal moderation.
@@ -47,7 +48,7 @@ export interface MenuItemFilters {
 
 async function buildMenuItemsWhere(params: MenuItemFilters, scope: AdminScopeContext) {
   const countryId = params.countrySlug
-    ? await getCountryIdFromSlug(params.countrySlug, scope)
+    ? await resolveCountryIdInScope(params.countrySlug, scope)
     : undefined
 
   // The country lives on the vendor, so scope is applied through the relation
@@ -84,7 +85,8 @@ const LIST_SELECT = {
   name          : true,
   description   : true,
   basePriceMinor: true,
-  mainImageKey  : true,
+  // The main image only — the queue shows one thumbnail per dish.
+  images        : { ...IMAGE_SELECT, take: 1 },
   reviewStatus  : true,
   flagReasons   : true,
   flaggedAt     : true,
@@ -106,34 +108,10 @@ const LIST_SELECT = {
 /*
  * A price is meaningless without its currency, and a cross-country queue shows
  * several at once — so each row carries its own rather than the page assuming
- * one. Resolved in a single batched read: the distinct codes on the page,
- * never one query per row, and minorUnitDigits is read rather than assumed to
- * be 2 (UGX has none, KWD has three).
+ * one. Finance resolves them in a single batched read for the page, never one
+ * query per row, and minorUnitDigits is read rather than assumed to be 2 (UGX
+ * has none, KWD has three).
  */
-async function currencyMap(codes: (string | null)[]) {
-  const distinct = [...new Set(codes.filter((c): c is string => !!c))]
-  if (distinct.length === 0) return new Map<string, { code: string; symbol: string; minorUnitDigits: number }>()
-
-  const rows = await prisma.currency.findMany({
-    where : { code: { in: distinct } },
-    select: { code: true, symbol: true, minorUnitDigits: true },
-  })
-  return new Map(
-    rows.map((r) => [r.code, { code: r.code, symbol: r.symbol ?? r.code, minorUnitDigits: r.minorUnitDigits }]),
-  )
-}
-
-/** Storage keys become short-lived signed URLs only at the response boundary. */
-async function signOrNull(storageKey: string | null): Promise<string | null> {
-  if (!storageKey) return null
-  try {
-    return await R2Service.generateViewUrl(storageKey)
-  } catch (err) {
-    // One unreadable object degrades to a null URL rather than failing the page.
-    serviceLog.warn({ err, storageKey }, "Failed to sign meal image URL")
-    return null
-  }
-}
 
 export async function listMenuItemsForAdmin(
   scope : AdminScopeContext,
@@ -166,19 +144,15 @@ export async function listMenuItemsForAdmin(
     prisma.menuItem.count({ where: { ...scopeWhere, adminStatus: MealStatus.BANNED } }),
   ])
 
-  const currencies = await currencyMap(items.map((i) => i.vendor.country?.currencyCode ?? null))
-  const withUrls = await Promise.all(
-    items.map(async (item) => {
-      const code = item.vendor.country?.currencyCode ?? item.vendor.country?.currency ?? null
-      return {
-        ...item,
-        mainImageUrl: await signOrNull(item.mainImageKey),
-        outletCount : item._count.outletMeals,
-        currency    : (code ? currencies.get(code) : null)
-          ?? { code: code ?? "USD", symbol: code ?? "USD", minorUnitDigits: 2 },
-      }
-    }),
-  )
+  const currencies = await getCurrenciesForCountries(items.map((i) => i.vendor.countryId))
+  // Photos are shown by their processed public master — the same stable URL a
+  // customer gets, never a signed link to the vendor's original.
+  const withUrls = items.map(({ images, ...item }) => ({
+    ...item,
+    mainImageUrl: images[0] ? mealImageUrl(images[0].imageKey) : null,
+    outletCount : item._count.outletMeals,
+    currency    : currencies.get(item.vendor.countryId)!,
+  }))
 
   return {
     items     : withUrls,
@@ -252,10 +226,11 @@ async function getItemWithScope(itemId: string, scope: AdminScopeContext) {
 export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeContext) {
   const item = await getItemWithScope(itemId, scope)
 
-  const [detail, images] = await Promise.all([
+  const [detail] = await Promise.all([
     prisma.menuItem.findUniqueOrThrow({
       where : { id: itemId },
       select: {
+        images         : IMAGE_SELECT,
         portionSize    : true,
         prepTimeMinutes: true,
         section        : { select: { id: true, name: true } },
@@ -296,16 +271,20 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
         },
       },
     }),
-    Promise.all(item.imageKeys.map(async (key) => ({ storageKey: key, url: await signOrNull(key) }))),
   ])
 
-  const code = item.vendor.country?.currencyCode ?? item.vendor.country?.currency ?? null
-  const currencies = await currencyMap([code])
+  const images = detail.images.map((image) => ({
+    storageKey : image.originalKey,
+    url        : mealImageUrl(image.imageKey),
+    width      : image.width,
+    height     : image.height,
+    blurDataUrl: image.blurDataUrl,
+  }))
+  const currency = await getCurrencyForCountry(item.vendor.countryId)
 
   return {
     ...item,
-    currency    : (code ? currencies.get(code) : null)
-      ?? { code: code ?? "USD", symbol: code ?? "USD", minorUnitDigits: 2 },
+    currency,
     portionSize : detail.portionSize,
     prepTimeMinutes: detail.prepTimeMinutes,
     section     : detail.section,

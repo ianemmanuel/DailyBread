@@ -3,7 +3,7 @@ import {
   normalizeOptions, normalizeSelectionRule, assertGroupCannotZeroOutDish,
   resolveGroupSelection, assertGroupName, assertOptionName,
   MAX_OPTIONS_PER_GROUP, MAX_GROUPS_PER_ITEM,
-} from "./vendor.modifiers"
+} from "./modifiers"
 
 /* Pure — every input supplied here, no DB. */
 
