@@ -1,43 +1,37 @@
 import Link from "next/link"
 import { BadgePercent, ArrowRight, Clock } from "lucide-react"
 import { formatPrice, type MenuCurrency } from "@/lib/menu/money"
-import type { MenuItemDiscount } from "@/lib/queries/menu"
+import type { MenuItemDiscount, MenuItemOutlet } from "@/lib/queries/menu"
 
 /*
- * Offers covering this dish, and what it costs while they run.
+ * Offers covering this dish, and what customers pay while they run.
  *
  * Uber Eats and DoorDash both show a discounted dish to the CUSTOMER the same
  * way — the original struck through beside the new price, with the offer named
- * — so a merchant needs to see exactly what their storefront is about to show.
- * The live case is therefore given a real price panel rather than a list row.
+ * — so a merchant needs to see exactly what their storefront is showing.
  *
- * The distinction that carries the design: an offer that is scheduled, paused
- * or outside its hours is listed but its price is framed as what the dish WOULD
- * cost, never struck through. A live discounted price for an offer nobody can
- * use would tell the vendor their shop is doing something it is not.
+ * EVERY PRICE HERE IS THE BACKEND'S, PER OUTLET. Which offer applies, and at
+ * what price, depends on the outlet: its own price, whether the offer targets
+ * it, and its local hours. The backend works that out with the storefront's own
+ * evaluator; this component chooses nothing and calculates nothing, so it can
+ * never show a vendor a price their customers are not paying.
  */
 
 export function MealDiscountNotice({
-  discounts, currency, basePriceMinor,
+  discounts, outlets, currency,
 }: {
-  discounts     : MenuItemDiscount[]
-  currency      : MenuCurrency
-  basePriceMinor: number
+  discounts: MenuItemDiscount[]
+  outlets  : MenuItemOutlet[]
+  currency : MenuCurrency
 }) {
   if (discounts.length === 0) return null
 
-  const active = discounts.filter((d) => d.appliesNow)
-  const dormant = discounts.filter((d) => !d.appliesNow)
-
-  // Offers never stack — a customer gets the best one, the same rule the
-  // resolver enforces.
-  const best = active.length > 0
-    ? active.reduce((a, b) => (b.savingMinor > a.savingMinor ? b : a))
-    : null
+  const live    = outlets.filter((o) => o.pricing.offer !== null)
+  const single  = live.length === 1 && outlets.length === 1 ? live[0]! : null
 
   return (
     <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]">
-      {best ? (
+      {live.length > 0 ? (
         <div className="relative bg-gradient-to-br from-emerald-600 to-emerald-700 px-5 py-4 text-white">
           <div className="flex items-center gap-2">
             <BadgePercent className="size-4" />
@@ -46,25 +40,47 @@ export function MealDiscountNotice({
             </p>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="font-display text-3xl font-semibold tabular-nums">
-              {formatPrice(best.discountedPriceMinor, currency)}
-            </span>
-            <span className="text-base tabular-nums text-white/60 line-through">
-              {formatPrice(basePriceMinor, currency)}
-            </span>
-            <span className="rounded-full bg-white/20 px-2.5 py-1 text-xs font-semibold">
-              {pct(best.percentBps)} off
-            </span>
-          </div>
-
-          <p className="mt-1.5 text-sm text-white/85">
-            Customers save {formatPrice(best.savingMinor, currency)} through{" "}
-            <Link href={`/offers/${best.id}`} className="cursor-pointer font-medium underline underline-offset-2">
-              {best.name}
-            </Link>
-            .
-          </p>
+          {single ? (
+            <>
+              <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="font-display text-3xl font-semibold tabular-nums">
+                  {formatPrice(single.pricing.priceMinor, currency)}
+                </span>
+                <span className="text-base tabular-nums text-white/60 line-through">
+                  {formatPrice(single.pricing.wasPriceMinor ?? single.pricing.listPriceMinor, currency)}
+                </span>
+                <span className="rounded-full bg-white/20 px-2.5 py-1 text-xs font-semibold">
+                  {single.pricing.offer!.label}
+                </span>
+              </div>
+              <p className="mt-1.5 text-sm text-white/85">
+                Customers save{" "}
+                {formatPrice((single.pricing.wasPriceMinor ?? single.pricing.priceMinor) - single.pricing.priceMinor, currency)}.
+              </p>
+            </>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {live.map((outlet) => (
+                <li key={outlet.mealId} className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 text-sm">
+                  <span className="min-w-0 truncate font-medium">{outlet.outletName}</span>
+                  <span className="font-semibold tabular-nums">{formatPrice(outlet.pricing.priceMinor, currency)}</span>
+                  {outlet.pricing.wasPriceMinor != null && (
+                    <span className="tabular-nums text-white/60 line-through">
+                      {formatPrice(outlet.pricing.wasPriceMinor, currency)}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs font-semibold">
+                    {outlet.pricing.offer!.label}
+                  </span>
+                </li>
+              ))}
+              {live.length < outlets.length && (
+                <li className="text-xs text-white/75">
+                  No offer is running at your other {outlets.length - live.length === 1 ? "location" : "locations"} right now.
+                </li>
+              )}
+            </ul>
+          )}
         </div>
       ) : (
         <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--muted)]/40 px-5 py-3">
@@ -75,9 +91,9 @@ export function MealDiscountNotice({
         </div>
       )}
 
-      {(dormant.length > 0 || active.length > 1) && (
+      {discounts.length > 0 && (
         <ul className="divide-y divide-[var(--border)]">
-          {[...active.filter((d) => d !== best), ...dormant].map((discount) => (
+          {discounts.map((discount) => (
             <li key={discount.id}>
               <Link
                 href={`/offers/${discount.id}`}
@@ -90,8 +106,8 @@ export function MealDiscountNotice({
                   <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
                     {!discount.appliesNow && <Clock className="size-3 shrink-0" />}
                     {discount.appliesNow
-                      ? `${pct(discount.percentBps)} off, also applying`
-                      : `${reason(discount)} · would be ${formatPrice(discount.discountedPriceMinor, currency)}`}
+                      ? `${discount.label} · applying now`
+                      : `${discount.label} · ${reason(discount)}`}
                   </p>
                 </div>
                 <ArrowRight className="size-4 shrink-0 text-[var(--muted-foreground)] transition-transform group-hover:translate-x-0.5" />
@@ -101,17 +117,14 @@ export function MealDiscountNotice({
         </ul>
       )}
 
-      {active.length > 1 && (
+      {discounts.filter((d) => d.appliesNow).length > 1 && (
         <p className="border-t border-[var(--border)] px-5 py-2.5 text-xs text-[var(--muted-foreground)]">
-          Offers don&apos;t stack. A customer gets the best one, which is the price above.
+          Offers don&apos;t stack. At each location a customer gets the best one, which is the price above.
         </p>
       )}
+
     </section>
   )
-}
-
-function pct(bps: number): string {
-  return `${Number((bps / 100).toFixed(2))}%`
 }
 
 /** Why an offer is not applying, in the vendor's words. The backend returns a
@@ -124,7 +137,7 @@ function reason(discount: MenuItemDiscount): string {
     case "SUSPENDED"       : return "Stopped by DailyBread"
     case "EXHAUSTED"       : return "Budget used up"
     case "EXPIRED"         : return "Finished"
-    // RUNNING but not applying means the daily window is shut.
+    // RUNNING but not applying means the daily window is shut everywhere.
     default                : return "Outside its hours"
   }
 }

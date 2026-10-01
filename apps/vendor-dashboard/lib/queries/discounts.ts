@@ -89,6 +89,9 @@ export interface DiscountContext {
   }
   maxDiscountBps: number
   vendorIsLive  : boolean
+  /** The timezone every outlet shares — what an offer's dates are meant in.
+   *  Null when outlets span zones; dates then use the device's clock. */
+  timeZone      : string | null
 }
 
 export interface UpsertDiscountRequest {

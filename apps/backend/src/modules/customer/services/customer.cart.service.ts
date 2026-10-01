@@ -1,21 +1,19 @@
-import { prisma, DiscountType } from "@repo/db"
+import { prisma } from "@repo/db"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
 import { priceCart, type CartLineInput, type ResolvedMenuItem } from "@/lib/pricing/cart"
 import { validateSelection, isGroupRequired, type GroupRule, type SelectedOption } from "@/lib/pricing/line"
-import { amountOffOrder, apportionOrderDiscount, percentageOffLine, MAX_DISCOUNT_BPS } from "@/lib/pricing/discount"
+import { apportionOrderDiscount } from "@/lib/pricing/discount"
 import type {
   PriceCartRequest, PricedCart, PricedCartLine, CartProblem,
 } from "@repo/types/backend"
 import { isOpenAt, type TradingDay } from "./customer.discovery"
 import {
   SELLABLE_MEAL_WHERE, SELLABLE_MENU_ITEM_WHERE, effectiveListPriceMinor, MEAL_IMAGE_SELECT, presentMealImage,
+  bestOrderOffer, bestPercentageOffer, offerAppliesNow, offerLabel, type OfferRow,
 } from "@/modules/meals"
 import { assertSellableOutlet } from "./customer.storefront.service"
-import {
-  OFFER_SELECT, getCountryTaxProfile, offerAppliesNow,
-  offerCoversItem, resolveRateBps, type OfferRow,
-} from "./customer.presentation"
+import { getCountryTaxProfile, loadVendorOffers, resolveRateBps } from "./customer.presentation"
 import { getCurrencyForCountry } from "@/modules/finance"
 
 /*
@@ -93,7 +91,7 @@ export async function priceCustomerCart(
   const items = await loadCartItems(outlet.vendorId, outlet.id, lines.map((l) => l.menuItemId))
   const itemsById = new Map(items.map((item) => [item.id, item]))
 
-  const offers = await loadOffers(outlet.vendorId)
+  const offers = await loadVendorOffers(outlet.vendorId)
   const liveOffers = offers.filter((o) => offerAppliesNow(o, outlet.id, true, now, city.timezone))
 
   // ─── Resolve every line ─────────────────────────────────────────────────────
@@ -280,9 +278,9 @@ export async function priceCustomerCart(
     discountMinor: line.discountMinor,
     totalMinor   : line.tax?.grossMinor ?? line.taxableMinor,
     appliedOfferId  : line.appliedDiscountId,
-    appliedOfferName: line.appliedDiscountId
-      ? liveOffers.find((o) => o.id === line.appliedDiscountId)?.name ?? null
-      : null,
+    // The generated CUSTOMER label ("10% off"), never Discount.name — that is
+    // the vendor's internal label and not copy a customer should read.
+    appliedOfferName: appliedLabel(line.appliedDiscountId, liveOffers, currency),
   }))
 
   return {
@@ -334,37 +332,21 @@ function resolveDiscounts(
   lineSubtotals: readonly number[],
   liveOffers   : readonly OfferRow[],
 ): Array<{ amountMinor: number; discountId: string | null }> {
+  /* Each line takes its single best percentage offer — chosen by the meals
+   * evaluator, so the ceiling, coverage and the deterministic tie-break are the
+   * storefront's and the vendor preview's exactly. */
   const perItem = items.map((item, i) => {
-    let best: { amountMinor: number; discountId: string } | null = null
-
-    for (const offer of liveOffers) {
-      if (offer.type !== DiscountType.PERCENTAGE_OFF_ITEMS) continue
-      if (!offerCoversItem(offer, item.menuItemId)) continue
-
-      const bps = Math.min(offer.percentBps ?? 0, MAX_DISCOUNT_BPS)
-      if (bps <= 0) continue
-
-      const amountMinor = percentageOffLine(lineSubtotals[i]!, bps)
-      if (amountMinor > 0 && (!best || amountMinor > best.amountMinor)) {
-        best = { amountMinor, discountId: offer.id }
-      }
-    }
-    return best ?? { amountMinor: 0, discountId: null as string | null }
+    const best = bestPercentageOffer(liveOffers, item.menuItemId, lineSubtotals[i]!)
+    return best
+      ? { amountMinor: best.savingMinor, discountId: best.offer.id as string | null }
+      : { amountMinor: 0, discountId: null as string | null }
   })
 
   const itemTotal = perItem.reduce((sum, d) => sum + d.amountMinor, 0)
   const basketSubtotal = lineSubtotals.reduce((sum, value) => sum + value, 0)
+  const orderOffer = bestOrderOffer(liveOffers, basketSubtotal)
 
-  let bestOrderOffer: { amountMinor: number; discountId: string } | null = null
-  for (const offer of liveOffers) {
-    if (offer.type !== DiscountType.AMOUNT_OFF_ORDER) continue
-    const amountMinor = amountOffOrder(basketSubtotal, offer.amountMinor ?? 0, offer.minSubtotalMinor)
-    if (amountMinor > 0 && (!bestOrderOffer || amountMinor > bestOrderOffer.amountMinor)) {
-      bestOrderOffer = { amountMinor, discountId: offer.id }
-    }
-  }
-
-  if (!bestOrderOffer || bestOrderOffer.amountMinor <= itemTotal) return perItem
+  if (!orderOffer || orderOffer.savingMinor <= itemTotal) return perItem
 
   /*
    * The basket offer wins, so it replaces the per-item ones entirely and is
@@ -372,19 +354,22 @@ function resolveDiscounts(
    * differ per dish, so a basket mixing a standard-rated meal with a zero-rated
    * one would otherwise be taxed wrongly.
    */
-  const shares = apportionOrderDiscount(lineSubtotals, bestOrderOffer.amountMinor)
+  const shares = apportionOrderDiscount(lineSubtotals, orderOffer.savingMinor)
   return shares.map((amountMinor) => ({
     amountMinor,
-    discountId: amountMinor > 0 ? bestOrderOffer!.discountId : null,
+    discountId: amountMinor > 0 ? orderOffer.offer.id : null,
   }))
 }
 
-async function loadOffers(vendorId: string): Promise<OfferRow[]> {
-  const rows = await prisma.discount.findMany({
-    where : { vendorId, deletedAt: null, isPaused: false, suspendedAt: null },
-    select: OFFER_SELECT,
-  })
-  return rows as unknown as OfferRow[]
+/** The label a customer is shown for the offer applied to a line. */
+function appliedLabel(
+  discountId: string | null,
+  liveOffers: readonly OfferRow[],
+  currency  : Awaited<ReturnType<typeof getCurrencyForCountry>>,
+): string | null {
+  if (!discountId) return null
+  const offer = liveOffers.find((o) => o.id === discountId)
+  return offer ? offerLabel(offer, currency) : null
 }
 
 // ─── Internal ────────────────────────────────────────────────────────────────

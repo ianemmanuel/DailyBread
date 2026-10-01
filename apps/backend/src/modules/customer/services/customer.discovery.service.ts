@@ -1,26 +1,21 @@
 import { prisma, Prisma } from "@repo/db"
-import { logger } from "@/lib/pino/logger"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
 import type { CityDiscoveryResult, DiscoveryFilters, DiscoveryOutlet, DiscoveryResult } from "@repo/types/backend"
 
 /** One cuisine tag as every customer surface shows it. */
 type Cuisine = { id: string; name: string; slug: string }
+import { sortOutlets, type DiscoverySort, type RankableOutlet } from "./customer.discovery"
 import {
-  boundingBox, distanceTo, effectiveRadiusMeters, estimateDelivery, isOpenAt,
-  sortOutlets, type DiscoverySort, type RankableOutlet, type TradingDay,
-} from "./customer.discovery"
-import { outletAreaAllowsSelling } from "./customer.serviceability"
-import {
-  getOperatingCities, resolveCustomerLocation, resolveOutletArea,
+  getOperatingCities, resolveCustomerLocation,
   type OperatingCity, type ResolvedLocation,
 } from "./customer.geo.service"
-import { SELLABLE_MEAL_WHERE, SELLABLE_MENU_ITEM_WHERE } from "@/modules/meals"
-import { SELLABLE_OUTLET_WHERE } from "./customer.visibility"
 import {
-  OFFER_SELECT, offerAppliesNow, signKey, toDiscountOffer,
-  type OfferRow,
-} from "./customer.presentation"
+  SELLABLE_MEAL_WHERE, SELLABLE_MENU_ITEM_WHERE,
+  OFFER_SELECT, offerAppliesNow, sortOffersStable, toDiscountOffer, type OfferRow,
+} from "@/modules/meals"
+import { eligibleCityOutlets, eligibleOutletsNear } from "./customer.eligibleOutlets"
+import { signKey } from "./customer.presentation"
 import { getCurrencyForCountry } from "@/modules/finance"
 
 /*
@@ -53,16 +48,8 @@ import { getCurrencyForCountry } from "@/modules/finance"
  * it.
  */
 
-const discoveryLog = logger.child({ module: "customer-discovery-service" })
-
-const MAX_CANDIDATE_SCAN = 2_000
 const DEFAULT_PAGE_SIZE  = 20
 const MAX_PAGE_SIZE      = 50
-
-/** How far out to look before the per-outlet radius does the real filtering.
- *  An outlet only appears if the customer is inside ITS radius, so this is a
- *  ceiling on the search, not a promise about range. */
-const SEARCH_RADIUS_METERS = 30_000
 
 // ─── Where the customer is ───────────────────────────────────────────────────
 
@@ -127,22 +114,6 @@ export async function resolveDiscoveryLocation(
 
 // ─── The feed ────────────────────────────────────────────────────────────────
 
-/** Phase-1 row: only what ranking reads. */
-const CANDIDATE_SELECT = {
-  id: true, vendorId: true, name: true, zoneId: true,
-  latitude: true, longitude: true, deliveryRadius: true,
-  ratings: true, totalReviews: true, isFeatured: true,
-  deliveryFeeMinor: true, minimumOrderMinor: true,
-  operatingHours: {
-    where : { isActive: true, validFrom: null },
-    select: { dayOfWeek: true, openTime: true, closeTime: true, isClosed: true },
-  },
-  meals: {
-    where : SELLABLE_MEAL_WHERE,
-    select: { menuItem: { select: { prepTimeMinutes: true } } },
-  },
-} as const
-
 export async function discoverOutlets(
   location  : DiscoveryLocationInput,
   filters   : DiscoveryFilters,
@@ -159,53 +130,20 @@ export async function discoverOutlets(
   }
 
   const city = resolved.city
-  const box = boundingBox(resolved.point, SEARCH_RADIUS_METERS)
 
-  const candidates = await prisma.outlet.findMany({
-    where: {
-      ...SELLABLE_OUTLET_WHERE,
-      cityId   : city.id,
-      latitude : { gte: box.minLat, lte: box.maxLat },
-      longitude: { gte: box.minLng, lte: box.maxLng },
-      ...buildFilterWhere(filters),
-    },
-    select: CANDIDATE_SELECT,
-    take  : MAX_CANDIDATE_SCAN + 1,
-  })
+  /* The SAME eligible set the meals feed reads — city, the outlet's own zone,
+   * and the outlet's radius from this point. */
+  const eligible = await eligibleOutletsNear(city, resolved.point, buildFilterWhere(filters), now)
+  const offersByVendor = await loadRunningOffers(eligible.map((e) => e.outlet.vendorId))
 
-  if (candidates.length > MAX_CANDIDATE_SCAN) {
-    discoveryLog.warn(
-      { cityId: city.id, count: candidates.length },
-      "Discovery candidate scan cap hit — this market has outgrown the in-memory distance filter and wants PostGIS",
-    )
-  }
-
-  const offersByVendor = await loadRunningOffers(
-    candidates.slice(0, MAX_CANDIDATE_SCAN).map((c) => c.vendorId),
-  )
-
-  // In-memory narrowing: distance, the outlet's own zone, and open-now.
   type FeedRow = RankableOutlet & {
     vendorId: string
     etaMinMinutes: number
   }
-  const ranked: FeedRow[] = []
-
-  for (const outlet of candidates.slice(0, MAX_CANDIDATE_SCAN)) {
-    if (!outletAreaAllowsSelling(resolveOutletArea(city, outlet.zoneId))) continue
-
-    const distanceMeters = distanceTo(resolved.point, {
-      latitude: outlet.latitude, longitude: outlet.longitude,
-    })
-    if (distanceMeters > effectiveRadiusMeters(outlet.deliveryRadius)) continue
-
-    const isOpenNow = isOpenAt(outlet.operatingHours as TradingDay[], now, city.timezone)
-    const eta = estimateDelivery(distanceMeters, slowestPrepTime(outlet.meals))
-
+  const ranked: FeedRow[] = eligible.map(({ outlet, distanceMeters, eta, isOpenNow }) => {
     const offers = offersByVendor.get(outlet.vendorId) ?? []
     const liveOffer = offers.find((o) => offerAppliesNow(o, outlet.id, true, now, city.timezone))
-
-    ranked.push({
+    return {
       id            : outlet.id,
       vendorId      : outlet.vendorId,
       distanceMeters,
@@ -216,8 +154,8 @@ export async function discoverOutlets(
       isOpenNow,
       hasOffer      : !!liveOffer,
       isFeatured    : outlet.isFeatured,
-    })
-  }
+    }
+  })
 
   // Filters that depend on the computed figures, applied after they exist.
   const narrowed = ranked.filter((row) => {
@@ -313,26 +251,15 @@ function buildFilterWhere(filters: DiscoveryFilters): Prisma.OutletWhereInput {
   return clauses.length > 0 ? { AND: clauses } : {}
 }
 
-/** The slowest dish decides the ticket — a ticket is ready when its last item
- *  is, which is why MenuItem carries a per-dish prep time at all. */
-function slowestPrepTime(meals: ReadonlyArray<{ menuItem: { prepTimeMinutes: number | null } }>): number | null {
-  let slowest: number | null = null
-  for (const meal of meals) {
-    const minutes = meal.menuItem.prepTimeMinutes
-    if (minutes != null && (slowest === null || minutes > slowest)) slowest = minutes
-  }
-  return slowest
-}
-
 /**
  * Every offer that could be running, for a set of vendors, in one query.
  *
  * One query for the whole page, never one per outlet — the same rule
- * getDiscountsForMenuItems follows on the vendor side. The lifecycle and window
+ * getVendorOfferSource follows on the vendor side. The lifecycle and window
  * checks then happen in memory per outlet, because whether an offer applies
  * depends on which outlet it is being asked about.
  */
-async function loadRunningOffers(vendorIds: readonly string[]): Promise<Map<string, OfferRow[]>> {
+export async function loadRunningOffers(vendorIds: readonly string[]): Promise<Map<string, OfferRow[]>> {
   const byVendor = new Map<string, OfferRow[]>()
   if (vendorIds.length === 0) return byVendor
 
@@ -352,6 +279,9 @@ async function loadRunningOffers(vendorIds: readonly string[]): Promise<Map<stri
     list.push(row as unknown as OfferRow)
     byVendor.set(row.vendorId, list)
   }
+  // A card shows the FIRST applying offer, so the order must be stable — the
+  // same one leads on every render, never whichever row Postgres returned first.
+  for (const [vendorId, list] of byVendor) byVendor.set(vendorId, sortOffersStable(list))
   return byVendor
 }
 
@@ -613,41 +543,27 @@ export async function discoverCityOutlets(
   const city = cities.find((c) => c.slug === citySlug && c.boundary !== null)
   if (!city) return null
 
-  const candidates = await prisma.outlet.findMany({
-    where : { ...SELLABLE_OUTLET_WHERE, cityId: city.id, ...buildFilterWhere(filters) },
-    select: CANDIDATE_SELECT,
-    take  : MAX_CANDIDATE_SCAN + 1,
+  /* The same eligible set the city's meals read: sellable, in this city, and
+   * the outlet's OWN zone permits trading. */
+  const eligible = await eligibleCityOutlets(city, buildFilterWhere(filters), now)
+  const offersByVendor = await loadRunningOffers(eligible.map((e) => e.outlet.vendorId))
+
+  const rows = eligible.map(({ outlet, isOpenNow }) => {
+    const offers = offersByVendor.get(outlet.vendorId) ?? []
+    return {
+      id         : outlet.id,
+      vendorId   : outlet.vendorId,
+      name       : outlet.name,
+      rating     : outlet.ratings,
+      reviewCount: outlet.totalReviews,
+      isFeatured : outlet.isFeatured,
+      isOpenNow,
+      hasOffer   : offers.some((o) => offerAppliesNow(o, outlet.id, true, now, city.timezone)),
+      /* No point, so no honest value for either. */
+      distanceMeters: null,
+      eta           : null,
+    }
   })
-
-  if (candidates.length > MAX_CANDIDATE_SCAN) {
-    discoveryLog.warn(
-      { cityId: city.id, count: candidates.length },
-      "City browse scan cap hit — this market has outgrown an in-memory pass",
-    )
-  }
-
-  const scanned = candidates.slice(0, MAX_CANDIDATE_SCAN)
-  const offersByVendor = await loadRunningOffers(scanned.map((c) => c.vendorId))
-
-  const rows = scanned
-    /* The outlet's own zone still decides whether it may trade at all. */
-    .filter((outlet) => outletAreaAllowsSelling(resolveOutletArea(city, outlet.zoneId)))
-    .map((outlet) => {
-      const offers = offersByVendor.get(outlet.vendorId) ?? []
-      return {
-        id         : outlet.id,
-        vendorId   : outlet.vendorId,
-        name       : outlet.name,
-        rating     : outlet.ratings,
-        reviewCount: outlet.totalReviews,
-        isFeatured : outlet.isFeatured,
-        isOpenNow  : isOpenAt(outlet.operatingHours as TradingDay[], now, city.timezone),
-        hasOffer   : offers.some((o) => offerAppliesNow(o, outlet.id, true, now, city.timezone)),
-        /* No point, so no honest value for either. */
-        distanceMeters: null,
-        eta           : null,
-      }
-    })
 
   const narrowed = rows.filter((row) => {
     if (filters.openNow && !row.isOpenNow) return false

@@ -36,3 +36,13 @@ export { effectiveListPriceMinor } from "./lib/menu.rules"
  * the processed masters, and the one place a master becomes a stable public
  * URL. Readers never see an original's key. */
 export { IMAGE_SELECT as MEAL_IMAGE_SELECT, presentMealImage } from "./services/images.service"
+/* Which offer prices a dish, at an outlet, at a moment — the one evaluator the
+ * storefront, the cart, the vendor preview and the admin all use. Pure: offers
+ * are authored by the vendor module and handed in. */
+export {
+  OFFER_SELECT, offerAppliesNow, offerAppliesAtAnyOutlet, offerCoversItem, effectivePercentBps,
+  bestPercentageOffer, bestOrderOffer, bestOfferForItem, sortOffersStable,
+  offerLabel, toDiscountOffer, formatMinor, priceAtOutlet,
+  type OfferRow, type OutletClock, type OutletPrice, type VendorOffers,
+} from "./lib/pricing/offers"
+export { loadOutletClocks } from "./services/outletClocks.service"

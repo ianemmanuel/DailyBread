@@ -93,6 +93,19 @@ export interface MenuItemImage {
   blurDataUrl: string
 }
 
+/** What a customer at ONE outlet pays for the dish right now — computed by
+ *  the backend with the storefront's own evaluator. Rendered, never re-derived. */
+export interface MenuOutletPricing {
+  /** The outlet's price when it set one, otherwise the dish's base price. */
+  listPriceMinor: number
+  /** What a customer there pays now. */
+  priceMinor    : number
+  /** The struck-through figure — present only while an offer is applying. */
+  wasPriceMinor : number | null
+  /** The offer applying there now, with its CUSTOMER-facing label. */
+  offer         : { id: string; label: string; percentBps: number | null } | null
+}
+
 export interface MenuItemOutlet {
   mealId            : string
   outletId          : string
@@ -100,19 +113,23 @@ export interface MenuItemOutlet {
   isAvailable       : boolean
   priceMinorOverride: number | null
   adminStatus       : string
+  pricing           : MenuOutletPricing
 }
 
-/** An offer covering this dish, and what it costs while the offer runs. */
+/** An offer covering this dish. No price here on purpose: what a customer
+ *  pays differs by outlet, so it lives on each outlet's `pricing`. */
 export interface MenuItemDiscount {
   id        : string
+  /** The vendor's own label. */
   name      : string
+  /** What a customer is told it is. */
+  label     : string
+  /** After the platform ceiling — what it can actually take. */
   percentBps: number
   state     : "SUSPENDED" | "PAUSED" | "EXPIRED" | "EXHAUSTED" | "SCHEDULED" | "AWAITING_GO_LIVE" | "RUNNING"
-  /** Whether it is actually changing the price this minute. Separate from
-   *  state, because a happy-hour offer is RUNNING all week. */
+  /** Whether it is changing the price this minute at ANY of the dish's
+   *  outlets. Separate from state: a happy-hour offer is RUNNING all week. */
   appliesNow: boolean
-  discountedPriceMinor: number
-  savingMinor         : number
 }
 
 export interface MenuItem {

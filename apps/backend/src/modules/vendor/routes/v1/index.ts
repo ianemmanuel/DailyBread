@@ -10,7 +10,7 @@ import discountRouter from './vendor.discount.routes'
 import authRouter from "../vendor.auth.routes"
 import { requireVendorState, NON_BANNED_STATES } from "../../middlewares"
 import { createMealsVendorRouter } from "@/modules/meals"
-import { getDiscountsForMenuItems } from "../../services/vendor.discount.service"
+import { getVendorOfferSource } from "../../services/vendor.discount.service"
 
 const v1Router: Router = Router()
 
@@ -37,7 +37,7 @@ v1Router.use('/profile',profileRouter)
  * and its offer preview, composed onto every dish response. Offers stay a
  * vendor concern until pricing (Phase 6) settles their home.
  */
-v1Router.use('/menu', requireVendorState("ACTIVE"), createMealsVendorRouter({ offerPreview: getDiscountsForMenuItems }))
+v1Router.use('/menu', requireVendorState("ACTIVE"), createMealsVendorRouter({ offerPreview: getVendorOfferSource }))
 //* Merchant-funded offers. Authoring tier, like the menu.
 v1Router.use('/discounts', discountRouter)
 

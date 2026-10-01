@@ -53,6 +53,17 @@ export type {
   StorefrontModifierGroup,
   StorefrontOption,
   StorefrontHours,
+  StorefrontDelivery,
+
+  // Meals
+  MealOutletRef,
+  MealDelivery,
+  DiscoveryMeal,
+  MealCuisineFacet,
+  MealDiscoveryFilters,
+  MealDiscoveryResult,
+  CityMealDiscoveryResult,
+  MealDetail,
 
   // Cart
   CartLineRequest,

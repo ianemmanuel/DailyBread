@@ -404,7 +404,12 @@ export interface MenuImage {
 }
 
 export interface StorefrontMenuItem {
+  /** The MenuItem — the dish. Kept as `id` for the storefront's existing
+   *  consumers; the cart addresses a line by this plus the outlet. */
   id          : string
+  /** The Meal — this dish AT this outlet, the customer's canonical identity
+   *  for it (`GET /meals/:mealId`). */
+  mealId      : string
   name        : string
   description : string | null
   portionSize : string | null
@@ -471,7 +476,134 @@ export interface Storefront {
   /** Populated only when the request carried a location. */
   distanceMeters: number | null
   eta           : DeliveryEstimate | null
+  /** The market this outlet trades in — an outlet id carries no city, so the
+   *  client learns it here rather than inferring it from a link. */
+  city          : MarketCity
+  /** Null when the request carried no location. */
+  delivery      : StorefrontDelivery | null
   sections      : StorefrontSection[]
+}
+
+/**
+ * Whether this outlet delivers to the location the request carried. The
+ * verdict is the SAME test the located feeds apply — the customer's own zone,
+ * then this outlet's city, zone and radius — so a storefront can never claim
+ * to deliver somewhere the feed would not list it.
+ */
+export interface StorefrontDelivery {
+  /** The customer's point, resolved: which city and zone, and whether we
+   *  serve it at all. */
+  serviceability: Serviceability
+  deliversHere  : boolean
+}
+
+// ─── Meals ───────────────────────────────────────────────────────────────────
+
+/**
+ * The outlet a meal is sold at, as a meal card or detail needs it. The logo is
+ * a short-lived signed URL (vendor media lives in the private bucket).
+ */
+export interface MealOutletRef {
+  outletId   : string
+  name       : string
+  displayName: string
+  logoUrl    : string | null
+}
+
+/** Only on a LOCATED feed — measured from the customer's point, never
+ *  invented for a city-wide list. */
+export interface MealDelivery {
+  distanceMeters  : number
+  eta             : DeliveryEstimate
+  deliveryFeeMinor: number | null
+}
+
+/**
+ * One meal in a discovery feed — a dish AT an outlet (Meal = MenuItem at an
+ * Outlet), never a dish in the abstract: price, offer, availability and reach
+ * all differ by outlet.
+ *
+ * Lighter than StorefrontMenuItem on purpose: the main image only, and no tax
+ * breakdown or modifiers — those belong to the detail read.
+ *
+ * Sold-out meals never appear in a feed. `isAvailable` is false only when the
+ * outlet is closed right now (`OUTLET_CLOSED`), which a card shows as such.
+ */
+export interface DiscoveryMeal {
+  mealId     : string
+  menuItemId : string
+  outletId   : string
+  name       : string
+  description: string | null
+  image      : MenuImage | null
+  cuisines   : Array<{ id: string; name: string; slug: string }>
+  dietaryTags: Array<{ id: string; name: string; slug: string }>
+  /** What it costs at this outlet right now — the outlet's price, less the
+   *  single best offer applying there. */
+  priceMinor   : number
+  /** Present only while an offer is applying — the struck-through figure. */
+  wasPriceMinor: number | null
+  offer        : DiscoveryOffer | null
+  currency     : CustomerCurrency
+  outlet       : MealOutletRef
+  isAvailable      : boolean
+  unavailableReason: MenuItemUnavailableReason | null
+  delivery         : MealDelivery | null
+}
+
+/** A cuisine facet on a MEAL list: `count` is meals, counted by the dish's
+ *  own cuisines — the entity the filter matches. */
+export interface MealCuisineFacet {
+  id   : string
+  name : string
+  slug : string
+  count: number
+}
+
+export interface MealDiscoveryFilters {
+  search?       : string
+  cuisineIds?   : string[]
+  dietaryTagIds?: string[]
+  hasOffer?     : boolean
+  /** Located feed only — every ordering is distance- or ETA-derived. */
+  sort?         : DiscoverySort
+  page?         : number
+  pageSize?     : number
+}
+
+/** Meals that can reach a customer's point. */
+export interface MealDiscoveryResult {
+  serviceability   : Serviceability
+  meals            : DiscoveryMeal[]
+  total            : number
+  page             : number
+  pageSize         : number
+  availableCuisines: MealCuisineFacet[]
+}
+
+/** Meals sold anywhere in a city, answered with no point. */
+export interface CityMealDiscoveryResult {
+  city             : MarketCity
+  meals            : DiscoveryMeal[]
+  total            : number
+  page             : number
+  pageSize         : number
+  availableCuisines: MealCuisineFacet[]
+}
+
+/**
+ * One meal in full — `GET /meals/:mealId`. The storefront's own item
+ * presentation (gallery, modifiers, tax breakdown, availability), with the
+ * identities spelled out and the outlet and market it belongs to.
+ */
+export interface MealDetail extends Omit<StorefrontMenuItem, "id" | "mealId"> {
+  mealId    : string
+  menuItemId: string
+  outletId  : string
+  section   : { id: string; name: string } | null
+  currency  : CustomerCurrency
+  outlet    : MealOutletRef
+  city      : MarketCity
 }
 
 // ─── Cart ────────────────────────────────────────────────────────────────────

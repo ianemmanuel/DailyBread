@@ -9,7 +9,7 @@ import {
   MAX_MEAL_CUISINES, MAX_MEAL_DIETARY_TAGS,
   MAX_MEAL_DESCRIPTION_LENGTH, MAX_PORTION_SIZE_LENGTH,
   assertMealName, assertValidPriceMinor, normalizePriceOverride,
-  resolveSelectedOutlets,
+  resolveSelectedOutlets, lowestEffectivePriceMinor,
 } from "../lib/menu.rules"
 import {
   MAX_MEAL_IMAGES, assertOwnedStagedKey, diffMealImages, mealUploadPrefix, planMealImages,
@@ -28,7 +28,13 @@ import {
   normalizePrepTime, resolveOrdering, nextPosition, assertSectionName,
 } from "../lib/menuStructure"
 import { getCountryTaxProfile, resolveRateBps, type CountryTaxProfile } from "@/modules/tax"
-import { getCurrencyForCountry } from "@/modules/finance"
+import { getCurrencyForCountry, type CountryCurrency } from "@/modules/finance"
+import { deriveDiscountState } from "@/lib/pricing/discount"
+import {
+  effectivePercentBps, offerAppliesAtAnyOutlet, offerCoversItem, offerLabel, priceAtOutlet,
+  sortOffersStable, type OfferRow, type OutletClock, type VendorOffers,
+} from "../lib/pricing/offers"
+import { loadOutletClocks } from "./outletClocks.service"
 import { computeTax, formatRateBps } from "@/lib/pricing/tax"
 
 /*
@@ -343,6 +349,42 @@ const ITEM_SELECT = {
   },
 } as const
 
+/*
+ * What a dish COSTS, per outlet, in the vendor's own view — computed by the
+ * meals evaluator exactly as the storefront computes it, so a vendor is never
+ * shown a price their customer does not pay.
+ *
+ * The offers themselves are vendor data, handed in by the vendor module at the
+ * router mount (see OfferPreview); nothing here imports vendor code. Without
+ * them — a caller that has none — every outlet simply shows its list price.
+ */
+interface PricingContext {
+  offers      : OfferRow[]
+  vendorIsLive: boolean
+  now         : Date
+  currency    : CountryCurrency
+  /** Every live outlet of the vendor, on its own clock, by outlet id. */
+  clocks      : Map<string, OutletClock>
+}
+
+async function pricingContext(
+  vendorId : string,
+  countryId: string,
+  source   : VendorOffers | undefined,
+): Promise<PricingContext> {
+  const [currency, clocks] = await Promise.all([
+    getCurrencyForCountry(countryId),
+    loadOutletClocks([vendorId]),
+  ])
+  return {
+    offers      : sortOffersStable(source?.offers ?? []),
+    vendorIsLive: source?.vendorIsLive ?? false,
+    now         : new Date(),
+    currency,
+    clocks      : new Map((clocks.get(vendorId) ?? []).map((c) => [c.id, c])),
+  }
+}
+
 type ItemRow = Awaited<ReturnType<typeof prisma.menuItem.findFirstOrThrow<{ select: typeof ITEM_SELECT }>>>
 
 /** A photo is shown by its processed PUBLIC master — a stable URL, never a
@@ -351,6 +393,7 @@ type ItemRow = Awaited<ReturnType<typeof prisma.menuItem.findFirstOrThrow<{ sele
 async function presentMenuItem(
   item      : ItemRow,
   taxProfile: CountryTaxProfile,
+  pricing   : PricingContext,
 ) {
   const imageUrls = item.images.map((image) => {
     const view = presentMealImage(image)
@@ -381,12 +424,40 @@ async function presentMenuItem(
         }
 
   const { cuisines, dietaryTags, outletMeals, modifierGroups, ...rest } = item
+
+  /* This dish's outlets, each on its own clock. An outlet whose clock is
+   * unknown (it has no city timezone) gets no offer rather than a guessed one. */
+  const dishClocks = outletMeals
+    .map((m) => pricing.clocks.get(m.outletId))
+    .filter((c): c is OutletClock => c !== undefined)
+
+  /*
+   * The offers ON this dish, for the vendor to see and manage — scheduled and
+   * paused ones included, so a vendor knows one is coming or why it is not
+   * running. Deliberately NO price here: which offer a customer gets, and what
+   * they pay, differs by outlet (targeting, local prices, local hours), so the
+   * price lives on each outlet row below and nowhere else. Only percentage
+   * offers: an amount off the ORDER is a basket rule with no per-dish price.
+   */
+  const discounts = pricing.offers
+    .filter((offer) => offerCoversItem(offer, item.id))
+    .map((offer) => ({
+      id        : offer.id,
+      /** The vendor's own label for it — theirs to read. */
+      name      : offer.name,
+      /** What a CUSTOMER is told it is. */
+      label     : offerLabel(offer, pricing.currency),
+      /** After the platform ceiling — what it can actually take. */
+      percentBps: effectivePercentBps(offer),
+      state     : deriveDiscountState(offer, pricing.now, pricing.vendorIsLive),
+      /** True when it is taking money off at ANY of this dish's outlets now. */
+      appliesNow: offerAppliesAtAnyOutlet(offer, dishClocks, pricing.vendorIsLive, pricing.now),
+    }))
+
   return {
     ...rest,
     tax,
-    // `discounts` (the offer preview) is NOT added here: offers belong to the
-    // vendor module, which composes them onto this at its own boundary — see
-    // OfferPreview in controllers/meals.vendor.controller.ts.
+    discounts,
     images     : imageUrls,
     mainImageUrl: imageUrls[0]?.url ?? null,
     cuisines   : cuisines.map((c) => c.cuisine),
@@ -417,6 +488,21 @@ async function presentMenuItem(
       isAvailable       : m.isAvailable,
       priceMinorOverride: m.priceMinorOverride,
       adminStatus       : m.adminStatus,
+      /*
+       * What a customer at THIS outlet pays right now — the storefront's own
+       * composition (priceAtOutlet): this outlet's price, the best offer
+       * applying here on this outlet's clock, under the ceiling.
+       */
+      pricing           : priceAtOutlet({
+        menuItemId        : item.id,
+        basePriceMinor    : item.basePriceMinor,
+        priceMinorOverride: m.priceMinorOverride,
+        outlet            : pricing.clocks.get(m.outletId) ?? { id: m.outletId, timeZone: "UTC" },
+        offers            : pricing.clocks.has(m.outletId) ? pricing.offers : [],
+        vendorIsLive      : pricing.vendorIsLive,
+        now               : pricing.now,
+        currency          : pricing.currency,
+      }),
     })),
   }
 }
@@ -424,6 +510,7 @@ async function presentMenuItem(
 export async function listMenuItems(
   vendorId: string,
   params  : { search?: string; sectionId?: string; outletId?: string; page?: number; pageSize?: number } = {},
+  offers? : VendorOffers,
 ) {
   const vendor = await loadActiveVendor(vendorId)
   const page     = Math.max(params.page ?? 1, 1)
@@ -446,9 +533,10 @@ export async function listMenuItems(
     ...(params.outletId ? { outletMeals: { some: { outletId: params.outletId, deletedAt: null } } } : {}),
   }
 
-  // One tax read for the whole page, never one per row.
-  const [taxProfile, items, total] = await Promise.all([
+  // One tax read, one pricing context for the whole page, never one per row.
+  const [taxProfile, pricing, items, total] = await Promise.all([
     getCountryTaxProfile(vendor.countryId),
+    pricingContext(vendorId, vendor.countryId, offers),
     prisma.menuItem.findMany({
       where,
       skip   : (page - 1) * pageSize,
@@ -466,7 +554,7 @@ export async function listMenuItems(
   ])
 
   return {
-    items     : await Promise.all(items.map((i) => presentMenuItem(i, taxProfile))),
+    items     : await Promise.all(items.map((i) => presentMenuItem(i, taxProfile, pricing))),
     total,
     page,
     pageSize,
@@ -474,17 +562,18 @@ export async function listMenuItems(
   }
 }
 
-export async function getMenuItem(vendorId: string, itemId: string) {
+export async function getMenuItem(vendorId: string, itemId: string, offers?: VendorOffers) {
   const vendor = await loadActiveVendor(vendorId)
-  const [item, taxProfile] = await Promise.all([
+  const [item, taxProfile, pricing] = await Promise.all([
     prisma.menuItem.findFirst({
       where : { id: itemId, vendorId, deletedAt: null },
       select: ITEM_SELECT,
     }),
     getCountryTaxProfile(vendor.countryId),
+    pricingContext(vendorId, vendor.countryId, offers),
   ])
   if (!item) throw new ApiError(404, "Meal not found", "NOT_FOUND")
-  return presentMenuItem(item, taxProfile)
+  return presentMenuItem(item, taxProfile, pricing)
 }
 
 // ─── Images ───────────────────────────────────────────────────────────────────
@@ -603,7 +692,7 @@ function normalizeOverrides(raw: unknown, outletIds: string[]): Map<string, numb
   return out
 }
 
-export async function createMenuItem(vendorId: string, input: UpsertMenuItemInput) {
+export async function createMenuItem(vendorId: string, input: UpsertMenuItemInput, offers?: VendorOffers) {
   const vendor = await loadActiveVendor(vendorId)
 
   const name           = assertMealName(input.name)
@@ -625,7 +714,11 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
 
   const sectionId       = await resolveSectionId(vendorId, input.sectionId)
   const taxCategoryId   = await resolveTaxCategoryId(vendor.countryId, input.taxCategoryId)
-  const modifierGroupIds = await resolveModifierGroups(vendorId, basePriceMinor, input.modifierGroupIds)
+  // Checked at the dish's CHEAPEST outlet price, not the catalogue price — an
+  // outlet override below the base is where options could reach zero.
+  const modifierGroupIds = await resolveModifierGroups(
+    vendorId, lowestEffectivePriceMinor(basePriceMinor, outletIds, overrides), input.modifierGroupIds,
+  )
   const { cuisineIds, dietaryTagIds } = await resolveSelectedFoodTags(vendor.countryId, {
     cuisineIds   : input.cuisineIds,
     dietaryTagIds: input.dietaryTagIds,
@@ -716,10 +809,15 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
     "Menu item created",
   )
 
-  return getMenuItem(vendorId, created.id)
+  return getMenuItem(vendorId, created.id, offers)
 }
 
-export async function updateMenuItem(vendorId: string, itemId: string, input: UpsertMenuItemInput) {
+export async function updateMenuItem(
+  vendorId: string,
+  itemId  : string,
+  input   : UpsertMenuItemInput,
+  offers? : VendorOffers,
+) {
   const vendor = await loadActiveVendor(vendorId)
 
   const existing = await prisma.menuItem.findFirst({
@@ -769,7 +867,11 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
   const taxCategoryId = input.taxCategoryId === undefined
     ? existing.taxCategoryId
     : await resolveTaxCategoryId(vendor.countryId, input.taxCategoryId)
-  const modifierGroupIds = await resolveModifierGroups(vendorId, basePriceMinor, input.modifierGroupIds)
+  // Checked at the dish's CHEAPEST outlet price, not the catalogue price — an
+  // outlet override below the base is where options could reach zero.
+  const modifierGroupIds = await resolveModifierGroups(
+    vendorId, lowestEffectivePriceMinor(basePriceMinor, outletIds, overrides), input.modifierGroupIds,
+  )
   const { cuisineIds, dietaryTagIds } = await resolveSelectedFoodTags(vendor.countryId, {
     cuisineIds   : input.cuisineIds,
     dietaryTagIds: input.dietaryTagIds,
@@ -898,7 +1000,7 @@ export async function updateMenuItem(vendorId: string, itemId: string, input: Up
   await Promise.all([deleteImageObjects(imageDiff.removed), clearStaged(published)])
 
   serviceLog.info({ vendorId, menuItemId: itemId, outlets: outletIds.length }, "Menu item updated")
-  return getMenuItem(vendorId, itemId)
+  return getMenuItem(vendorId, itemId, offers)
 }
 
 /**
