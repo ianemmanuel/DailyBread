@@ -1,4 +1,5 @@
 import Image from "next/image"
+import Link from "next/link"
 import { UtensilsCrossed } from "lucide-react"
 import type { CustomerCurrency, StorefrontMenuItem } from "@repo/types/customer-app"
 
@@ -18,7 +19,9 @@ import { formatMoneyCompact } from "@/lib/format/money"
  *
  * The sheet, the modifier picker and the cart return with orders; the tile
  * goes back to `"use client"` then. Until it does, a whole storefront ships
- * zero JavaScript.
+ * zero JavaScript — and the tile links to the dish's own page, `/meals/<mealId>`
+ * (the canonical identity of this dish AT this outlet), where its photos,
+ * options and tax line are shown in full.
  *
  * ── The layout, and why the photo is on the right ──────────────────────────
  *
@@ -47,8 +50,9 @@ export function MenuItemCard({
   const unavailable = disabled || !item.isAvailable
 
   return (
-    <article
-      className={`surface flex items-stretch gap-4 p-4 ${unavailable ? "opacity-60" : ""}`}
+    <Link
+      href={`/meals/${item.mealId}`}
+      className={`surface-interactive flex cursor-pointer items-stretch gap-4 p-4 ${unavailable ? "opacity-60" : ""}`}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <h3 className="clamp-2 leading-snug font-medium text-foreground">{item.name}</h3>
@@ -105,6 +109,6 @@ export function MenuItemCard({
           </div>
         )}
       </div>
-    </article>
+    </Link>
   )
 }

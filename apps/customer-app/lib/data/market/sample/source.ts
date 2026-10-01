@@ -2,16 +2,16 @@ import "server-only"
 
 import type { MarketScope } from "@/lib/market/context"
 import type {
-  ItemDelivery, MarketList, MarketListQuery, MarketMeal, MarketMealPlan,
+  ItemDelivery, MarketList, MarketListQuery, MarketMealPlan,
 } from "../types"
 import {
-  SAMPLE_CURRENCY, SAMPLE_MEAL_PLANS, SAMPLE_MEALS, samplePhoto,
-  type SampleMeal, type SampleMealPlan,
+  SAMPLE_CURRENCY, SAMPLE_MEAL_PLANS, samplePhoto,
+  type SampleMealPlan,
 } from "./fixtures"
 
 /*
- * The sample adapter: turns fixtures into exactly what the real reads will
- * return, INCLUDING the delivery-scoped behaviour, so the pages exercise the
+ * The sample adapter for MEAL PLANS (meals are live): turns fixtures into
+ * exactly what the real read will return, INCLUDING the delivery-scoped behaviour, so the pages exercise the
  * same branches they will run on live data.
  *
  *   browse / unavailable  → the whole fixture list, no delivery facts
@@ -41,7 +41,7 @@ function matches(query: MarketListQuery, haystack: string[], cuisineId: string |
   return true
 }
 
-function deliveryFor(scope: MarketScope, kitchen: SampleMeal["kitchen"]): ItemDelivery | null | false {
+function deliveryFor(scope: MarketScope, kitchen: SampleMealPlan["kitchen"]): ItemDelivery | null | false {
   if (scope.mode !== "delivery") return null
   if (!kitchen.reaches) return false
   return { eta: { minMinutes: kitchen.etaMin, maxMinutes: kitchen.etaMax }, feeMinor: kitchen.feeMinor }
@@ -56,28 +56,6 @@ function list<T>(scope: MarketScope, all: T[], query: MarketListQuery): MarketLi
     basis : scope.mode === "delivery" ? "delivery" : "city",
     source: "sample",
   }
-}
-
-export function sampleMeals(scope: MarketScope, query: MarketListQuery): MarketList<MarketMeal> {
-  const items: MarketMeal[] = []
-  for (const meal of SAMPLE_MEALS) {
-    if (!matches(query, [meal.name, meal.description, meal.kitchen.name], meal.cuisine.id)) continue
-    const delivery = deliveryFor(scope, meal.kitchen)
-    if (delivery === false) continue
-    items.push({
-      id         : meal.id,
-      name       : meal.name,
-      description: meal.description,
-      image      : { url: samplePhoto(meal.photo), alt: "" },
-      priceMinor : meal.priceMinor,
-      currency   : SAMPLE_CURRENCY,
-      place      : { outletId: null, name: meal.kitchen.name },
-      cuisine    : meal.cuisine,
-      offerLabel : meal.offerLabel,
-      delivery,
-    })
-  }
-  return list(scope, items, query)
 }
 
 export function sampleMealPlans(scope: MarketScope, query: MarketListQuery): MarketList<MarketMealPlan> {

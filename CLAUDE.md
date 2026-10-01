@@ -1099,7 +1099,8 @@ focused page. The city page and `/discover` compose them; they do not branch.
 | `/city/[slug]` | the introduction + SEO page: hero, mode strip, places, meals, plans, offers, catalogue tiles, areas, editorial |
 | `/city/[slug]/discover` | canonical exploration: mode banner, search + cuisine + toggles (sort only when delivering) applied to every row |
 | `/places`, `/offers` | the full live lists (`PlacesList`; offers = places with `hasOffer` pinned) |
-| `/meals`, `/meal-plans` | the full lists — SAMPLE until the reads exist |
+| `/meals` | the full live list (`MealsList`): search, cuisine, `hasOffer`, sort when delivering, paged at 24 |
+| `/meal-plans` | the full list — SAMPLE until the read exists |
 
 > **"Offers", not "discounts"** in anything a customer reads — `Discount` is the
 > schema's word (the Places-not-Outlets rule).
@@ -1112,12 +1113,13 @@ focused page. The city page and `/discover` compose them; they do not branch.
 > `?cuisine=` as `cuisineId`. `robots: noindex` on every market page except the
 > city page and meal plans, which are the SEO surfaces.
 
-**SAMPLE DATA: allowed for meals and meal plans, and fenced** (explicit
-direction, superseding "every row is real" for these two). Rules:
-- Only `lib/data/market/sample/` holds fixtures, and only `meals.ts` /
-  `meal-plans.ts` import it. Each loader is the ONE function to change when the
-  backend read lands; its comment names the endpoint. The shapes in
-  `lib/data/market/types.ts` are the contract that read must return.
+**SAMPLE DATA: allowed for MEAL PLANS only, and fenced** (explicit direction;
+meals went live in Phase 8 and their fixtures and `MarketMeal` were deleted).
+Rules:
+- Only `lib/data/market/sample/` holds fixtures, and only `meal-plans.ts`
+  imports it. That loader is the ONE function to change when the backend read
+  lands; its comment names the endpoint. `MarketMealPlan` in
+  `lib/data/market/types.ts` is the contract that read must return.
 - **Off in production builds** (`SAMPLE_DATA_ENABLED`; `MARKET_SAMPLE_DATA=1`
   forces it on for a demo). Off, the loaders return `not-available` and the
   sections say the listing is coming — no invented inventory reaches a real
@@ -1126,7 +1128,28 @@ direction, superseding "every row is real" for these two). Rules:
   are named "(sample)" and carry no outlet id, so no card links anywhere and no
   real vendor is shown a menu they did not write.
 - The sample adapter SIMULATES delivery scoping with a fixed `reaches` flag —
-  it never computes geography. Places, offers and cuisines are LIVE.
+  it never computes geography. Places, meals, offers and cuisines are LIVE.
+
+**MEALS ARE LIVE, and the UI uses `DiscoveryMeal` / `MealDetail` directly** —
+no frontend copy of either type. `getMarketMeals` (`lib/data/market/meals.ts`)
+picks the endpoint from the scope exactly like places: `delivery` → the
+located feed (token, never cached), `browse`/`unavailable` → the city feed
+(anonymous, 60s). No fallback between them and none to sample data; a located
+read's `AUTH_REQUIRED` / `ADDRESS_NOT_FOUND` get their own words.
+- **`mealParams` (`lib/data/market/meal-params.ts`) is the one mapper**, pure,
+  checked by `scripts/check-meal-params.ts` (11). `openNow` and `freeDelivery`
+  are PLACES filters the meals API does not read: they are not in `MealsQuery`,
+  `FeedFilters` takes `toggles={["hasOffer"]}` on the meals page, and on
+  `/discover` the meals row says those chips apply to places only instead of
+  listing meals under them.
+- **A meal card links to `/meals/<mealId>`** — flat, like `/store`, because a
+  meal id carries no city; the page links back to the market the BACKEND names
+  (`meal.city.slug`). Storefront menu rows link there too. Read-only: modifier
+  groups are shown as information (rule + per-option delta as sent), never a
+  form. No delivery claim on it — the read takes no location (deferred, see
+  *Next up*). `/meals` is a doorway like `/meal-plans`.
+- A page past the end says so and links to page 1 with the filters kept — an
+  empty `meals` with `total > 0` is neither "no matches" nor "nothing here".
 
 **THE STOREFRONT IS BUILT, AND IT IS READ-ONLY ON PURPOSE.**
 `/store/[outletId]` + `lib/data/storefront.ts` + `components/storefront/*`,
@@ -1386,12 +1409,13 @@ step asks for exactly one thing:
 | `/city/[citySlug]` | `ƒ` | the market's introduction: CITY/COUNTRY promotion, then every section in the market's scope (see *Market scope*). The SEO surface — crawlers get the city-wide version |
 | `/city/[citySlug]/discover` | `ƒ` | canonical exploration — filters over a row of each thing, each with a way to see the rest |
 | `/city/[citySlug]/places` | `ƒ` dynamic | the full list of places, filtered, sorted and paged |
-| `/city/[citySlug]/meals` · `/offers` | `ƒ` | all meals (sample) · every place running an offer (live) |
+| `/city/[citySlug]/meals` · `/offers` | `ƒ` | all meals (live) · every place running an offer (live) |
+| `/meals/[mealId]` | `ƒ` | one meal at one place, read-only: gallery, price + tax line, options as information, links to its store and its market |
 | `/city/[citySlug]/meal-plans` | `ƒ` | meal plans in this market (sample) + how plans work |
 | `/city/[citySlug]/location` | `ƒ` | the delivery-point picker; seeds the map with this market's anonymous pin. A PAGE, not a sheet — a map is the whole task, it survives a refresh, and every empty state links to it |
 | `/store/[outletId]` | `ƒ` | one storefront: the kitchen, its menu, its hours. Read-only until orders exist |
 | `/continue` | route handler | where sign-in lands when not returning to a market page. Default city → device's last market → `/city` |
-| `/discover`, `/meal-plans` | `ƒ` | doorways (`lib/market/doorway.ts`): device's last market → signed-in default city → `/city`. `/discover` **forwards the query string** — the landing page's cuisine tiles arrive with `?cuisine=` |
+| `/discover`, `/meals`, `/meal-plans` | `ƒ` | doorways (`lib/market/doorway.ts`): device's last market → signed-in default city → `/city`. `/discover` **forwards the query string** — the landing page's cuisine tiles arrive with `?cuisine=` |
 
 > **`/` NEVER ASKS FOR A LOCATION.** The picker used to sit in the hero, so the
 > landing page's primary action was a geolocation prompt fired at someone who
@@ -1674,8 +1698,8 @@ list would pass every other check.
 2. **Payments module** — separate from tax and finance, per explicit direction. Finance keeps provider config/routing/credentials/adapters; Payments takes payment-intent/attempt/capture/refund orchestration, webhook reconciliation and `ProviderWebhookEvent`.
 3. **Meal-plan cleanup, before orders** — `MealPlan` is outlet-scoped while `MenuItem` is vendor-scoped, and `MealPlanMeal` has **no day column** despite the concept being one meal per delivery day. Meal plans are this platform's differentiator; an Order model designed without them in view will need reshaping.
 4. **The cart, with orders and not before** — recover `components/cart/*`, `lib/cart/*`, `app/api/cart/price` and `components/storefront/ItemSheet.tsx` from `30facf5` and put `MenuItemCard` back to `"use client"`. It was deliberately left out of the storefront recovery: a working "Add to cart" is a promise of a checkout that does not exist. The backend's `POST /cart/price` is already built and stateless.
-5. **The two market reads the sample layer stands in for** — city-scoped MEALS and MEAL PLANS, each in a city-wide and a point-scoped form, resolved through the outlet (city → zone → radius) exactly like places. Replace the bodies of `lib/data/market/meals.ts` / `meal-plans.ts`, move `lib/data/market/types.ts` into `@repo/types`, delete `lib/data/market/sample/`. Meal plans need the `MealPlanMeal` day column first.
-6. **Storefront scope** — `/store/[outletId]` sends no delivery point now (a per-market choice cannot be applied to a page that does not know its city). The storefront read should return its city and accept `addressId`, then the page can use that market's scope and say whether it delivers to you.
+5. **The meal-plan market read the sample layer still stands in for** — city-wide and point-scoped, resolved through the outlet like places and meals. Replace the body of `lib/data/market/meal-plans.ts`, move `MarketMealPlan` into `@repo/types`, delete `lib/data/market/sample/`. Needs the `MealPlanMeal` day column first. (Meals: done in Phase 8.)
+6. **Delivery verdict on storefront and meal detail** (deferred from Phase 8 by explicit direction). The backend half is DONE — `GET /outlets/:id` returns `city` and accepts `addressId`/a point, answering `delivery.deliversHere`. What remains is the frontend: read this market's cookie choice for `store.city.slug` (or `meal.city.slug`) and ask again. `GET /meals/:id` takes no location, so meal detail would use the storefront verdict for its outlet. Until then neither page claims delivery.
 7. **Cap on "your cities"** (planned): evict the oldest non-default `ConsumerMarket` row in `selectMarket`.
 
 ---

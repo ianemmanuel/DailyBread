@@ -6,6 +6,7 @@ import { MealPlanCard } from "@/components/market/MealPlanCard"
 import { ModeButton } from "@/components/market/ModeButton"
 import { SampleBadge } from "@/components/market/SampleBadge"
 import { getMarketMealPlans } from "@/lib/data/market/meal-plans"
+import { PLACES_ONLY_FILTERS } from "@/lib/data/market/meal-params"
 import { getMarketMeals } from "@/lib/data/market/meals"
 import { getMarketPlaces, type PlacesQuery } from "@/lib/data/market/places"
 import type { MarketList } from "@/lib/data/market/types"
@@ -176,10 +177,30 @@ export async function CuisinesRow({ scope, query, hideIfEmpty = true }: RowProps
   )
 }
 
-// ─── Meals — SAMPLE until the read exists ────────────────────────────────────
+// ─── Meals — LIVE ────────────────────────────────────────────────────────────
 
 export async function MealsRow({ scope, limit = 8, query }: RowProps) {
-  const state = await getMarketMeals(scope, { search: query?.search, cuisine: query?.cuisine, limit })
+  const seeAll = { href: withQuery(`${base(scope)}/meals`, query, ["search", "cuisine"]), label: "See all meals" }
+
+  /* Open now / free delivery narrow PLACES; the meals API does not apply them.
+   * Showing meals under those chips would read as filtered when it is not, so
+   * the row says so instead (and its "see all" drops them). */
+  const placesOnly = PLACES_ONLY_FILTERS.filter((key) => query?.[key] === "1")
+  if (placesOnly.length > 0) {
+    return (
+      <MarketSection title={titled(scope, "Meals", "reach")} seeAll={seeAll}>
+        <p className="surface px-6 py-6 text-sm leading-relaxed text-muted-foreground">
+          {placesOnly.map((key) => (key === "openNow" ? "Open now" : "Free delivery")).join(" and ")}
+          {placesOnly.length > 1 ? " apply" : " applies"} to places only, so meals aren&apos;t listed under
+          {placesOnly.length > 1 ? " them" : " it"}. See all meals for every dish in this search.
+        </p>
+      </MarketSection>
+    )
+  }
+
+  const state = await getMarketMeals(scope, {
+    search: query?.search, cuisine: query?.cuisine, sort: query?.sort, pageSize: String(limit),
+  })
 
   return (
     <MarketSection
@@ -187,20 +208,24 @@ export async function MealsRow({ scope, limit = 8, query }: RowProps) {
       description={scope.mode === "delivery"
         ? "Dishes from places that can deliver to your address."
         : `Dishes cooked across ${scope.context.market.city.name}.`}
-      badge={state.kind === "ok" && state.source === "sample" ? <SampleBadge /> : undefined}
       seeAll={state.kind === "ok" && state.total > 0
-        ? { href: withQuery(`${base(scope)}/meals`, query, ["search", "cuisine"]), label: `See all meals` }
+        ? { ...seeAll, label: state.total > state.meals.length ? `See all ${state.total}` : seeAll.label }
         : undefined}
     >
-      {listNotice(state, scope, "meals") ?? (
-        state.kind === "ok" && state.items.length === 0
-          ? <Empty scope={scope}>{scope.mode === "delivery" ? "No meals reach this address right now." : "No meals match."}</Empty>
-          : state.kind === "ok" && (
-            <MarketRow>
-              {state.items.map((meal) => <MealCard key={meal.id} meal={meal} />)}
-            </MarketRow>
-          )
-      )}
+      {state.kind === "error" ? <Failed message={state.message} />
+        : state.meals.length === 0 ? (
+          <Empty scope={scope}>
+            {scope.mode === "delivery"
+              ? `No meals reach ${targetLabel(scope.target)} right now.`
+              : query?.search || query?.cuisine
+                ? "No meals match those filters."
+                : `No meals are on sale in ${scope.context.market.city.name} yet.`}
+          </Empty>
+        ) : (
+          <MarketRow>
+            {state.meals.map((meal) => <MealCard key={meal.mealId} meal={meal} />)}
+          </MarketRow>
+        )}
     </MarketSection>
   )
 }

@@ -25,12 +25,12 @@ import { getStorefront } from "@/lib/data/storefront"
  *
  * The cart and the option sheet were recovered out of this page rather than
  * back into it: there is no `Order` model yet, so an "Add to cart" would price
- * a meal with nowhere to send it. See `MenuItemCard` — it is the honest half,
- * and it is the half that makes every card in the app lead somewhere real.
+ * a meal with nowhere to send it. See `MenuItemCard` — it is the honest half:
+ * each dish links to its own `/meals/<mealId>` page, read-only as well.
  *
  * Per request rather than cached: prices, offers, open-now and availability
- * are all live, and the photography arrives as short-lived signed URLs that a
- * cached page would hand out dead.
+ * are all live, and the logo and cover arrive as short-lived signed URLs that
+ * a cached page would hand out dead.
  */
 
 export const dynamic = "force-dynamic"

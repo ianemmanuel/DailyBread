@@ -1,13 +1,13 @@
 import type { CustomerCurrency, DeliveryEstimate } from "@repo/types/customer-app"
 
 /*
- * The shapes the market sections render — meals and meal plans in particular,
- * which have NO customer read yet.
+ * The shapes the meal-plan section renders — meal plans have NO customer read
+ * yet. (Meals are live and use `DiscoveryMeal` from `@repo/types` directly.)
  *
- * These are written as the CONTRACT the backend reads will return, so that
- * wiring a real endpoint changes one loader body (meals.ts / meal-plans.ts)
- * and nothing in a component. When the endpoint lands, move the types into
- * `@repo/types` beside `DiscoveryOutlet` and have the backend return them.
+ * Written as the CONTRACT the backend read will return, so that wiring a real
+ * endpoint changes one loader body (meal-plans.ts) and nothing in a component.
+ * When the endpoint lands, move the type into `@repo/types` beside
+ * `DiscoveryMeal` and have the backend return it.
  *
  * Delivery facts follow the outlet rule already in DiscoveryOutlet: present
  * only when the list was resolved against a SERVICEABLE point, null for
@@ -19,7 +19,7 @@ export interface MarketImage {
   alt: string
 }
 
-/** The place an item is sold by. `outletId` is null only for sample data,
+/** The place a plan is sold by. `outletId` is null only for sample data,
  *  which has no storefront to link to. */
 export interface MarketPlaceRef {
   outletId: string | null
@@ -30,19 +30,6 @@ export interface MarketPlaceRef {
 export interface ItemDelivery {
   eta     : DeliveryEstimate | null
   feeMinor: number | null
-}
-
-export interface MarketMeal {
-  id         : string
-  name       : string
-  description: string | null
-  image      : MarketImage | null
-  priceMinor : number
-  currency   : CustomerCurrency
-  place      : MarketPlaceRef
-  cuisine    : { id: string; name: string } | null
-  offerLabel : string | null
-  delivery   : ItemDelivery | null
 }
 
 export interface MarketMealPlan {
