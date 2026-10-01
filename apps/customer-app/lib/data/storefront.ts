@@ -6,13 +6,15 @@ import { backendFetch, BackendApiError } from "@/lib/api/server"
 /*
  * One storefront: the kitchen, its menu and its hours.
  *
- * ── No delivery point is sent — for now ────────────────────────────────────
+ * ── No delivery point is sent — a deliberate deferral ──────────────────────
  *
- * Delivery choices are per MARKET, and an outlet id carries no city, so this
- * page cannot tell which market's choice applies. Sending one anyway (the old
- * behaviour sent whatever single point the device held) produced distances
- * measured from another city. Until the storefront read returns its city and
- * accepts an `addressId`, the page shows the menu without delivery claims.
+ * The backend read now returns the outlet's `city` and accepts an `addressId`
+ * or a point, answering `delivery` with the same eligibility test the located
+ * feeds use. This page does not send one yet: delivery choices are per
+ * MARKET, and applying the right one means reading this market's choice from
+ * the cookie for `store.city.slug` and asking again. That is a decision left
+ * for a later phase, so the page makes no delivery claim — it never says an
+ * outlet reaches the customer without a verdict for their own point.
  *
  * ── The point is OPTIONAL, and the page works without it ───────────────────
  *
@@ -36,9 +38,9 @@ import { backendFetch, BackendApiError } from "@/lib/api/server"
  * ── Nothing here caches ────────────────────────────────────────────────────
  *
  * Prices, offers, open-now and per-dish availability are all live, and the
- * menu photography arrives as short-lived SIGNED URLs — a cached page would
- * hand out dead image links. The read also depends on the caller's location,
- * and a cached response must never depend on who asked.
+ * logo and cover arrive as short-lived SIGNED URLs (vendor media lives in the
+ * private bucket) — a cached page would hand out dead image links. Dish photos
+ * are stable public URLs; it is the rest of the payload that cannot be cached.
  */
 export async function getStorefront(outletId: string): Promise<Storefront | null> {
   try {

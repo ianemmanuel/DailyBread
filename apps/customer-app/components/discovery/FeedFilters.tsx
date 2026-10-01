@@ -28,7 +28,9 @@ const SORTS: Array<{ value: DiscoverySort; label: string }> = [
   { value: "DISTANCE",      label: "Nearest" },
 ]
 
-const TOGGLES: Array<{ param: string; label: string }> = [
+export type FeedToggle = "openNow" | "hasOffer" | "freeDelivery"
+
+const TOGGLES: Array<{ param: FeedToggle; label: string }> = [
   { param: "openNow",      label: "Open now" },
   { param: "hasOffer",     label: "Offers" },
   { param: "freeDelivery", label: "Free delivery" },
@@ -41,7 +43,9 @@ const CHIP_OFF = "border-border bg-card text-foreground hover:bg-muted"
 export function FeedFilters({
   cuisines,
   sortable = true,
+  toggles,
 }: {
+  /* Places and meals facets share this shape. */
   cuisines: DiscoveryResult["availableCuisines"]
   /*
    * False while browsing a whole city. Every sort this app offers is
@@ -50,7 +54,14 @@ export function FeedFilters({
    * nothing is the same failure as a filter that never reaches its mapper.
    */
   sortable?: boolean
+  /*
+   * Which toggles this list's endpoint actually applies; all three when
+   * omitted (places). The meals API reads `hasOffer` only, so the meals page
+   * passes just that — same rule as `sortable`: absent, never ignored.
+   */
+  toggles?: FeedToggle[]
 }) {
+  const shownToggles = toggles ? TOGGLES.filter((t) => toggles.includes(t.param)) : TOGGLES
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
@@ -89,7 +100,7 @@ export function FeedFilters({
   const activeSort = (params.get("sort") ?? "RELEVANCE") as DiscoverySort
   const activeCuisine = params.get("cuisine")
   const hasFilters =
-    !!activeCuisine || TOGGLES.some((t) => params.get(t.param) === "1") ||
+    !!activeCuisine || shownToggles.some((t) => params.get(t.param) === "1") ||
     (sortable && activeSort !== "RELEVANCE") || !!params.get("search")
 
   return (
@@ -140,7 +151,7 @@ export function FeedFilters({
       </div>
 
       <div className="rail">
-        {TOGGLES.map((toggle) => {
+        {shownToggles.map((toggle) => {
           const on = params.get(toggle.param) === "1"
           return (
             <button

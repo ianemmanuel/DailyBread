@@ -19,7 +19,9 @@ import { getMarketScope } from "@/lib/market/context"
  * controls, then a row of each thing this market has — places, meals, meal
  * plans, offers — each with a way into its full page. Search and cuisine
  * filters apply to every row at once, so "biryani" narrows the meals and the
- * places together.
+ * places together. "Open now" and "Free delivery" are PLACES filters the meals
+ * API does not apply; the meals row says so rather than listing meals under
+ * them.
  *
  * Delivery-aware or city-wide by the same scope as every market page. Sorting
  * is offered only when delivering: every ordering this app has is distance- or

@@ -39,12 +39,15 @@ export function NoMatches({
   basePath,
   citySlug,
   delivering,
+  entity = "places",
 }: {
   hasFilters: boolean
   basePath  : string
   citySlug  : string
   /** Delivery-scoped lists offer the whole city instead of a dead end. */
   delivering: boolean
+  /** Which list is empty — a market can have places and still no meals. */
+  entity?   : "places" | "meals"
 }) {
   if (hasFilters) {
     return (
@@ -64,9 +67,13 @@ export function NoMatches({
     <Panel
       icon={<Store className="size-6 text-primary-subtle-fg" />}
       title={delivering ? "Nothing reaches this address right now" : "Nothing here yet"}
-      body={delivering
-        ? "No place here is delivering to your address at the moment. The rest of the city may still have something for you."
-        : "No place is open for orders in this market yet. It's worth checking back soon."}
+      body={entity === "meals"
+        ? delivering
+          ? "No meals from places here reach your address at the moment. The rest of the city may still have something for you."
+          : "No meals are on sale in this market yet. It's worth checking back soon."
+        : delivering
+          ? "No place here is delivering to your address at the moment. The rest of the city may still have something for you."
+          : "No place is open for orders in this market yet. It's worth checking back soon."}
     >
       {delivering && <ModeButton citySlug={citySlug} browse label="Browse the whole city" />}
     </Panel>
