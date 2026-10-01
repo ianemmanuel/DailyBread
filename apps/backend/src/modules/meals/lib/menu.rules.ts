@@ -77,6 +77,22 @@ export function effectiveListPriceMinor(
   return priceMinorOverride ?? basePriceMinor
 }
 
+/**
+ * The cheapest this dish is listed at across the outlets that sell it — the
+ * price any rule about "the dish's price" must hold at. A dish is 10000 in the
+ * catalogue but 3000 at an outlet that overrides it; a modifier group that is
+ * harmless on 10000 can take the 3000 one to zero, and that outlet's customers
+ * are the ones who would order it.
+ */
+export function lowestEffectivePriceMinor(
+  basePriceMinor: number,
+  outletIds     : readonly string[],
+  overrides     : ReadonlyMap<string, number | null>,
+): number {
+  if (outletIds.length === 0) return basePriceMinor
+  return Math.min(...outletIds.map((id) => effectiveListPriceMinor(basePriceMinor, overrides.get(id))))
+}
+
 // ─── Text ─────────────────────────────────────────────────────────────────────
 
 export function assertMealName(value: unknown): string {

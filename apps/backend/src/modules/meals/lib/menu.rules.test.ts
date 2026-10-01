@@ -4,6 +4,7 @@ import {
   assertValidPriceMinor,
   normalizePriceOverride,
   effectiveListPriceMinor,
+  lowestEffectivePriceMinor,
   resolveSelectedOutlets,
   assertMealName,
 } from "./menu.rules"
@@ -51,6 +52,23 @@ describe("effectiveListPriceMinor", () => {
   it("uses the outlet's own price when it set one, higher or lower", () => {
     expect(effectiveListPriceMinor(10000, 12000)).toBe(12000)
     expect(effectiveListPriceMinor(10000, 8000)).toBe(8000)
+  })
+})
+
+describe("lowestEffectivePriceMinor", () => {
+  it("is the cheapest outlet price, an override below the base included", () => {
+    const overrides = new Map<string, number | null>([["a", null], ["b", 3000], ["c", 12000]])
+    expect(lowestEffectivePriceMinor(10000, ["a", "b", "c"], overrides)).toBe(3000)
+  })
+
+  it("is the base when no selected outlet undercuts it", () => {
+    const overrides = new Map<string, number | null>([["a", null], ["c", 12000]])
+    expect(lowestEffectivePriceMinor(10000, ["a", "c"], overrides)).toBe(10000)
+  })
+
+  it("ignores an override on an outlet that is not selected", () => {
+    const overrides = new Map<string, number | null>([["b", 3000]])
+    expect(lowestEffectivePriceMinor(10000, ["a"], overrides)).toBe(10000)
   })
 })
 

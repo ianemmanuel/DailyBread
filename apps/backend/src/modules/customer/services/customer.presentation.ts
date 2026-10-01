@@ -1,13 +1,10 @@
-import { DiscountType } from "@repo/db"
-import type { DayOfWeek } from "@repo/db"
+import { prisma } from "@repo/db"
 import { R2Service } from "@/lib/r2/r2.service"
 import { logger } from "@/lib/pino/logger"
 import { computeTax } from "@/lib/pricing/tax"
-import {
-  deriveDiscountState, isWithinWindow, percentageOffLine, MAX_DISCOUNT_BPS,
-} from "@/lib/pricing/discount"
 import { getCountryTaxProfile, resolveRateBps, type CountryTaxProfile } from "@/modules/tax"
-import type { CustomerCurrency, DiscoveryOffer, PriceBreakdown } from "@repo/types/backend"
+import type { PriceBreakdown } from "@repo/types/backend"
+import { OFFER_SELECT, type OfferRow } from "@/modules/meals"
 
 /*
  * Things every customer-facing surface needs, written once.
@@ -30,15 +27,6 @@ const presentLog = logger.child({ module: "customer-presentation" })
  * getCurrencyForCountry from "@/modules/finance". What stays here is only how
  * a customer surface formats an amount once it has one.
  */
-
-/** Minor units as a decimal string in the currency's own scale. Used only for
- *  building human-readable offer labels; every transported figure stays an
- *  integer. */
-export function formatMinor(minor: number, currency: CustomerCurrency): string {
-  const digits = currency.minorUnitDigits
-  const value = minor / 10 ** digits
-  return `${currency.symbol} ${value.toFixed(digits)}`
-}
 
 // ─── Tax ─────────────────────────────────────────────────────────────────────
 
@@ -119,143 +107,20 @@ export async function signKeys(keys: readonly string[]): Promise<string[]> {
 
 // ─── Offers ──────────────────────────────────────────────────────────────────
 
-/** The subset of a Discount row the customer surfaces read. */
-export interface OfferRow {
-  id              : string
-  name            : string
-  type            : DiscountType
-  percentBps      : number | null
-  amountMinor     : number | null
-  minSubtotalMinor: number | null
-  appliesToAllOutlets: boolean
-  appliesToAllItems  : boolean
-  startsAt   : Date
-  endsAt     : Date | null
-  daysOfWeek : DayOfWeek[]
-  startTime  : string | null
-  endTime    : string | null
-  isPaused   : boolean
-  suspendedAt: Date | null
-  budgetMinor    : number | null
-  spentMinor     : number
-  maxRedemptions : number | null
-  redemptionCount: number
-  outlets: Array<{ outletId: string }>
-  items  : Array<{ menuItemId: string }>
-}
-
-/** The Prisma select behind OfferRow. One shape, so discovery, the storefront
- *  and the cart cannot drift on which offers they consider. */
-export const OFFER_SELECT = {
-  id: true, name: true, type: true,
-  percentBps: true, amountMinor: true, minSubtotalMinor: true,
-  appliesToAllOutlets: true, appliesToAllItems: true,
-  startsAt: true, endsAt: true, daysOfWeek: true, startTime: true, endTime: true,
-  isPaused: true, suspendedAt: true,
-  budgetMinor: true, spentMinor: true, maxRedemptions: true, redemptionCount: true,
-  outlets: { select: { outletId: true } },
-  items  : { select: { menuItemId: true } },
-} as const
-
-/**
- * Whether an offer is actually taking money off, this minute, at this outlet.
- *
- * Two separate questions, and conflating them is how a happy-hour offer gets
- * reported as expired at three in the afternoon:
- *   - is the offer RUNNING at all (lifecycle: started, not ended, not paused,
- *     not suspended, not exhausted, vendor live), and
- *   - is its daily window open right now.
- *
- * `vendorIsLive` is passed in rather than read here because the caller already
- * knows it for a whole page of outlets — an offer belonging to an unpublished
- * storefront is never applying, and that is what AWAITING_GO_LIVE means.
+/*
+ * WHICH offer applies, and what it is called, is the meals module's evaluator
+ * (modules/meals/lib/pricing/offers.ts) — shared with the vendor preview and
+ * the admin, so a dish is priced the same wherever it is asked. What stays
+ * here is only LOADING a vendor's candidate offers, once, for the storefront
+ * and the cart alike.
  */
-export function offerAppliesNow(
-  offer       : OfferRow,
-  outletId    : string,
-  vendorIsLive: boolean,
-  now         : Date,
-  /** The OUTLET's IANA timezone. A happy-hour window is local to the outlet,
-   *  so evaluating it against server time is wrong by the offset between the
-   *  two — see lib/time/localClock.ts. */
-  timeZone    : string,
-): boolean {
-  if (deriveDiscountState(offer, now, vendorIsLive) !== "RUNNING") return false
-  if (!isWithinWindow(offer, now, timeZone)) return false
-  if (!offer.appliesToAllOutlets && !offer.outlets.some((o) => o.outletId === outletId)) return false
-  return true
-}
 
-/** Whether a percentage offer covers this particular dish. An order-level offer
- *  covers no individual dish by definition — it is a basket rule. */
-export function offerCoversItem(offer: OfferRow, menuItemId: string): boolean {
-  if (offer.type !== DiscountType.PERCENTAGE_OFF_ITEMS) return false
-  return offer.appliesToAllItems || offer.items.some((i) => i.menuItemId === menuItemId)
-}
-
-/**
- * What a customer is told an offer is.
- *
- * The vendor's Discount.name is their own internal label ("Q3 push", "clear the
- * fridge") and is explicitly not customer-facing copy — the schema says so — so
- * the customer sees the VALUE, generated here, and never the vendor's label.
- */
-export function offerLabel(offer: OfferRow, currency: CustomerCurrency): string {
-  if (offer.type === DiscountType.PERCENTAGE_OFF_ITEMS) {
-    return `${formatRateBps(offer.percentBps ?? 0)} off`
-  }
-  const amount = formatMinor(offer.amountMinor ?? 0, currency)
-  return offer.minSubtotalMinor
-    ? `${amount} off over ${formatMinor(offer.minSubtotalMinor, currency)}`
-    : `${amount} off`
-}
-
-export function toDiscountOffer(offer: OfferRow, currency: CustomerCurrency): DiscoveryOffer {
-  return {
-    id        : offer.id,
-    label     : offerLabel(offer, currency),
-    percentBps: offer.type === DiscountType.PERCENTAGE_OFF_ITEMS ? offer.percentBps : null,
-  }
-}
-
-/**
- * The best percentage offer on one dish, and what the dish costs under it.
- *
- * OFFERS NEVER STACK. A customer gets the single best one — the rule the vendor
- * dashboard already states on the meal page, and the rule every marketplace
- * uses, because stacking is where marketplace margin bugs live.
- *
- * The ceiling is applied here as well as at save time. A ceiling a stored row
- * could exceed is not a ceiling: a discount written before the cap existed, or
- * by any future path that skips validation, must still not be able to give
- * away more than the platform allows.
- */
-export function bestOfferForItem(
-  offers    : readonly OfferRow[],
-  menuItemId: string,
-  priceMinor: number,
-  currency  : CustomerCurrency,
-): { offer: DiscoveryOffer; discountedMinor: number; savingMinor: number } | null {
-  let best: { offer: OfferRow; discountedMinor: number; savingMinor: number } | null = null
-
-  for (const offer of offers) {
-    if (!offerCoversItem(offer, menuItemId)) continue
-
-    const bps = Math.min(offer.percentBps ?? 0, MAX_DISCOUNT_BPS)
-    if (bps <= 0) continue
-
-    const savingMinor = percentageOffLine(priceMinor, bps)
-    if (savingMinor <= 0) continue
-
-    if (!best || savingMinor > best.savingMinor) {
-      best = { offer, discountedMinor: priceMinor - savingMinor, savingMinor }
-    }
-  }
-
-  if (!best) return null
-  return {
-    offer          : toDiscountOffer(best.offer, currency),
-    discountedMinor: best.discountedMinor,
-    savingMinor    : best.savingMinor,
-  }
+/** Every offer this vendor could be running. Whether each APPLIES — lifecycle,
+ *  window, targeting — is decided per outlet by offerAppliesNow. */
+export async function loadVendorOffers(vendorId: string): Promise<OfferRow[]> {
+  const rows = await prisma.discount.findMany({
+    where : { vendorId, deletedAt: null, isPaused: false, suspendedAt: null },
+    select: OFFER_SELECT,
+  })
+  return rows as unknown as OfferRow[]
 }

@@ -2,12 +2,13 @@ import { prisma } from "@repo/db"
 import type { Prisma, DiscountType } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
-import { getCountryTaxProfile, resolveRateBps } from "@/modules/tax"
+import { getCountryTaxProfile } from "@/modules/tax"
 import { getCurrencyForCountry } from "@/modules/finance"
+import { deriveDiscountState, MAX_DISCOUNT_BPS, type DiscountState } from "@/lib/pricing/discount"
 import {
-  deriveDiscountState, isWithinWindow, percentageOffLine, MAX_DISCOUNT_BPS,
-  type DiscountState,
-} from "@/lib/pricing/discount"
+  OFFER_SELECT, loadOutletClocks, offerAppliesAtAnyOutlet,
+  type OfferRow, type OutletClock, type VendorOffers,
+} from "@/modules/meals"
 import { normalizeOptionalText } from "@/lib/text/optionalText"
 import {
   assertDiscountName, normalizeDiscountValue, normalizeSchedule,
@@ -65,16 +66,23 @@ type DiscountRow = Prisma.DiscountGetPayload<{ select: typeof DISCOUNT_SELECT }>
  * never stored, so the dashboards render the backend's answer rather than
  * re-deriving one — the standing rule in CLAUDE.md.
  */
-function presentDiscount(discount: DiscountRow, vendorIsLive: boolean, now: Date) {
+function presentDiscount(
+  discount    : DiscountRow,
+  vendorIsLive: boolean,
+  now         : Date,
+  /** The vendor's live outlets, each on its own city's clock. */
+  clocks      : readonly OutletClock[],
+) {
   const { outlets, items, ...rest } = discount
   const state: DiscountState = deriveDiscountState(discount, now, vendorIsLive)
 
   return {
     ...rest,
     state,
-    /** Whether the happy-hour window is open this minute. Separate from state
-     *  on purpose: a 5–7pm offer is RUNNING all week. */
-    appliesNow: state === "RUNNING" && isWithinWindow(discount, now),
+    /** Whether it is taking money off this minute at ANY outlet it targets,
+     *  each judged on its own clock by the shared evaluator — separate from
+     *  state on purpose: a 5–7pm offer is RUNNING all week. */
+    appliesNow: offerAppliesAtAnyOutlet(asOfferRow(discount), clocks, vendorIsLive, now),
     outlets   : outlets.map((o) => o.outlet),
     items     : items.map((i) => i.menuItem),
     /** Said out loud rather than implied by a counter that never moves. */
@@ -83,6 +91,15 @@ function presentDiscount(discount: DiscountRow, vendorIsLive: boolean, now: Date
 }
 
 export type PresentedDiscount = ReturnType<typeof presentDiscount>
+
+/** A discount row in the evaluator's shape. */
+function asOfferRow(discount: DiscountRow): OfferRow {
+  return {
+    ...discount,
+    outlets: discount.outlets.map((o) => ({ outletId: o.outlet.id })),
+    items  : discount.items.map((i) => ({ menuItemId: i.menuItem.id })),
+  }
+}
 
 // ─── Context for the form ─────────────────────────────────────────────────────
 
@@ -97,7 +114,7 @@ export type PresentedDiscount = ReturnType<typeof presentDiscount>
 export async function getDiscountContext(vendorId: string) {
   const vendor = await loadActiveVendor(vendorId)
 
-  const [currency, outlets, items, taxProfile] = await Promise.all([
+  const [currency, outlets, items, taxProfile, clocks] = await Promise.all([
     // Finance's answer, never a guess — see getCurrencyForCountry.
     getCurrencyForCountry(vendor.countryId),
     prisma.outlet.findMany({
@@ -111,12 +128,24 @@ export async function getDiscountContext(vendorId: string) {
       select : { id: true, name: true, basePriceMinor: true, taxCategoryId: true },
     }),
     getCountryTaxProfile(vendor.countryId),
+    loadOutletClocks([vendorId]),
   ])
+
+  const zones = [...new Set((clocks.get(vendorId) ?? []).map((c) => c.timeZone))]
 
   return {
     currency,
     outlets,
     items,
+    /**
+     * The timezone an offer's start and end are MEANT in — the one every one of
+     * this vendor's outlets shares, so "starts Friday 17:00" means 17:00 where
+     * the food is, not wherever the vendor's laptop is. Null when the outlets
+     * span more than one zone (or there are none): then no single reading is
+     * right, and the form says it is using the browser's clock. Stored values
+     * are UTC either way — this only governs how the form reads and writes them.
+     */
+    timeZone: zones.length === 1 ? zones[0]! : null,
     /** Null when no rate is set. The preview then says so rather than showing
      *  the vendor a figure that ignores a cut they will actually pay. */
     commissionRateBps: vendor.commissionRateBps,
@@ -137,14 +166,17 @@ export async function listDiscounts(vendorId: string) {
   const vendor = await loadActiveVendor(vendorId)
   const now = new Date()
 
-  const discounts = await prisma.discount.findMany({
-    where  : { vendorId, deletedAt: null },
-    orderBy: [{ startsAt: "desc" }],
-    select : DISCOUNT_SELECT,
-  })
+  const [discounts, clocks] = await Promise.all([
+    prisma.discount.findMany({
+      where  : { vendorId, deletedAt: null },
+      orderBy: [{ startsAt: "desc" }],
+      select : DISCOUNT_SELECT,
+    }),
+    loadOutletClocks([vendorId]),
+  ])
 
   const live = vendor.vendorProfile?.isPublished === true
-  return discounts.map((d) => presentDiscount(d, live, now))
+  return discounts.map((d) => presentDiscount(d, live, now, clocks.get(vendorId) ?? []))
 }
 
 export async function getDiscount(vendorId: string, discountId: string) {
@@ -154,7 +186,8 @@ export async function getDiscount(vendorId: string, discountId: string) {
     select: DISCOUNT_SELECT,
   })
   if (!discount) throw new ApiError(404, "That offer doesn't exist", "NOT_FOUND")
-  return presentDiscount(discount, vendor.vendorProfile?.isPublished === true, new Date())
+  const clocks = await loadOutletClocks([vendorId])
+  return presentDiscount(discount, vendor.vendorProfile?.isPublished === true, new Date(), clocks.get(vendorId) ?? [])
 }
 
 // ─── Writing ──────────────────────────────────────────────────────────────────
@@ -367,174 +400,31 @@ export async function deleteDiscount(vendorId: string, discountId: string) {
   return { id: discountId, deleted: true }
 }
 
-// ─── Matching, for the future cart ────────────────────────────────────────────
-
-export interface DiscountCandidate {
-  id         : string
-  type       : DiscountType
-  percentBps : number | null
-  amountMinor: number | null
-  minSubtotalMinor: number | null
-  appliesToAllItems: boolean
-  itemIds    : string[]
-}
+// ─── Offers, handed to the meals module ─────────────────────────────────────
 
 /**
- * Every offer that could apply to a basket at this outlet, right now.
+ * This vendor's offers, as DATA, for the meals module to price the vendor's
+ * dishes with — supplied through the meal router's OfferPreview hand-off.
  *
- * NOT CALLED BY ANYTHING YET — there is no cart. It exists now so the rule is
- * written and proven while it is cheap, and so the customer app plugs into a
- * resolved answer rather than inventing matching of its own. Deciding WHICH
- * offer wins for a given basket is the caller's job once a cart exists; this
- * returns the eligible set.
- *
- * One offer per line, best value wins, is the intended rule — stacking is
- * where every marketplace's margin bugs live and is deliberately excluded.
+ * Deliberately no pricing here. Which offer a customer gets and what they pay
+ * is the meals evaluator's single answer, shared with the storefront and the
+ * cart; this module only owns what an offer IS. Finished offers are left out
+ * (nothing to show); scheduled and paused ones stay in, because the vendor's
+ * own view says one is coming or why it is not running.
  */
-export async function findApplicableDiscounts(
-  vendorId: string,
-  outletId: string,
-  now     : Date = new Date(),
-): Promise<DiscountCandidate[]> {
-  const vendor = await prisma.vendorAccount.findUnique({
-    where : { id: vendorId },
-    select: { id: true, status: true, vendorProfile: { select: { isPublished: true } } },
-  })
-  if (!vendor || vendor.status !== "ACTIVE") return []
-
-  const live = vendor.vendorProfile?.isPublished === true
-  if (!live) return []
-
-  const rows = await prisma.discount.findMany({
-    where: {
-      vendorId,
-      deletedAt  : null,
-      isPaused   : false,
-      suspendedAt: null,
-      startsAt   : { lte: now },
-      OR         : [{ endsAt: null }, { endsAt: { gt: now } }],
-      // Outlet targeting is settled below rather than in SQL: "all outlets, OR
-      // this specific one" is a two-branch condition that reads far worse as a
-      // Prisma filter than as one line of code, and the row count here is the
-      // handful of offers one vendor is running.
-    },
-    select: DISCOUNT_SELECT,
-  })
-
-  return rows
-    .filter((d) => {
-      if (deriveDiscountState(d, now, live) !== "RUNNING") return false
-      if (!isWithinWindow(d, now)) return false
-      if (!d.appliesToAllOutlets && !d.outlets.some((o) => o.outlet.id === outletId)) return false
-      return true
-    })
-    .map((d) => ({
-      id              : d.id,
-      type            : d.type,
-      percentBps      : d.percentBps,
-      amountMinor     : d.amountMinor,
-      minSubtotalMinor: d.minSubtotalMinor,
-      appliesToAllItems: d.appliesToAllItems,
-      itemIds         : d.items.map((i) => i.menuItem.id),
-    }))
-}
-
-/** Re-exported so a caller resolving a cart does not have to reach into the
- *  tax module separately for the one function it needs. */
-export { resolveRateBps }
-
-// ─── Offers on a dish ────────────────────────────────────────────────────────
-
-export interface MenuItemDiscount {
-  id        : string
-  name      : string
-  percentBps: number
-  state     : DiscountState
-  /** Whether the daily window is open this minute. */
-  appliesNow: boolean
-  /** What the dish costs while this offer is actually applying. */
-  discountedPriceMinor: number
-  savingMinor         : number
-}
-
-/**
- * Which offers cover each of these dishes, and what the price becomes.
- *
- * Shown on the vendor's own menu because Uber Eats and DoorDash both surface a
- * discounted dish the same way to a CUSTOMER — the original struck through
- * beside the new price, with the offer named — so a merchant needs to see
- * exactly what their storefront is about to show.
- *
- * ONLY percentage offers appear here. An amount-off-the-order is a basket rule
- * and has no per-dish price to display; claiming one would be a number the
- * customer never sees.
- *
- * One query for the whole page, never one per dish.
- */
-export async function getDiscountsForMenuItems(
-  vendorId: string,
-  itemIds : readonly string[],
-  now     : Date = new Date(),
-): Promise<Map<string, MenuItemDiscount[]>> {
-  const result = new Map<string, MenuItemDiscount[]>()
-  if (itemIds.length === 0) return result
-
-  const [vendor, discounts, items] = await Promise.all([
+export async function getVendorOfferSource(vendorId: string, now: Date = new Date()): Promise<VendorOffers> {
+  const [vendor, rows] = await Promise.all([
     prisma.vendorAccount.findUnique({
       where : { id: vendorId },
       select: { vendorProfile: { select: { isPublished: true } } },
     }),
     prisma.discount.findMany({
-      where : {
-        vendorId,
-        deletedAt: null,
-        type     : "PERCENTAGE_OFF_ITEMS",
-        // Finished offers are not worth showing; a scheduled or paused one is,
-        // because the vendor wants to know it is coming or why it is not.
-        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
-      },
-      select: {
-        id: true, name: true, percentBps: true,
-        isPaused: true, suspendedAt: true, startsAt: true, endsAt: true,
-        budgetMinor: true, spentMinor: true, maxRedemptions: true, redemptionCount: true,
-        daysOfWeek: true, startTime: true, endTime: true,
-        appliesToAllItems: true,
-        items: { select: { menuItemId: true } },
-      },
-    }),
-    prisma.menuItem.findMany({
-      where : { id: { in: [...itemIds] }, vendorId },
-      select: { id: true, basePriceMinor: true },
+      where : { vendorId, deletedAt: null, OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+      select: OFFER_SELECT,
     }),
   ])
-
-  const live = vendor?.vendorProfile?.isPublished === true
-  const priceById = new Map(items.map((i) => [i.id, i.basePriceMinor]))
-
-  for (const itemId of itemIds) {
-    const base = priceById.get(itemId)
-    if (base == null) continue
-
-    const covering = discounts.filter(
-      (d) => d.appliesToAllItems || d.items.some((i) => i.menuItemId === itemId),
-    )
-    if (covering.length === 0) continue
-
-    result.set(itemId, covering.map((d) => {
-      const bps = d.percentBps ?? 0
-      const saving = percentageOffLine(base, bps)
-      const state = deriveDiscountState(d, now, live)
-      return {
-        id        : d.id,
-        name      : d.name,
-        percentBps: bps,
-        state,
-        appliesNow: state === "RUNNING" && isWithinWindow(d, now),
-        discountedPriceMinor: base - saving,
-        savingMinor         : saving,
-      }
-    }))
+  return {
+    offers      : rows as unknown as OfferRow[],
+    vendorIsLive: vendor?.vendorProfile?.isPublished === true,
   }
-
-  return result
 }

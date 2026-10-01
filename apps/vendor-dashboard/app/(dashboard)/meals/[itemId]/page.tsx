@@ -38,8 +38,8 @@ export default async function EditMealPage({ params }: { params: Promise<{ itemI
       <MealReviewNotice item={item} />
       <MealDiscountNotice
         discounts={item.discounts}
+        outlets={item.outlets}
         currency={context.currency}
-        basePriceMinor={item.basePriceMinor}
       />
       <MealOutletAvailability item={item} />
       <MealForm item={item} />

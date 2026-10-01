@@ -28,6 +28,7 @@ import {
   setMenuItemArchived,
   deleteMenuItem,
 } from "../services/menu.service"
+import type { VendorOffers } from "../lib/pricing/offers"
 
 /*
  * Every handler destructures the body field by field rather than spreading it.
@@ -73,32 +74,19 @@ export const handleCreateMenuSection: RequestHandler = async (req, res, next) =>
 }
 
 /*
- * ─── The offer preview, composed at the vendor boundary ──────────────────────
+ * ─── Offers, supplied at the vendor boundary ────────────────────────────────
  *
- * Every dish the vendor reads back carries `discounts`: which of their offers
- * cover it and what it costs under each. Offers belong to the VENDOR module
- * (they are not part of this domain), and meals imports nothing from vendor,
- * so the vendor module supplies this function when it mounts the router —
- * the one place the two are composed. Phase 6 (pricing) decides its final
- * home; until then this is a pass-through of the vendor's own preview,
- * deliberately unchanged, including its known pricing gaps.
+ * Every dish the vendor reads back is priced PER OUTLET — what a customer at
+ * each outlet pays right now — and lists the offers on it. Offers are VENDOR
+ * data (authored in the vendor module) and meals imports nothing from vendor,
+ * so the vendor module supplies this function when it mounts the router: it
+ * hands over the vendor's offers, and meals prices them with the same
+ * evaluator the storefront and cart use (lib/pricing/offers.ts). One read per
+ * request, never one per dish.
  */
-export type OfferPreview = (
-  vendorId: string,
-  itemIds : readonly string[],
-) => Promise<Map<string, unknown[]>>
+export type OfferPreview = (vendorId: string) => Promise<VendorOffers>
 
-async function withOffers<T extends { id: string }>(
-  offerPreview: OfferPreview,
-  vendorId    : string,
-  items       : T[],
-): Promise<Array<T & { discounts: unknown[] }>> {
-  // One read for the whole page, never one per dish.
-  const byItem = await offerPreview(vendorId, items.map((i) => i.id))
-  return items.map((item) => ({ ...item, discounts: byItem.get(item.id) ?? [] }))
-}
-
-/** The four handlers whose response is a dish, and so carries its offers. */
+/** The four handlers whose response is a dish, and so carries its pricing. */
 export function menuItemHandlers(offerPreview: OfferPreview) {
   //* GET /vendor/v1/menu/items?search=&sectionId=&outletId=&page=&pageSize=
   const handleListMenuItems: RequestHandler = async (req, res, next) => {
@@ -110,9 +98,8 @@ export function menuItemHandlers(offerPreview: OfferPreview) {
         outletId : typeof req.query.outletId  === "string" ? req.query.outletId  : undefined,
         page     : req.query.page     ? Number(req.query.page)     : undefined,
         pageSize : req.query.pageSize ? Number(req.query.pageSize) : undefined,
-      })
-      const items = await withOffers(offerPreview, vendorId, result.items)
-      return sendSuccess(res, { ...result, items }, "Meals fetched")
+      }, await offerPreview(vendorId))
+      return sendSuccess(res, result, "Meals fetched")
     } catch (err) { next(err) }
   }
 
@@ -120,9 +107,8 @@ export function menuItemHandlers(offerPreview: OfferPreview) {
   const handleGetMenuItem: RequestHandler = async (req, res, next) => {
     try {
       const vendorId = await vendorIdOf(req)
-      const item = await getMenuItem(vendorId, req.params.itemId!)
-      const [withPreview] = await withOffers(offerPreview, vendorId, [item])
-      return sendSuccess(res, withPreview, "Meal fetched")
+      const item = await getMenuItem(vendorId, req.params.itemId!, await offerPreview(vendorId))
+      return sendSuccess(res, item, "Meal fetched")
     } catch (err) { next(err) }
   }
 
@@ -130,9 +116,8 @@ export function menuItemHandlers(offerPreview: OfferPreview) {
   const handleCreateMenuItem: RequestHandler = async (req, res, next) => {
     try {
       const vendorId = await vendorIdOf(req)
-      const item = await createMenuItem(vendorId, menuItemInputFrom(req.body))
-      const [withPreview] = await withOffers(offerPreview, vendorId, [item])
-      return sendSuccess(res, withPreview, "Meal created", 201)
+      const item = await createMenuItem(vendorId, menuItemInputFrom(req.body), await offerPreview(vendorId))
+      return sendSuccess(res, item, "Meal created", 201)
     } catch (err) { next(err) }
   }
 
@@ -140,9 +125,10 @@ export function menuItemHandlers(offerPreview: OfferPreview) {
   const handleUpdateMenuItem: RequestHandler = async (req, res, next) => {
     try {
       const vendorId = await vendorIdOf(req)
-      const item = await updateMenuItem(vendorId, req.params.itemId!, menuItemInputFrom(req.body))
-      const [withPreview] = await withOffers(offerPreview, vendorId, [item])
-      return sendSuccess(res, withPreview, "Meal updated")
+      const item = await updateMenuItem(
+        vendorId, req.params.itemId!, menuItemInputFrom(req.body), await offerPreview(vendorId),
+      )
+      return sendSuccess(res, item, "Meal updated")
     } catch (err) { next(err) }
   }
 

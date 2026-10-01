@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils"
 import { FormSection, FormField } from "@/components/dashboard/form"
 import { ClientApiError } from "@/lib/api/client"
 import { majorToMinor, minorToMajor, formatPrice } from "@/lib/menu/money"
+import { isoToZonedLocal, zonedLocalToIso } from "@/lib/time/zoned"
 import { NetPreview } from "./NetPreview"
 import { DAYS, toBps, formatBps } from "./discount-meta"
 import {
@@ -59,11 +60,23 @@ interface FormValues {
   maxPerCustomer: string
 }
 
-/** Datetime-local wants "YYYY-MM-DDTHH:mm" in local time. */
-function toLocalInput(iso: string | null | undefined): string {
-  const date = iso ? new Date(iso) : new Date()
+/**
+ * Datetime-local wants "YYYY-MM-DDTHH:mm" wall time. When the server names the
+ * zone the vendor's outlets share, that is the clock the fields mean — an offer
+ * starting "Friday 17:00" starts at 17:00 where the food is, whatever the
+ * vendor's laptop is set to. Without one (outlets in several zones) there is no
+ * single right reading, so the browser's clock is used and the form says so.
+ */
+function toLocalInput(iso: string | null | undefined, timeZone: string | null): string {
+  const instant = iso ?? new Date().toISOString()
+  if (timeZone) return isoToZonedLocal(instant, timeZone)
+  const date = new Date(instant)
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function fromLocalInput(local: string, timeZone: string | null): string {
+  return timeZone ? zonedLocalToIso(local, timeZone) : new Date(local).toISOString()
 }
 
 export function DiscountForm({ discount }: Props) {
@@ -78,7 +91,7 @@ export function DiscountForm({ discount }: Props) {
     name: "", description: "", type: "PERCENTAGE_OFF_ITEMS",
     percent: "", amount: "", minSubtotal: "",
     allOutlets: true, outletIds: [], allItems: true, menuItemIds: [],
-    startsAt: toLocalInput(null), endsAt: "",
+    startsAt: "", endsAt: "",
     daysOfWeek: [], startTime: "", endTime: "",
     budget: "", maxRedemptions: "", maxPerCustomer: "",
   })
@@ -86,8 +99,17 @@ export function DiscountForm({ discount }: Props) {
   const currency = context?.currency
   const seeded = React.useRef(false)
 
+  const timeZone = context?.timeZone ?? null
+
+  // A new offer starts "now" — on the outlets' clock, which is only known once
+  // the context arrives.
   React.useEffect(() => {
-    if (!discount || !currency || seeded.current) return
+    if (discount || !context) return
+    setValues((prev) => (prev.startsAt ? prev : { ...prev, startsAt: toLocalInput(null, context.timeZone) }))
+  }, [discount, context])
+
+  React.useEffect(() => {
+    if (!discount || !currency || !context || seeded.current) return
     seeded.current = true
     setValues({
       name       : discount.name,
@@ -100,8 +122,8 @@ export function DiscountForm({ discount }: Props) {
       outletIds  : discount.outlets.map((o) => o.id),
       allItems   : discount.appliesToAllItems,
       menuItemIds: discount.items.map((i) => i.id),
-      startsAt   : toLocalInput(discount.startsAt),
-      endsAt     : discount.endsAt ? toLocalInput(discount.endsAt) : "",
+      startsAt   : toLocalInput(discount.startsAt, context.timeZone),
+      endsAt     : discount.endsAt ? toLocalInput(discount.endsAt, context.timeZone) : "",
       daysOfWeek : discount.daysOfWeek,
       startTime  : discount.startTime ?? "",
       endTime    : discount.endTime ?? "",
@@ -109,7 +131,7 @@ export function DiscountForm({ discount }: Props) {
       maxRedemptions: discount.maxRedemptions != null ? String(discount.maxRedemptions) : "",
       maxPerCustomer: discount.maxPerCustomer != null ? String(discount.maxPerCustomer) : "",
     })
-  }, [discount, currency])
+  }, [discount, currency, context])
 
   function set<K extends keyof FormValues>(key: K, value: FormValues[K]) {
     setValues((prev) => ({ ...prev, [key]: value }))
@@ -151,8 +173,8 @@ export function DiscountForm({ discount }: Props) {
       outletIds          : values.allOutlets ? [] : values.outletIds,
       appliesToAllItems  : isPercentage ? values.allItems : true,
       menuItemIds        : isPercentage && !values.allItems ? values.menuItemIds : [],
-      startsAt   : new Date(values.startsAt).toISOString(),
-      endsAt     : values.endsAt ? new Date(values.endsAt).toISOString() : null,
+      startsAt   : fromLocalInput(values.startsAt, timeZone),
+      endsAt     : values.endsAt ? fromLocalInput(values.endsAt, timeZone) : null,
       daysOfWeek : values.daysOfWeek,
       startTime  : values.startTime || null,
       endTime    : values.endTime || null,
@@ -253,7 +275,13 @@ export function DiscountForm({ discount }: Props) {
             )}
           </FormSection>
 
-          <FormSection icon={CalendarClock} title="When it runs" description="Dates, and an optional daily window.">
+          <FormSection
+            icon={CalendarClock}
+            title="When it runs"
+            description={timeZone
+              ? `Dates, and an optional daily window — all in your locations' time (${timeZone}).`
+              : "Dates, and an optional daily window. Your locations are in more than one time zone, so dates use this device's clock; daily hours still follow each location's own."}
+          >
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label="Starts" required>
                 <Input type="datetime-local" value={values.startsAt} onChange={(e) => set("startsAt", e.target.value)} />

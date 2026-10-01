@@ -1,22 +1,25 @@
-import { prisma } from "@repo/db"
+import { prisma, type Prisma } from "@repo/db"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
 import { isGroupRequired } from "@/lib/pricing/line"
 import type {
-  Storefront, StorefrontMenuItem, StorefrontSection, StorefrontModifierGroup,
+  MealDetail, Storefront, StorefrontDelivery, StorefrontMenuItem, StorefrontSection, StorefrontModifierGroup,
 } from "@repo/types/backend"
 import {
   distanceTo, estimateDelivery, isOpenAt, type TradingDay,
 } from "./customer.discovery"
 import { outletAreaAllowsSelling } from "./customer.serviceability"
 import { getOperatingCities, resolveOutletArea, type OperatingCity } from "./customer.geo.service"
+import { resolveDiscoveryLocation, type DiscoveryLocationInput } from "./customer.discovery.service"
+import { eligibleOutletsNear } from "./customer.eligibleOutlets"
 import {
-  SELLABLE_MEAL_WHERE, effectiveListPriceMinor, MEAL_IMAGE_SELECT, presentMealImage,
+  SELLABLE_MEAL_WHERE, MEAL_IMAGE_SELECT, presentMealImage,
+  offerAppliesNow, priceAtOutlet, sortOffersStable, toDiscountOffer,
+  type OfferRow, type OutletClock,
 } from "@/modules/meals"
 import { SELLABLE_OUTLET_WHERE } from "./customer.visibility"
 import {
-  OFFER_SELECT, bestOfferForItem, breakdownFor, getCountryTaxProfile,
-  offerAppliesNow, signKey, toDiscountOffer, type OfferRow,
+  breakdownFor, getCountryTaxProfile, loadVendorOffers, signKey,
 } from "./customer.presentation"
 import { getCurrencyForCountry } from "@/modules/finance"
 
@@ -62,24 +65,24 @@ const MENU_ITEM_SELECT = {
   },
 } as const
 
-export interface StorefrontLocation {
-  latitude : number
-  longitude: number
-}
-
 /**
  * The storefront a customer opens.
  *
  * `location` is optional: a customer can open a link to a restaurant before
  * telling us where they are, and refusing to render the menu until they do
- * would break every shared link. Distance and the delivery estimate are simply
- * null in that case, which the client shows as "set your address for delivery
- * times" rather than as a broken card.
+ * would break every shared link. Distance, the delivery estimate and the
+ * delivery verdict are simply null in that case, which the client shows as
+ * "set your address for delivery times" rather than as a broken card.
+ *
+ * When it IS given — a saved `addressId` (resolved against the caller's own
+ * book, never by id alone) or a point — it goes through the same resolver the
+ * located feeds use, and the verdict is the same eligibility test.
  */
 export async function getStorefront(
-  outletId: string,
-  location: StorefrontLocation | null,
-  now     : Date = new Date(),
+  outletId  : string,
+  location  : DiscoveryLocationInput | null,
+  customerId: string | null,
+  now       : Date = new Date(),
 ): Promise<Storefront> {
   const outlet = await prisma.outlet.findFirst({
     where : { id: outletId, ...SELLABLE_OUTLET_WHERE },
@@ -123,14 +126,22 @@ export async function getStorefront(
     throw new ApiError(HttpStatus.NOT_FOUND, "Restaurant not found.", "OUTLET_NOT_FOUND")
   }
 
-  const [items, offers, currency, taxProfile] = await Promise.all([
+  const [items, offers, currency, taxProfile, resolved] = await Promise.all([
     loadMenu(outlet.vendorId, outlet.id),
-    loadOutletOffers(outlet.vendorId),
+    loadVendorOffers(outlet.vendorId),
     getCurrencyForCountry(outlet.vendor.countryId),
     getCountryTaxProfile(outlet.vendor.countryId),
+    location ? resolveDiscoveryLocation(location, customerId) : Promise.resolve(null),
   ])
 
-  const liveOffers = offers.filter((o) => offerAppliesNow(o, outlet.id, true, now, city.timezone))
+  /* The outlet's own clock decides every daily window, and a stable order means
+   * the chips lead with the same offer on every render. `true`: an outlet only
+   * reaches this point through SELLABLE_OUTLET_WHERE, which requires the
+   * vendor's storefront to be published. */
+  const clock: OutletClock = { id: outlet.id, timeZone: city.timezone }
+  const liveOffers = sortOffersStable(
+    offers.filter((o) => offerAppliesNow(o, outlet.id, true, now, city.timezone)),
+  )
   const isOpenNow = isOpenAt(outlet.operatingHours as TradingDay[], now, city.timezone)
 
   const profile = outlet.vendor.vendorProfile
@@ -139,12 +150,12 @@ export async function getStorefront(
     signKey(profile?.coverStorageKey),
   ])
 
-  const sections = await buildSections(items, {
-    liveOffers, currency, taxProfile, isOpenNow,
+  const sections = buildSections(items, {
+    liveOffers, clock, now, currency, taxProfile, isOpenNow,
   })
 
-  const distanceMeters = location
-    ? Math.round(distanceTo(location, { latitude: outlet.latitude, longitude: outlet.longitude }))
+  const distanceMeters = resolved
+    ? Math.round(distanceTo(resolved.point, { latitude: outlet.latitude, longitude: outlet.longitude }))
     : null
 
   return {
@@ -178,13 +189,113 @@ export async function getStorefront(
     eta   : distanceMeters === null
       ? null
       : estimateDelivery(distanceMeters, slowestPrep(items)),
+    city    : { id: city.id, name: city.name, slug: city.slug, timezone: city.timezone },
+    delivery: resolved ? await deliveryVerdict(resolved, outlet.id, now) : null,
     sections,
+  }
+}
+
+/**
+ * Does this outlet deliver to the resolved point? The customer's point must be
+ * serviceable, and this outlet must be in the set the located feeds read —
+ * the one eligibility authority, asked about this outlet alone, so the
+ * storefront and the feeds cannot disagree.
+ */
+async function deliveryVerdict(
+  resolved: Awaited<ReturnType<typeof resolveDiscoveryLocation>>,
+  outletId: string,
+  now     : Date,
+): Promise<StorefrontDelivery> {
+  const deliversHere = resolved.city !== null
+    && resolved.serviceability.isServiceable
+    && (await eligibleOutletsNear(resolved.city, resolved.point, { id: outletId }, now)).length > 0
+  return { serviceability: resolved.serviceability, deliversHere }
+}
+
+// ─── One meal ────────────────────────────────────────────────────────────────
+
+/**
+ * `GET /meals/:mealId` — one dish at one outlet, in full.
+ *
+ * The same gates as the storefront, in the same order: the Meal must pass the
+ * meals module's own SELLABLE_MEAL_WHERE (not deleted from the outlet, not
+ * archived, not hidden by moderation), its outlet must be sellable, and the
+ * outlet's own zone must permit trading. Anything else is a 404 — an opaque id
+ * does not say which gate it failed (principle 6).
+ *
+ * A SOLD-OUT meal is still found and shown as unavailable, exactly as its
+ * storefront shows it: it exists at that outlet, it just cannot be ordered
+ * now. Only discovery FEEDS leave sold-out meals out.
+ */
+export async function getMealDetail(mealId: string, now: Date = new Date()): Promise<MealDetail> {
+  const meal = await prisma.meal.findFirst({
+    where : { id: mealId, ...SELLABLE_MEAL_WHERE, outlet: SELLABLE_OUTLET_WHERE },
+    select: {
+      id: true, isAvailable: true, priceMinorOverride: true,
+      menuItem: { select: MENU_ITEM_SELECT },
+      outlet  : {
+        select: {
+          id: true, vendorId: true, cityId: true, zoneId: true, name: true,
+          vendor: {
+            select: {
+              countryId    : true,
+              vendorProfile: { select: { displayName: true, logoStorageKey: true } },
+            },
+          },
+          operatingHours: {
+            where : { isActive: true, validFrom: null },
+            select: { dayOfWeek: true, openTime: true, closeTime: true, isClosed: true },
+          },
+        },
+      },
+    },
+  })
+  if (!meal) throw new ApiError(HttpStatus.NOT_FOUND, "Meal not found.", "MEAL_NOT_FOUND")
+
+  const outlet = meal.outlet
+  const city = (await getOperatingCities()).find((c) => c.id === outlet.cityId)
+  if (!city || !outletAreaAllowsSelling(resolveOutletArea(city, outlet.zoneId))) {
+    throw new ApiError(HttpStatus.NOT_FOUND, "Meal not found.", "MEAL_NOT_FOUND")
+  }
+
+  const [offers, currency, taxProfile, logoUrl] = await Promise.all([
+    loadVendorOffers(outlet.vendorId),
+    getCurrencyForCountry(outlet.vendor.countryId),
+    getCountryTaxProfile(outlet.vendor.countryId),
+    signKey(outlet.vendor.vendorProfile?.logoStorageKey),
+  ])
+
+  const liveOffers = sortOffersStable(
+    offers.filter((o) => offerAppliesNow(o, outlet.id, true, now, city.timezone)),
+  )
+  const isOpenNow = isOpenAt(outlet.operatingHours as TradingDay[], now, city.timezone)
+
+  const { id: menuItemId, mealId: _mealId, ...item } = presentItem(meal.menuItem, meal, {
+    liveOffers, clock: { id: outlet.id, timeZone: city.timezone }, now, currency, taxProfile, isOpenNow,
+  })
+  const section = meal.menuItem.section
+
+  return {
+    mealId    : meal.id,
+    menuItemId,
+    outletId  : outlet.id,
+    ...item,
+    section   : section ? { id: section.id, name: section.name } : null,
+    currency,
+    outlet    : {
+      outletId   : outlet.id,
+      name       : outlet.name,
+      displayName: outlet.vendor.vendorProfile?.displayName ?? outlet.name,
+      logoUrl,
+    },
+    city      : { id: city.id, name: city.name, slug: city.slug, timezone: city.timezone },
   }
 }
 
 // ─── Menu ────────────────────────────────────────────────────────────────────
 
 type MenuRow = Awaited<ReturnType<typeof loadMenu>>[number]
+type MenuItemRow = Prisma.MenuItemGetPayload<{ select: typeof MENU_ITEM_SELECT }>
 
 /**
  * Every dish this outlet sells, with its per-outlet row attached.
@@ -217,16 +328,20 @@ async function loadMenu(vendorId: string, outletId: string) {
   })
 }
 
-async function buildSections(
-  items  : MenuRow[],
-  context: {
-    liveOffers: OfferRow[]
-    currency  : Awaited<ReturnType<typeof getCurrencyForCountry>>
-    taxProfile: Awaited<ReturnType<typeof getCountryTaxProfile>>
-    isOpenNow : boolean
-  },
-): Promise<StorefrontSection[]> {
-  const presented = await Promise.all(items.map((item) => presentItem(item, context)))
+/** What pricing and availability a presented item is judged against — the
+ *  outlet's clock and live offers, the market's currency and tax. */
+interface ItemContext {
+  liveOffers: OfferRow[]
+  clock     : OutletClock
+  now       : Date
+  currency  : Awaited<ReturnType<typeof getCurrencyForCountry>>
+  taxProfile: Awaited<ReturnType<typeof getCountryTaxProfile>>
+  isOpenNow : boolean
+}
+
+function buildSections(items: MenuRow[], context: ItemContext): StorefrontSection[] {
+  // loadMenu only returns dishes with a live Meal at this outlet.
+  const presented = items.map((item) => presentItem(item, item.outletMeals[0]!, context))
 
   // Group preserving the vendor's authored order. A Map keeps insertion order,
   // so sorting the sections once is enough.
@@ -250,26 +365,31 @@ async function buildSections(
     .map(({ id, name, items: sectionItems }) => ({ id, name, items: sectionItems }))
 }
 
-async function presentItem(
-  item   : MenuRow,
-  context: {
-    liveOffers: OfferRow[]
-    currency  : Awaited<ReturnType<typeof getCurrencyForCountry>>
-    taxProfile: Awaited<ReturnType<typeof getCountryTaxProfile>>
-    isOpenNow : boolean
-  },
-): Promise<StorefrontMenuItem> {
-  const meal = item.outletMeals[0]
-
+/**
+ * One dish at one outlet, as a customer is shown it — the storefront's menu and
+ * the meal detail read both come through here, so the two can never disagree.
+ */
+function presentItem(
+  item   : MenuItemRow,
+  meal   : { id: string; isAvailable: boolean; priceMinorOverride: number | null },
+  context: ItemContext,
+): StorefrontMenuItem {
   /*
-   * The outlet's own price when it has set one, otherwise the catalog price.
-   * Null on the override means "use the catalog price" and is the common case —
-   * precisely the distinction duplicating a dish per outlet would lose.
+   * The meals evaluator's one composition — the outlet's price when it set one,
+   * then the single best percentage offer applying here now, under the ceiling.
+   * The vendor's preview of this same dish at this same outlet runs exactly
+   * this, so the two cannot disagree.
    */
-  const listPriceMinor = effectiveListPriceMinor(item.basePriceMinor, meal?.priceMinorOverride)
-
-  const best = bestOfferForItem(context.liveOffers, item.id, listPriceMinor, context.currency)
-  const priceMinor = best ? best.discountedMinor : listPriceMinor
+  const { priceMinor, wasPriceMinor, offer } = priceAtOutlet({
+    menuItemId        : item.id,
+    basePriceMinor    : item.basePriceMinor,
+    priceMinorOverride: meal.priceMinorOverride,
+    outlet            : context.clock,
+    offers            : context.liveOffers,
+    vendorIsLive      : true,
+    now               : context.now,
+    currency          : context.currency,
+  })
 
   // Processed public masters at stable URLs — never a signed link to the
   // vendor's original, and identical on every render, so next/image and the
@@ -278,9 +398,10 @@ async function presentItem(
     .map((image) => presentMealImage(image))
     .filter((image): image is NonNullable<typeof image> => image !== null)
 
-  const available = meal?.isAvailable !== false
+  const available = meal.isAvailable
   return {
     id          : item.id,
+    mealId      : meal.id,
     name        : item.name,
     description : item.description,
     portionSize : item.portionSize,
@@ -293,8 +414,8 @@ async function presentItem(
     // Only present when an offer is actually applying — this is the
     // struck-through figure, and showing one without a live offer would claim a
     // saving the customer is not getting.
-    wasPriceMinor: best ? listPriceMinor : null,
-    offer       : best?.offer ?? null,
+    wasPriceMinor,
+    offer,
     price       : breakdownFor(priceMinor, item.taxCategoryId, context.taxProfile),
     isAvailable : available && context.isOpenNow,
     unavailableReason: !available
@@ -315,7 +436,7 @@ async function presentItem(
  * `isRequired` is DERIVED from minSelect and never read from a column, because
  * there isn't one — a stored flag could disagree with the rule it describes.
  */
-function presentGroups(links: MenuRow["modifierGroups"]): StorefrontModifierGroup[] {
+function presentGroups(links: MenuItemRow["modifierGroups"]): StorefrontModifierGroup[] {
   return links
     .filter((link) => link.group.deletedAt === null)
     .filter((link) =>
@@ -337,19 +458,6 @@ function presentGroups(links: MenuRow["modifierGroups"]): StorefrontModifierGrou
         isAvailable    : option.isAvailable,
       })),
     }))
-}
-
-// ─── Offers ──────────────────────────────────────────────────────────────────
-
-/** Every offer this vendor could be running. Lifecycle and window are decided
- *  per outlet by the caller, because "does it apply" depends on which outlet is
- *  being asked about. */
-async function loadOutletOffers(vendorId: string): Promise<OfferRow[]> {
-  const rows = await prisma.discount.findMany({
-    where : { vendorId, deletedAt: null, isPaused: false, suspendedAt: null },
-    select: OFFER_SELECT,
-  })
-  return rows as unknown as OfferRow[]
 }
 
 function slowestPrep(items: ReadonlyArray<{ prepTimeMinutes: number | null }>): number | null {

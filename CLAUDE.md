@@ -1695,6 +1695,14 @@ list would pass every other check.
 - **Address geocoding.** The customer location picker takes coordinates; a search box needs a provider key. The vendor dashboard's Mapbox picker is the component to lift.
 - **Nested modifiers, per-outlet option pricing, drag-and-drop reordering, menu trading hours** (needs a `Menu` layer above `MenuSection`).
 - **BOGO, platform-funded/co-funded campaigns, free delivery, promo codes, customer targeting, stacking.**
+- **An authoring timezone for offers whose vendor spans timezones.** An offer's
+  `startsAt`/`endsAt` are instants, and the vendor form enters them on the
+  outlets' shared timezone (`getDiscountContext().timeZone`). When a vendor's
+  outlets span zones there is no single right one, so the form falls back to the
+  browser clock and says so. Daily windows are unaffected — they are always read
+  on each outlet's own clock. Deliberately left out of Phase 6 (explicit
+  direction): the fix is a schema decision (a zone per offer, or per-outlet
+  dates), and no vendor spans timezones yet.
 - **Sub-national tax rates.** Extension point is a nullable `cityId` + partial unique index; `resolveRateBps` is the only function that changes. No launch market needs it.
 - **Vendor tax-registration status** — belongs to onboarding, which already captures the IDs.
 - **Effective-dated commission schedules** — the scalar + audit-log model is sufficient; wait for a real pricing need.

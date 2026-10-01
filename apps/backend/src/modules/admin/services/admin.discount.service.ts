@@ -4,7 +4,8 @@ import type { AdminScopeContext } from "@repo/types/backend"
 import { ApiError } from "@/errors/ApiError"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
-import { deriveDiscountState, isWithinWindow, type DiscountState } from "@/lib/pricing/discount"
+import { deriveDiscountState, type DiscountState } from "@/lib/pricing/discount"
+import { loadOutletClocks, offerAppliesAtAnyOutlet, type OfferRow, type OutletClock } from "@/modules/meals"
 import { isFilterableState } from "@/lib/pricing/discount-state-filter"
 
 /*
@@ -41,19 +42,29 @@ const LIST_SELECT = {
     },
   },
   _count: { select: { outlets: true, items: true } },
+  // Targeting, for "applies now" — read through the shared evaluator.
+  outlets: { select: { outletId: true } },
+  items  : { select: { menuItemId: true } },
 } as const
 
 type Row = Prisma.DiscountGetPayload<{ select: typeof LIST_SELECT }>
 
-function present(row: Row, now: Date) {
-  const { vendor, _count, ...rest } = row
+function present(
+  row   : Row,
+  now   : Date,
+  /** The vendor's live outlets, each on its own city's clock. */
+  clocks: readonly OutletClock[],
+) {
+  const { vendor, _count, outlets: _outlets, items: _items, ...rest } = row
   const live = vendor.vendorProfile?.isPublished === true
   const state = deriveDiscountState(row, now, live)
 
   return {
     ...rest,
     state,
-    appliesNow: state === "RUNNING" && isWithinWindow(row, now),
+    /* Applying this minute at ANY outlet it targets, each on its own clock —
+     * the evaluator the storefront and cart use, never the server's clock. */
+    appliesNow: offerAppliesAtAnyOutlet(row as unknown as OfferRow, clocks, live, now),
     vendor    : {
       id          : vendor.id,
       businessName: vendor.legalBusinessName,
@@ -184,8 +195,9 @@ export async function listDiscountsForAdmin(scope: AdminScopeContext, params: Li
     prisma.discount.count({ where }),
   ])
 
+  const clocks = await loadOutletClocks(rows.map((r) => r.vendor.id))
   return {
-    discounts : rows.map((r) => present(r, now)),
+    discounts : rows.map((r) => present(r, now, clocks.get(r.vendor.id) ?? [])),
     total,
     page,
     pageSize,
@@ -213,7 +225,8 @@ async function loadInScope(discountId: string, scope: AdminScopeContext) {
 
 export async function getDiscountForAdmin(discountId: string, scope: AdminScopeContext) {
   const discount = await loadInScope(discountId, scope)
-  return present(discount, new Date())
+  const clocks = await loadOutletClocks([discount.vendor.id])
+  return present(discount, new Date(), clocks.get(discount.vendor.id) ?? [])
 }
 
 /**
@@ -243,7 +256,8 @@ export async function getDiscountDetailForAdmin(discountId: string, scope: Admin
       : Promise.resolve(null),
   ])
 
-  const presented = present(base, new Date())
+  const clocks = await loadOutletClocks([base.vendor.id])
+  const presented = present(base, new Date(), clocks.get(base.vendor.id) ?? [])
 
   return {
     ...presented,

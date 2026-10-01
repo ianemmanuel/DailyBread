@@ -5,6 +5,9 @@ import {
   handleDiscoverOutlets,
   handleDiscoverCityOutlets,
   handleGetStorefront,
+  handleDiscoverMeals,
+  handleDiscoverCityMeals,
+  handleGetMealDetail,
   handlePriceCart,
 } from "../../controllers/customer.discovery.controller"
 
@@ -38,8 +41,16 @@ discoveryRouter.get("/discovery/outlets", handleDiscoverOutlets)
 //* different shape; see the controller.
 discoveryRouter.get("/discovery/cities/:citySlug/outlets", handleDiscoverCityOutlets)
 
+//* Meals — one row per dish AT an outlet — from a point, and city-wide. They
+//* read the same eligible outlets as the two places routes above.
+discoveryRouter.get("/discovery/meals", handleDiscoverMeals)
+discoveryRouter.get("/discovery/cities/:citySlug/meals", handleDiscoverCityMeals)
+
 //* One storefront and its menu.
 discoveryRouter.get("/outlets/:outletId", handleGetStorefront)
+
+//* One meal in full.
+discoveryRouter.get("/meals/:mealId", handleGetMealDetail)
 
 /*
  * Pricing a basket.

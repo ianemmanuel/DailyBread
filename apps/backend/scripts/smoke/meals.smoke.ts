@@ -204,7 +204,7 @@ async function makeOutlet(vendorId: string, cityId: string, zoneId: string | nul
 /** The storefront, or null when it 404s the way a hidden outlet must. */
 async function storefrontOrNull(outletId: string) {
   try {
-    return await getStorefront(outletId, null)
+    return await getStorefront(outletId, null, null)
   } catch (err) {
     if ((err as { code?: string }).code === "OUTLET_NOT_FOUND") return null
     throw err
@@ -451,7 +451,7 @@ async function main() {
       "reviewStatus", "section", "tax", "taxCategory", "taxCategoryId", "updatedAt",
     ].sort().join(",")
     check("create response keeps its exact key set", keys(plate) === ITEM_KEYS, keys(plate))
-    check("…outlet rows keep theirs", keys(plate.outlets[0]) === "adminStatus,isAvailable,mealId,outletId,outletName,priceMinorOverride", keys(plate.outlets[0]))
+    check("…outlet rows keep theirs", keys(plate.outlets[0]) === "adminStatus,isAvailable,mealId,outletId,outletName,priceMinorOverride,pricing", keys(plate.outlets[0]))
     check("…discounts is an array on create", Array.isArray(plate.discounts))
     {
       const one  = await call("GET", `/api/vendor/v1/menu/items/${plateId}`)
@@ -1187,20 +1187,79 @@ async function main() {
     check("…in the same currency", cart2.currency.code === "UGX" && cart2.currency.minorUnitDigits === 0)
     check("…and the cart response carries no commission", !("commissionMinor" in (cart2 as object)))
 
-    // ── vendor vs customer: capture the current divergence, don't fix it ──
+    // ════════════════════════════════════════════════════════════════════
+    console.log("\n  ── 5b. pricing parity: vendor preview = storefront = cart\n")
+    /*
+     * One dish, one outlet, one moment must price identically in all three
+     * places. Each case reads the REAL vendor route, the REAL storefront
+     * service and the REAL cart service, and asserts the same four facts from
+     * each: the price, the struck-through list price, the applying offer and
+     * the label the customer is shown.
+     */
     asVendor(vendorA.userId)
     const vPlate = (await call("GET", `/api/vendor/v1/menu/items/${plateId}`)).json.data as Json
-    const vd1 = (vPlate.discounts as Json[]).find((d) => d.id === d1.id)
     check("the vendor sees the same base price and override", vPlate.basePriceMinor === 10000
       && (vPlate.outlets as Json[]).find((o) => o.outletId === o2.id)?.priceMinorOverride === 12000)
     check("the vendor tax breakdown agrees with the customer's for the base price", vPlate.tax?.taxMinor === 1379, vPlate.tax)
-    known("vendor offer preview prices off the BASE (9000) — the customer pays 10800 at the override outlet and 10000 at the other",
-      vd1?.discountedPriceMinor === 9000, vd1)
-    known("vendor offer preview ignores outlet targeting — reports the offer applying to the dish outright",
-      vd1?.appliesNow === true, vd1)
 
-    /* D2: 20% on the probe dish, during the current hour IN THE OUTLET'S ZONE. */
-    const localHour = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "2-digit", hourCycle: "h23" }).format(now))
+    const views = async (dishId: string, outletId: string) => {
+      const v = (await call("GET", `/api/vendor/v1/menu/items/${dishId}`)).json.data as Json
+      const vp = (v.outlets as Json[]).find((o) => o.outletId === outletId)?.pricing as Json | undefined
+      const st = menuOf(await storefrontOrNull(outletId)).find((i) => i.id === dishId)
+      const cart = await priceCustomerCart({ outletId, lines: [{ menuItemId: dishId, quantity: 1, selectedOptionIds: [] }] })
+      const line = cart.lines[0]
+      return {
+        vendor: vp ? { price: vp.priceMinor, was: vp.wasPriceMinor ?? null, offer: vp.offer?.id ?? null, label: vp.offer?.label ?? null } : null,
+        store : st ? { price: st.priceMinor, was: st.wasPriceMinor, offer: st.offer?.id ?? null, label: st.offer?.label ?? null } : null,
+        cart  : line ? {
+          price: line.totalMinor,
+          was  : line.discountMinor > 0 ? line.subtotalMinor : null,
+          offer: line.appliedOfferId,
+          label: line.appliedOfferName,
+        } : null,
+        discounts: v.discounts as Json[],
+        cartCurrency: cart.currency,
+      }
+    }
+    const agree = async (
+      label: string, dishId: string, outletId: string,
+      want: { price: number; was: number | null; offer: string | null; label: string | null },
+    ) => {
+      const r = await views(dishId, outletId)
+      const expected = JSON.stringify(want)
+      const got = [r.vendor, r.store, r.cart].map((x) => JSON.stringify(x))
+      check(label, got.every((x) => x === expected), { want: expected, vendor: got[0], store: got[1], cart: got[2] })
+      return r
+    }
+
+    // A — no override: the base price, everywhere.
+    await agree("A · no override: the base price in all three", plateId, o1.id,
+      { price: 10000, was: null, offer: null, label: null })
+
+    // B + C — override + targeted offer: the OUTLET price, discounted, everywhere.
+    const atO2 = await agree("B+C · outlet override, targeted offer: 12000 → 10800 in all three", plateId, o2.id,
+      { price: 10800, was: 12000, offer: d1.id, label: "10% off" })
+
+    // D — the same offer does not touch a non-targeted outlet (A already shows
+    // o1 untouched); the dish-level list still says it is applying somewhere.
+    const d1Row = atO2.discounts.find((d) => d.id === d1.id)
+    check("D · the dish's offer list says D1 applies (at its targeted outlet) without claiming a single price",
+      d1Row?.appliesNow === true && d1Row.state === "RUNNING" && !("discountedPriceMinor" in d1Row) && !("savingMinor" in d1Row), d1Row)
+
+    // I — every surface shows the GENERATED label, never the vendor's internal name.
+    check("I · the customer label is generated, never the vendor's internal offer name",
+      atO2.cart?.label === "10% off" && atO2.store?.label === "10% off" && atO2.vendor?.label === "10% off"
+        && d1Row?.label === "10% off" && d1Row?.name === `${MARKER} D1`, { cart: atO2.cart?.label, row: d1Row })
+
+    // J — a zero-decimal currency end to end.
+    check("J · UGX (0 digits) end to end — the cart's currency, and every price a whole number",
+      atO2.cartCurrency.code === "UGX" && atO2.cartCurrency.minorUnitDigits === 0
+        && [atO2.vendor, atO2.store, atO2.cart].every((x) => Number.isInteger(x?.price)), atO2.cartCurrency)
+
+    // E — a happy hour open NOW on the outlet's clock (UTC+14), and a second one
+    // whose hours are "now" on the SERVER clock but shut where the outlet is.
+    const localHour  = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "2-digit", hourCycle: "h23" }).format(now))
+    const serverHour = now.getHours()
     const hh = (h: number) => `${String(h % 24).padStart(2, "0")}:00`
     const d2 = await prisma.discount.create({
       data: {
@@ -1210,18 +1269,37 @@ async function main() {
         items: { create: { menuItemId: probe.id } },
       },
     })
-    const cProbe = menuOf(await storefrontOrNull(o1.id)).find((i) => i.id === probe.id)
-    check("a happy-hour offer is live for the customer in the OUTLET's timezone", cProbe?.offer?.id === d2.id && cProbe.priceMinor === 3200, cProbe)
-    const vProbe = ((await call("GET", `/api/vendor/v1/menu/items/${probe.id}`)).json.data?.discounts as Json[]).find((d) => d.id === d2.id)
-    if (now.getHours() !== localHour) {
-      known("vendor preview evaluates the happy-hour window on the SERVER clock — says not applying while customers get it",
-        vProbe?.appliesNow === false, vProbe)
+    const d2x = serverHour !== localHour ? await prisma.discount.create({
+      data: {
+        vendorId: vendorA.id, name: `${MARKER} D2x`, type: "PERCENTAGE_OFF_ITEMS", percentBps: 3000,
+        appliesToAllItems: false, appliesToAllOutlets: true, startsAt: past,
+        startTime: hh(serverHour), endTime: hh(serverHour + 1),
+        items: { create: { menuItemId: probe.id } },
+      },
+    }) : null
+    const happy = await agree("E · a happy hour on the OUTLET's clock applies in all three (4000 → 3200)", probe.id, o1.id,
+      { price: 3200, was: 4000, offer: d2.id, label: "20% off" })
+    if (d2x) {
+      check("E · …and one open only on the SERVER clock applies nowhere — not even in the vendor's list",
+        happy.discounts.find((d) => d.id === d2x.id)?.appliesNow === false, happy.discounts)
+      const list = (await call("GET", "/api/vendor/v1/discounts")).json.data as Json[]
+      check("E · the vendor's offer list agrees: D2 applying, D2x not",
+        list.find((d) => d.id === d2.id)?.appliesNow === true && list.find((d) => d.id === d2x.id)?.appliesNow === false,
+        list.map((d) => [d.name, d.appliesNow]))
+      asAdmin(admin.id, [AdminPermissions.FINANCE_DISCOUNTS_READ],
+        { isGlobal: false, countryIds: [countryA.id], cityIds: [], tier: "COUNTRY" })
+      const adminList = (await call("GET", `/api/admin/v1/vendors/discounts?vendor=${vendorA.id}&pageSize=50`)).json.data?.discounts as Json[]
+      const adminOne = (await call("GET", `/api/admin/v1/vendors/discounts/${d2x.id}`)).json.data as Json
+      check("E · the admin's \"applies now\" agrees, on the outlet's clock",
+        adminList?.find((d) => d.id === d2.id)?.appliesNow === true
+          && adminList?.find((d) => d.id === d2x.id)?.appliesNow === false && adminOne?.appliesNow === false,
+        adminList?.map((d) => [d.name, d.appliesNow]))
     } else {
-      console.log("  skip  timezone divergence — server clock coincides with the outlet's zone this hour")
+      console.log("  skip  server-clock contrast — the server's hour coincides with the outlet's this hour")
     }
-    await prisma.discount.delete({ where: { id: d2.id } })
 
-    /* D3: a stored row ABOVE the 50% ceiling (a pre-validation row, principle 10). */
+    // F + G — a stored row above the ceiling competes with the happy hour: it
+    // wins on saving, and takes only the 50% the platform allows.
     const d3 = await prisma.discount.create({
       data: {
         vendorId: vendorA.id, name: `${MARKER} D3`, type: "PERCENTAGE_OFF_ITEMS", percentBps: 6000,
@@ -1229,11 +1307,80 @@ async function main() {
         items: { create: { menuItemId: probe.id } },
       },
     })
-    const cClamp = menuOf(await storefrontOrNull(o1.id)).find((i) => i.id === probe.id)
-    check("the customer path re-clamps an over-ceiling row to 50% (4000 → 2000)", cClamp?.priceMinor === 2000, cClamp)
-    const vClamp = ((await call("GET", `/api/vendor/v1/menu/items/${probe.id}`)).json.data?.discounts as Json[]).find((d) => d.id === d3.id)
-    known("vendor preview does NOT re-clamp — shows 60% off (4000 → 1600)", vClamp?.discountedPriceMinor === 1600, vClamp)
-    await prisma.discount.deleteMany({ where: { id: { in: [d1.id, d3.id] } } })
+    await agree("F+G · the bigger saving wins, re-clamped to 50% everywhere (4000 → 2000, \"50% off\")", probe.id, o1.id,
+      { price: 2000, was: 4000, offer: d3.id, label: "50% off" })
+    await prisma.discount.deleteMany({ where: { id: { in: [d2.id, d3.id, ...(d2x ? [d2x.id] : [])] } } })
+
+    // G — at the override outlet, a larger offer beats D1.
+    const d4 = await prisma.discount.create({
+      data: {
+        vendorId: vendorA.id, name: `${MARKER} D4`, type: "PERCENTAGE_OFF_ITEMS", percentBps: 2500,
+        appliesToAllItems: true, appliesToAllOutlets: true, startsAt: past,
+      },
+    })
+    await agree("G · competing offers: 25% beats 10% everywhere (12000 → 9000)", plateId, o2.id,
+      { price: 9000, was: 12000, offer: d4.id, label: "25% off" })
+    await prisma.discount.deleteMany({ where: { id: { in: [d1.id, d4.id] } } })
+
+    // H — equal savings. Created in the "wrong" order on purpose: row order must not decide.
+    const hLater = await prisma.discount.create({
+      data: {
+        vendorId: vendorA.id, name: `${MARKER} H-later`, type: "PERCENTAGE_OFF_ITEMS", percentBps: 1500,
+        appliesToAllItems: true, appliesToAllOutlets: true, startsAt: new Date(now.getTime() - 86_400_000),
+      },
+    })
+    const hEarlier = await prisma.discount.create({
+      data: {
+        vendorId: vendorA.id, name: `${MARKER} H-earlier`, type: "PERCENTAGE_OFF_ITEMS", percentBps: 1500,
+        appliesToAllItems: true, appliesToAllOutlets: true, startsAt: new Date(now.getTime() - 2 * 86_400_000),
+      },
+    })
+    await agree("H · equal savings: the EARLIER start wins in all three", plateId, o1.id,
+      { price: 8500, was: 10000, offer: hEarlier.id, label: "15% off" })
+    await prisma.discount.deleteMany({ where: { id: { in: [hLater.id, hEarlier.id] } } })
+
+    const sameStart = new Date(now.getTime() - 3 * 86_400_000)
+    const hA = await prisma.discount.create({
+      data: {
+        vendorId: vendorA.id, name: `${MARKER} H-a`, type: "PERCENTAGE_OFF_ITEMS", percentBps: 1500,
+        appliesToAllItems: true, appliesToAllOutlets: true, startsAt: sameStart,
+      },
+    })
+    const hB = await prisma.discount.create({
+      data: {
+        vendorId: vendorA.id, name: `${MARKER} H-b`, type: "PERCENTAGE_OFF_ITEMS", percentBps: 1500,
+        appliesToAllItems: true, appliesToAllOutlets: true, startsAt: sameStart,
+      },
+    })
+    const lowerId = [hA.id, hB.id].sort()[0]!
+    await agree("H · equal savings AND start: the lower id wins in all three", plateId, o1.id,
+      { price: 8500, was: 10000, offer: lowerId, label: "15% off" })
+    await prisma.discount.deleteMany({ where: { id: { in: [hA.id, hB.id] } } })
+
+    // J — the vendor's own form is told the same scale.
+    const ctxA = (await call("GET", "/api/vendor/v1/menu/context")).json.data as Json
+    check("J · the vendor's form is told UGX with 0 digits", ctxA.currency?.code === "UGX" && ctxA.currency?.minorUnitDigits === 0, ctxA.currency)
+
+    // Offer dates are meant on the outlets' shared clock.
+    const discountCtx = (await call("GET", "/api/vendor/v1/discounts/context")).json.data as Json
+    check("the offer form is told the timezone the vendor's outlets share", discountCtx?.timeZone === TZ, discountCtx?.timeZone)
+
+    // ── modifier zero-price check holds at the CHEAPEST outlet price ──
+    asVendor(vendorA.userId)
+    const cutGroup = (await call("POST", "/api/vendor/v1/menu/modifier-groups", {
+      name: `${MARKER} Half`, minSelect: 0, maxSelect: 1, options: [{ name: "Half portion", priceDeltaMinor: -5000 }],
+    })).json.data as Json
+    const cheapAtO2 = await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body({
+      priceOverrides: { [o2.id]: 3000 }, modifierGroupIds: [cutGroup.id],
+    }))
+    check("a group harmless on the 10000 base is refused when an outlet sells the dish at 3000",
+      cheapAtO2.status === 400 && cheapAtO2.json.code === "OPTIONS_ZERO_OUT_DISH", cheapAtO2.json)
+    const fineEverywhere = await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body({
+      priceOverrides: { [o2.id]: 12000 }, modifierGroupIds: [cutGroup.id],
+    }))
+    check("…and accepted when every outlet's price can carry it", fineEverywhere.status === 200, fineEverywhere.json)
+    await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body())
+    await call("DELETE", `/api/vendor/v1/menu/modifier-groups/${cutGroup.id}`)
 
     // ── currency with no Currency link ──
     await prisma.country.update({ where: { id: countryB.id }, data: { currencyCode: null, currency: "ZZX" } })

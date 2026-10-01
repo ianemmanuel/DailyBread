@@ -4,7 +4,8 @@ import { sendSuccess } from "@/helpers/api-response/response"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
 import { discoverOutlets, discoverCityOutlets, resolveDiscoveryLocation } from "../services/customer.discovery.service"
-import { getStorefront } from "../services/customer.storefront.service"
+import { getMealDetail, getStorefront } from "../services/customer.storefront.service"
+import { discoverCityMeals, discoverMeals } from "../services/customer.mealDiscovery.service"
 import { priceCustomerCart } from "../services/customer.cart.service"
 
 /*
@@ -134,19 +135,87 @@ export const handleDiscoverCityOutlets: RequestHandler = async (req, res, next) 
   } catch (err) { next(err) }
 }
 
-//* GET /customer/v1/outlets/:outletId?latitude=&longitude=
+//* GET /customer/v1/outlets/:outletId?addressId=|latitude=&longitude=
 export const handleGetStorefront: RequestHandler = async (req, res, next) => {
   try {
-    const latitude = num(req.query.latitude)
+    const addressId = str(req.query.addressId)
+    const latitude  = num(req.query.latitude)
     const longitude = num(req.query.longitude)
 
     // A shared link opens without a location, so the menu renders and only the
-    // distance and delivery estimate are withheld.
-    const location = latitude !== undefined && longitude !== undefined
-      ? { latitude, longitude }
-      : null
+    // distance, delivery estimate and delivery verdict are withheld. A saved
+    // address wins over a point; a half-sent point is no location at all.
+    const location = addressId
+      ? { addressId }
+      : latitude !== undefined && longitude !== undefined
+        ? { latitude, longitude }
+        : null
 
-    return sendSuccess(res, await getStorefront(req.params.outletId!, location), "Storefront fetched")
+    return sendSuccess(
+      res,
+      await getStorefront(req.params.outletId!, location, customerIdOf(req)),
+      "Storefront fetched",
+    )
+  } catch (err) { next(err) }
+}
+
+//* GET /customer/v1/discovery/meals?latitude=&longitude=&addressId=&…filters
+export const handleDiscoverMeals: RequestHandler = async (req, res, next) => {
+  try {
+    const result = await discoverMeals(
+      {
+        latitude : num(req.query.latitude),
+        longitude: num(req.query.longitude),
+        addressId: str(req.query.addressId),
+      },
+      {
+        search       : str(req.query.search),
+        cuisineIds   : ids(req.query.cuisineId),
+        dietaryTagIds: ids(req.query.dietaryTagId),
+        hasOffer     : bool(req.query.hasOffer),
+        sort         : str(req.query.sort) as never,
+        page         : num(req.query.page),
+        pageSize     : num(req.query.pageSize),
+      },
+      customerIdOf(req),
+    )
+
+    return sendSuccess(res, result, "Meals fetched")
+  } catch (err) { next(err) }
+}
+
+/*
+ * GET /customer/v1/discovery/cities/:citySlug/meals?…filters
+ *
+ * The city's meals with NO point — the same split, and the same reason, as the
+ * city's places. No `sort`: every ordering offered is distance-derived.
+ */
+export const handleDiscoverCityMeals: RequestHandler = async (req, res, next) => {
+  try {
+    const result = await discoverCityMeals(
+      String(req.params.citySlug ?? ""),
+      {
+        search       : str(req.query.search),
+        cuisineIds   : ids(req.query.cuisineId),
+        dietaryTagIds: ids(req.query.dietaryTagId),
+        hasOffer     : bool(req.query.hasOffer),
+        page         : num(req.query.page),
+        pageSize     : num(req.query.pageSize),
+      },
+    )
+
+    if (!result) {
+      throw new ApiError(HttpStatus.NOT_FOUND, "We do not have a market for that city.", "CITY_NOT_FOUND")
+    }
+
+    return sendSuccess(res, result, "City meals fetched")
+  } catch (err) { next(err) }
+}
+
+//* GET /customer/v1/meals/:mealId
+export const handleGetMealDetail: RequestHandler = async (req, res, next) => {
+  try {
+    return sendSuccess(res, await getMealDetail(String(req.params.mealId ?? "")), "Meal fetched")
   } catch (err) { next(err) }
 }
 
