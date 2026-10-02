@@ -17,7 +17,7 @@ import type { AdminMealDetail } from "@/types"
  * Two independent axes, never collapsed into one control.
  *
  *   Review — a verdict about the words: approve, or send back for revision.
- *   Status — the platform's operational call: suspend, ban, reinstate.
+ *   Status — the platform's operational call: suspend, reinstate, ban, unban.
  *
  * Sending a meal back does NOT suspend it, and suspending one does NOT mark it
  * rejected. Same rule outlet moderation follows, and it matters here because
@@ -27,6 +27,12 @@ import type { AdminMealDetail } from "@/types"
  * "Send back for revision" rather than "reject", because that is genuinely what
  * happens next: the vendor edits, screening re-runs, and it returns to this
  * queue with no admin action.
+ *
+ * The status buttons offered are exactly the backend's transitions
+ * (mealStatusTransition): a banned meal offers "Lift ban" and nothing else,
+ * because a ban is never undone by an ordinary reactivation. Every status call
+ * sends the status this page was rendered with, so a decision made on a stale
+ * view is refused rather than silently becoming a different act.
  */
 
 interface Props {
@@ -36,7 +42,7 @@ interface Props {
   suggestedReason: string
 }
 
-type Dialog = null | "send-back" | "suspend" | "ban"
+type Dialog = null | "send-back" | "suspend" | "ban" | "unban"
 
 async function post(url: string, body?: unknown) {
   const res = await fetch(url, {
@@ -71,6 +77,12 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
   const sentBack  = meal.reviewStatus === "MANUALLY_REJECTED"
   const suspended = meal.adminStatus === "SUSPENDED"
   const banned    = meal.adminStatus === "BANNED"
+  // Server-computed per group. The backend refuses the approve anyway
+  // (MODIFIER_GROUP_UNRESOLVED); this only says so before the click.
+  const blockingGroups = meal.modifierGroups.filter((g) => g.blocksDish)
+  const status = (to: string, why?: string) => ({
+    status: to, expectedStatus: meal.adminStatus, ...(why ? { reason: why } : {}),
+  })
 
   return (
     <div className="space-y-4">
@@ -80,7 +92,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
           <Button
             type="button"
             className="gap-1.5 rounded-full"
-            disabled={pending || approved}
+            disabled={pending || approved || blockingGroups.length > 0}
             onClick={() => run(`${base}/approve`, undefined, "Meal approved")}
           >
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ThumbsUp className="h-4 w-4" />}
@@ -102,28 +114,46 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
             It returns here automatically once they edit it.
           </p>
         )}
+        {!approved && blockingGroups.length > 0 && (
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Resolve {blockingGroups.map((g) => `“${g.name}”`).join(", ")} under the options first — a group&apos;s
+            verdict is its own, because other meals can share it.
+          </p>
+        )}
       </div>
 
       <div className="border-t border-border/70 pt-4">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Marketplace status</p>
         <div className="mt-2 flex flex-wrap gap-2">
-          {(suspended || banned) && (
+          {suspended && (
             <Button
               type="button"
-              variant="outline"
+              variant="success"
               className="gap-1.5 rounded-full"
               disabled={pending}
-              onClick={() => run(`${base}/status`, { status: "ACTIVE" }, "Meal reinstated")}
+              onClick={() => run(`${base}/status`, status("ACTIVE"), "Meal reinstated")}
             >
               <RotateCcw className="h-4 w-4" />
               Reinstate
             </Button>
           )}
+          {banned && (
+            <Button
+              type="button"
+              variant="success"
+              className="gap-1.5 rounded-full"
+              disabled={pending}
+              onClick={() => { setReason(""); setDialog("unban") }}
+            >
+              <RotateCcw className="h-4 w-4" />
+              Lift ban
+            </Button>
+          )}
           {!suspended && !banned && (
             <Button
               type="button"
-              variant="outline"
-              className="gap-1.5 rounded-full text-warning hover:text-warning"
+              variant="warning"
+              className="gap-1.5 rounded-full"
               disabled={pending}
               onClick={() => { setReason(""); setDialog("suspend") }}
             >
@@ -134,8 +164,8 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
           {!banned && (
             <Button
               type="button"
-              variant="outline"
-              className="gap-1.5 rounded-full text-destructive hover:text-destructive"
+              variant="destructive"
+              className="gap-1.5 rounded-full"
               disabled={pending}
               onClick={() => { setReason(""); setDialog("ban") }}
             >
@@ -146,7 +176,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground">
           Separate from the content verdict. Suspending is reversible; a ban also blocks the vendor from
-          editing it.
+          editing it, and only lifting the ban restores it. The vendor is notified either way.
         </p>
       </div>
 
@@ -157,6 +187,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
               {dialog === "send-back" && "Send back for revision"}
               {dialog === "suspend"   && `Suspend ${meal.name}?`}
               {dialog === "ban"       && `Ban ${meal.name}?`}
+              {dialog === "unban"     && `Lift the ban on ${meal.name}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {dialog === "send-back" && (
@@ -173,8 +204,14 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
               )}
               {dialog === "ban" && (
                 <>
-                  Removes the dish permanently and blocks the vendor from editing it. Use suspend if there is
-                  any chance this is recoverable.
+                  Takes the dish off the marketplace and blocks the vendor from editing it until the ban is
+                  lifted. Use suspend if this is likely to be temporary.
+                </>
+              )}
+              {dialog === "unban" && (
+                <>
+                  The vendor can edit it again and it can sell wherever they offer it, subject to its content
+                  review. Recorded in the audit trail as an unban.
                 </>
               )}
             </AlertDialogDescription>
@@ -182,7 +219,9 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
 
           <div className="space-y-1.5">
             <Label className="text-xs">
-              {dialog === "send-back" ? "What the vendor needs to change *" : "Reason *"}
+              {dialog === "send-back"
+                ? "What the vendor needs to change *"
+                : dialog === "unban" ? "Note (optional)" : "Reason *"}
             </Label>
             <Textarea
               value={reason}
@@ -191,7 +230,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
               placeholder={
                 dialog === "send-back"
                   ? "Which field, what is wrong with it, and what would be acceptable…"
-                  : "Recorded in the audit trail."
+                  : "Recorded in the audit trail — not shown to the vendor."
               }
             />
           </div>
@@ -209,16 +248,22 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
             <Button
               type="button"
               className="gap-1.5 rounded-full"
-              variant={dialog === "ban" ? "destructive" : "default"}
-              disabled={pending || !reason.trim()}
+              variant={
+                dialog === "ban" ? "destructive"
+                  : dialog === "suspend" ? "warning"
+                  : dialog === "unban" ? "success"
+                  : "default"
+              }
+              disabled={pending || (dialog !== "unban" && !reason.trim())}
               onClick={() => {
                 if (dialog === "send-back") return run(`${base}/send-back`, { reason: reason.trim() }, "Sent back to the vendor")
-                if (dialog === "suspend")   return run(`${base}/status`, { status: "SUSPENDED", reason: reason.trim() }, "Meal suspended")
-                if (dialog === "ban")       return run(`${base}/status`, { status: "BANNED", reason: reason.trim() }, "Meal banned")
+                if (dialog === "suspend")   return run(`${base}/status`, status("SUSPENDED", reason.trim()), "Meal suspended")
+                if (dialog === "ban")       return run(`${base}/status`, status("BANNED", reason.trim()), "Meal banned")
+                if (dialog === "unban")     return run(`${base}/status`, status("ACTIVE", reason.trim()), "Ban lifted")
               }}
             >
               {pending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {dialog === "send-back" ? "Send back" : dialog === "suspend" ? "Suspend" : "Ban"}
+              {dialog === "send-back" ? "Send back" : dialog === "suspend" ? "Suspend" : dialog === "unban" ? "Lift ban" : "Ban"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

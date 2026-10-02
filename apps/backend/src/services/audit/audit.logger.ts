@@ -1,23 +1,7 @@
 import { prisma, Prisma } from "@repo/db"
-import { logger } from "@/lib/pino/logger"
 import { SYSTEM_USER_ID } from "@repo/db"
 import type { AuditLogInput } from "@repo/types/backend"
-
-
-const auditLog = logger.child({ module: "audit-platform-service" })
-
-const pendingWrites: Promise<unknown>[] = []
-
-function enqueue(p: Promise<unknown>): void {
-  const wrapped = p.catch((err) => {
-    auditLog.warn({ err }, "Audit log write failed — event may be lost")
-  })
-  pendingWrites.push(wrapped)
-  wrapped.finally(() => {
-    const idx = pendingWrites.indexOf(wrapped)
-    if (idx !== -1) pendingWrites.splice(idx, 1)
-  })
-}
+import { trackAuditWrite } from "./audit.queue"
 
 export const auditService = {
   log(input: AuditLogInput): void {
@@ -37,7 +21,7 @@ export const auditService = {
         metadata,
       },
     })
-    enqueue(write)
+    trackAuditWrite(write)
   },
 
   security(action: string, metadata: Record<string, unknown>): void {

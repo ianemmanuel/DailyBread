@@ -8,6 +8,8 @@ import {
   handleApproveMenuItem,
   handleSendBackMenuItem,
   handleSetMenuItemStatus,
+  handleApproveModifierGroup,
+  handleSendBackModifierGroup,
 } from "../controllers/meals.admin.controller"
 
 /*
@@ -33,5 +35,11 @@ mealsAdminRouter.get("/:itemId", MEALS_READ, handleGetMenuItem)
 mealsAdminRouter.post("/:itemId/approve",   MEALS_MODERATE, handleApproveMenuItem)
 mealsAdminRouter.post("/:itemId/send-back", MEALS_MODERATE, handleSendBackMenuItem)
 mealsAdminRouter.post("/:itemId/status",    MEALS_MODERATE, handleSetMenuItemStatus)
+
+// Option groups carry their own verdict — one group can sit on many dishes.
+// Same permission as the dish verdict: it is the same act (judging vendor
+// wording a customer reads), and the dishes follow the group automatically.
+mealsAdminRouter.post("/modifier-groups/:groupId/approve",   MEALS_MODERATE, handleApproveModifierGroup)
+mealsAdminRouter.post("/modifier-groups/:groupId/send-back", MEALS_MODERATE, handleSendBackModifierGroup)
 
 export default mealsAdminRouter

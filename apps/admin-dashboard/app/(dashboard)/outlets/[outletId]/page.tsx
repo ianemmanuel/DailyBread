@@ -47,6 +47,9 @@ export default async function OutletDetailPage({ params }: Props) {
   const canModerate  = session.permissions.includes(AdminPermissions.VENDORS_OUTLETS_MODERATE)
   const canInspect   = session.permissions.includes(AdminPermissions.VENDORS_OUTLETS_INSPECT)
   const canReadZones = session.permissions.includes(AdminPermissions.SETTINGS_ZONES_READ)
+  // A filter into the meals queue, not an authorization: the meals API
+  // applies its own permission and the vendor's country scope.
+  const canReadMeals = session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)
 
   let outlet: AdminOutlet
   try {
@@ -91,6 +94,14 @@ export default async function OutletDetailPage({ params }: Props) {
             <Link href={`/vendors/accounts/${outlet.vendorId}`} className="text-sm text-primary hover:underline">
               {outlet.vendor.legalBusinessName}
             </Link>
+            {canReadMeals && (
+              <Link
+                href={`/vendors/meals?outlet=${outlet.id}&outletName=${encodeURIComponent(outlet.name)}&status=all`}
+                className="ml-3 text-sm text-primary hover:underline"
+              >
+                Meals sold here →
+              </Link>
+            )}
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className={REVIEW_BADGE[outlet.reviewStatus]}>{REVIEW_LABEL[outlet.reviewStatus]}</span>
               <span className={ADMIN_STATUS_BADGE[outlet.adminStatus]}>{ADMIN_STATUS_LABEL[outlet.adminStatus] ?? outlet.adminStatus}</span>

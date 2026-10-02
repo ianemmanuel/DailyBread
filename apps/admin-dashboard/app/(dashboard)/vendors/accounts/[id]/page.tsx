@@ -68,6 +68,8 @@ export default async function VendorAccountDetailPage({ params }: Props) {
   const canManageCommission = session.permissions.includes(AdminPermissions.VENDORS_ACCOUNTS_COMMISSION_MANAGE)
   // Roadmap VM-P1-04 (CLAUDE.md) — log a formal appeal against a ban or suspension.
   const canLogAppeal = session.permissions.includes(AdminPermissions.VENDORS_APPEALS_MANAGE)
+  // The link vanishes rather than render-then-403; the meals API enforces it.
+  const canReadMeals = session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)
   const commissionHistory = canManageCommission
     ? await adminFetch<CommissionRateHistoryEntry[]>(`/admin/v1/vendors/accounts/${id}/commission-rate/history`, {
         next: { revalidate: 60, tags: [`vendor-account-${id}-commission`] },
@@ -391,6 +393,14 @@ export default async function VendorAccountDetailPage({ params }: Props) {
               >
                 Moderation →
               </Link>
+              {canReadMeals && (
+                <Link
+                  href={`/vendors/meals?vendor=${account.id}&vendorName=${encodeURIComponent(account.legalBusinessName)}&status=all`}
+                  className="view-all-link text-xs"
+                >
+                  Meals →
+                </Link>
+              )}
             </div>
           </div>
           <Table>

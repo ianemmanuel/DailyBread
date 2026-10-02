@@ -46,3 +46,6 @@ export {
   type OfferRow, type OutletClock, type OutletPrice, type VendorOffers,
 } from "./lib/pricing/offers"
 export { loadOutletClocks } from "./services/outletClocks.service"
+/* Read-only: whether a country-scoped admin has meals waiting on review, for
+ * the admin session's sidebar dot. Not authoring. */
+export { hasFlaggedMealsForCountries } from "./services/moderation.service"

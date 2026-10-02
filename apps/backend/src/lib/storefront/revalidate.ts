@@ -26,7 +26,7 @@ const log = logger.child({ module: "storefront-revalidate" })
 /** Tags the storefront will accept. It keeps its own allowlist; this is the
  *  same set, so a typo here fails fast in the smoke test rather than silently
  *  purging nothing. */
-export type StorefrontTag = "hero-promotion"
+export type StorefrontTag = "hero-promotion" | "city-inventory"
 
 /** Long enough for a healthy local or in-region call, short enough that a dead
  *  storefront cannot hold an admin request open. */

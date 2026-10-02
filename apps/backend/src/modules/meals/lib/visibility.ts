@@ -25,6 +25,18 @@ export const SELLABLE_MENU_ITEM_WHERE = {
   isArchived  : false,
   adminStatus : MealStatus.ACTIVE,
   reviewStatus: { in: CUSTOMER_VISIBLE_REVIEW_STATUSES },
+  /*
+   * No live option group the storefront would HIDE (groupBlocksDish). The
+   * moderation rules already keep such a dish out of a visible review status
+   * on every write; this re-checks it on read (principle 10), so a row written
+   * before those rules — or by a future path that skips them — still cannot
+   * sell with a choice silently missing. The cart does not filter groups by
+   * status, so without this it would price a dish against a group the
+   * customer was never shown.
+   */
+  modifierGroups: {
+    none: { group: { deletedAt: null, reviewStatus: { notIn: CUSTOMER_VISIBLE_REVIEW_STATUSES } } },
+  },
 } satisfies Prisma.MenuItemWhereInput
 
 /** One dish AT one outlet. The outlet-level row plus its catalog entry. */

@@ -194,6 +194,12 @@ function GroupCard({
               Under review
             </span>
           )}
+          {group.reviewStatus === "MANUALLY_REJECTED" && (
+            <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--destructive)]">
+              <AlertTriangle className="size-3" />
+              Changes needed
+            </span>
+          )}
         </div>
 
         <p className="mt-1 truncate text-xs text-[var(--muted-foreground)]">

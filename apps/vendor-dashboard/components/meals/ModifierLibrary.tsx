@@ -146,9 +146,22 @@ function GroupRow({
                 Under review
               </span>
             )}
+            {group.reviewStatus === "MANUALLY_REJECTED" && (
+              <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--destructive)]">
+                <AlertTriangle className="size-3" />
+                Changes needed
+              </span>
+            )}
           </div>
           {group.description && (
             <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{group.description}</p>
+          )}
+          {group.reviewStatus === "MANUALLY_REJECTED" && (
+            // The admin's own words, so the vendor knows what to change before
+            // opening the editor. Every dish using the group waits on this.
+            <p className="mt-1 whitespace-pre-line text-xs text-[var(--destructive)]">
+              {group.rejectionReason ?? "An admin asked for changes to these options."}
+            </p>
           )}
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
             {group.usedByCount === 0

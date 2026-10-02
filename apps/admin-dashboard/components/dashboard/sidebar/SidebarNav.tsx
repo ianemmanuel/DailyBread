@@ -114,6 +114,7 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
     "/vendors/compliance": session.hasOpenComplianceIssues,
     "/vendors/appeals"   : session.hasOpenAppealIssues,
     "/vendors/profiles"  : session.hasFlaggedProfiles,
+    "/vendors/meals"     : session.hasFlaggedMeals,
   }
   const showDot = (href: string) => !!dotFlags[href]
 

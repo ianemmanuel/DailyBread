@@ -2930,6 +2930,18 @@ enum VendorNotificationType {
   //* dashboard; the model name is an internal detail.
   MEAL_REJECTED
   MEAL_APPROVED
+  //* The platform's operational verdict on a meal — independent of the
+  //* content review above. REINSTATED covers both lifting a suspension and
+  //* lifting a ban: to the vendor both mean "it is back on your menu", and the
+  //* audit log is where the two are told apart.
+  MEAL_SUSPENDED
+  MEAL_BANNED
+  MEAL_REINSTATED
+  //* An admin cleared or sent back a flagged option group (ModifierGroup).
+  //* One group can sit on many dishes, so it gets its own verdict rather than
+  //* riding on a dish's.
+  MEAL_OPTIONS_APPROVED
+  MEAL_OPTIONS_REJECTED
   // "Operational" compliance issue — not document-shaped, so it never
   // gets a VendorComplianceCase row (see getVendorOperationalIssues in
   // admin.vendor.compliance.service.ts). Notify is a one-off nudge, no

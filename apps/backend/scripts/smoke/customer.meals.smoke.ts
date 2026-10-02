@@ -240,6 +240,10 @@ async function main() {
   const archived = await dish("Archived Bread", 4000, { isArchived: true })
   const deleted  = await dish("Deleted Pie", 4000, { deletedAt: new Date() })
   const flagged  = await dish("Flagged Fish", 4000, { reviewStatus: "FLAGGED" })
+  /* Its OWN status would show it; a flagged option group attached directly,
+   * bypassing the moderation rules, is what must hide it (the read-side guard
+   * in SELLABLE_MENU_ITEM_WHERE). */
+  const heldBack = await dish("Held Back Curry", 4000)
   const remote   = await dish("Dormant Dish", 4000)
   const faraway  = await dish("Other City Dish", 4000)
 
@@ -254,6 +258,7 @@ async function main() {
   const mArchived   = await meal(oNear.id, archived.id)
   const mDeleted    = await meal(oNear.id, deleted.id)
   const mFlagged    = await meal(oNear.id, flagged.id)
+  const mHeldBack   = await meal(oNear.id, heldBack.id)
   const mRemote     = await meal(oDormant.id, remote.id)
   const mOther      = await meal(oOther.id, faraway.id)
 
@@ -267,7 +272,8 @@ async function main() {
     })),
   })
 
-  // ── Modifiers: one approved group (required), one flagged group ──
+  // ── Modifiers: one approved group (required) on the plate; one flagged
+  //    group, on a dish of its own — a visible dish may not carry one ──
   const size = await prisma.modifierGroup.create({
     data: {
       vendorId: vendor.id, name: `${MARKER} Size`, minSelect: 1, maxSelect: 1, reviewStatus: "AUTO_APPROVED",
@@ -287,7 +293,7 @@ async function main() {
     data: { vendorId: vendor.id, name: `${MARKER} Hidden`, reviewStatus: "FLAGGED", options: { create: [{ name: "X" }] } },
   })
   await prisma.menuItemModifierGroup.createMany({
-    data: [{ menuItemId: plate.id, groupId: size.id, position: 0 }, { menuItemId: plate.id, groupId: hidden.id, position: 1 }],
+    data: [{ menuItemId: plate.id, groupId: size.id, position: 0 }, { menuItemId: heldBack.id, groupId: hidden.id, position: 0 }],
   })
 
   // ── Customers ──
@@ -346,6 +352,7 @@ async function main() {
     check("an ARCHIVED dish is left out", !listed.has(mArchived.id))
     check("a DELETED dish is left out", !listed.has(mDeleted.id))
     check("a moderation-FLAGGED dish is left out", !listed.has(mFlagged.id))
+    check("a dish carrying a FLAGGED option group is left out (read-side guard)", !listed.has(mHeldBack.id))
 
     const store = (await get(`/outlets/${oNear.id}`)).json.data as Json
     const storeItems = ((store?.sections ?? []) as Json[]).flatMap((s) => s.items as Json[])
@@ -353,14 +360,14 @@ async function main() {
     check("the STOREFRONT still shows the sold-out meal, greyed",
       storeSold?.isAvailable === false && storeSold?.unavailableReason === "OUT_OF_STOCK", storeSold)
     check("…and none of the removed, archived, deleted or flagged ones",
-      ![mRemoved, mArchived, mDeleted, mFlagged].some((m) => storeItems.some((i) => i.mealId === m.id)),
+      ![mRemoved, mArchived, mDeleted, mFlagged, mHeldBack].some((m) => storeItems.some((i) => i.mealId === m.id)),
       storeItems.map((i) => i.name))
 
     const soldDetail = await get(`/meals/${mSold.id}`)
     check("detail of a sold-out meal is found and marked unavailable",
       soldDetail.status === 200 && soldDetail.json.data?.isAvailable === false
         && soldDetail.json.data?.unavailableReason === "OUT_OF_STOCK", soldDetail.json)
-    for (const [label, m] of [["removed", mRemoved], ["archived", mArchived], ["deleted", mDeleted], ["flagged", mFlagged], ["dormant-zone", mRemote]] as const) {
+    for (const [label, m] of [["removed", mRemoved], ["archived", mArchived], ["deleted", mDeleted], ["flagged", mFlagged], ["option-group-flagged", mHeldBack], ["dormant-zone", mRemote]] as const) {
       const r = await get(`/meals/${m.id}`)
       check(`detail of a ${label} meal is a 404`, r.status === 404 && r.json.code === "MEAL_NOT_FOUND", r.json)
     }
@@ -516,7 +523,7 @@ async function main() {
       detail?.images?.length === 2 && detail.images[0].url.includes(plateKeys[0]) && detail.images[1].url.includes(plateKeys[1])
         && detail.images[1].width === 1500 && detail.image?.url === detail.images[0].url, detail?.images)
     const groups = detail?.modifierGroups as Json[] | undefined
-    check("detail carries the approved modifier group only", groups?.length === 1 && groups[0]?.id === size.id, groups)
+    check("detail carries the plate's modifier group", groups?.length === 1 && groups[0]?.id === size.id, groups)
     check("…required (derived from minSelect), options in order, unavailable shown and marked",
       groups?.[0]?.isRequired === true
         && groups[0].options.map((o: Json) => `${o.name}:${o.priceDeltaMinor}:${o.isAvailable}`).join() === "Regular:0:true,Large:2000:true,Huge:4000:false",
