@@ -179,6 +179,22 @@ export function ModifierGroupSheet({ open, onClose, currency, group, onSaved }: 
               </p>
             )}
 
+            {isEdit && group!.reviewStatus === "MANUALLY_REJECTED" && (
+              <div className="rounded-lg border border-[var(--destructive)]/30 bg-[var(--destructive)]/5 px-3 py-2 text-xs text-[var(--foreground)]">
+                <p className="flex items-center gap-2 font-medium">
+                  <AlertTriangle className="size-3.5 shrink-0 text-[var(--destructive)]" />
+                  Changes needed
+                </p>
+                <p className="mt-1 whitespace-pre-line">
+                  {group!.rejectionReason ?? "An admin asked for changes to these options."}
+                </p>
+                <p className="mt-1 text-[var(--muted-foreground)]">
+                  Every dish using this group stays off the menu until you change the wording and save — that
+                  sends it for a fresh check.
+                </p>
+              </div>
+            )}
+
             {isEdit && group!.reviewStatus === "FLAGGED" && (
               <p className="flex items-start gap-2 rounded-lg border border-[var(--destructive)]/30 bg-[var(--destructive)]/5 px-3 py-2 text-xs text-[var(--foreground)]">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--destructive)]" />

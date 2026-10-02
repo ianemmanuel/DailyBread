@@ -386,6 +386,8 @@ async function main() {
         ["POST", `/meals/${NOPE}/approve`],
         ["POST", `/meals/${NOPE}/send-back`],
         ["POST", `/meals/${NOPE}/status`],
+        ["POST", `/meals/modifier-groups/${NOPE}/approve`],
+        ["POST", `/meals/modifier-groups/${NOPE}/send-back`],
       ]
       asAdmin(admin.id, [AdminPermissions.VENDORS_MEALS_READ, AdminPermissions.VENDORS_MEALS_MODERATE],
         { isGlobal: false, countryIds: [countryA.id], cityIds: [], tier: "COUNTRY" })
@@ -897,15 +899,15 @@ async function main() {
       check("…the vendor can no longer edit a banned dish", vEdit.status === 403 && vEdit.json.code === "MEAL_BANNED", vEdit.json)
 
       const back = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "ACTIVE" })
-      check("reinstate → ACTIVE (no reason needed)", back.json.data?.adminStatus === "ACTIVE", back.json)
+      check("unban → ACTIVE (no reason needed)", back.json.data?.adminStatus === "ACTIVE", back.json)
 
       /*
-       * POLLED, not drained. drainAuditQueue() awaits the array declared in
-       * audit.queue.ts, but auditService.log pushes into a SEPARATE array in
-       * audit.logger.ts — so the drain returns at once with writes still in
-       * flight (a real defect, reported rather than fixed in this pass). Five
-       * audited actions are expected; wait a bounded time for them to land.
+       * Drained, then polled. The drain used to be a no-op (the writer and
+       * drainAuditQueue kept separate lists — fixed in Phase 10, unit-tested
+       * in audit.queue.test.ts); the bounded poll stays as a belt for slow
+       * writes. Five audited actions are expected.
        */
+      await drainAuditQueue()
       const readAudit = () => prisma.auditLog.findMany({
         where : { entityType: "MenuItem", entityId: plateId },
         select: { action: true, adminUserId: true },
@@ -917,7 +919,7 @@ async function main() {
       }
       const names = actions.map((a) => a.action)
       check("every moderation write is audited",
-        ["menu_item.approved", "menu_item.sent_back", "menu_item.suspended", "menu_item.banned", "menu_item.active"]
+        ["menu_item.approved", "menu_item.sent_back", "menu_item.suspended", "menu_item.banned", "menu_item.unbanned"]
           .every((a) => names.includes(a)), names)
       check("…attributed to the acting admin", actions.every((a) => a.adminUserId === admin.id))
       check("…and refused actions wrote nothing", !names.some((n) => n.includes("deleted")) && names.length === 5, names)

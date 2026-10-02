@@ -8,6 +8,7 @@ import { adminFetch, ApiCallError } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { AdminPermissions } from "@repo/types/admin-app"
 import { MealModerationActions } from "@/components/vendors/MealModerationActions"
+import { ModifierGroupModerationActions } from "@/components/vendors/ModifierGroupModerationActions"
 import { formatMealPrice, type AdminMealDetail } from "@/types"
 
 export const metadata: Metadata = { title: "Meal" }
@@ -18,6 +19,12 @@ const FLAG_FIELD: Record<string, string> = {
   INAPPROPRIATE_NAME       : "the name",
   INAPPROPRIATE_DESCRIPTION: "the description",
   INAPPROPRIATE_MODIFIER   : "one of the choice groups",
+}
+
+/* What screening found in a GROUP — its own reasons, separate from the dish's. */
+const GROUP_FLAG_LABEL: Record<string, string> = {
+  INAPPROPRIATE_NAME  : "name or description",
+  INAPPROPRIATE_OPTION: "option names",
 }
 
 /* Vendor-facing wording for the send-back message. A vendor told
@@ -59,9 +66,10 @@ export default async function AdminMealDetailPage({ params }: Props) {
 
   let meal: AdminMealDetail
   try {
-    // Image URLs are short-lived signed R2 links, so a cached page would hand
-    // out dead images.
-    meal = await adminFetch<AdminMealDetail>(`/admin/v1/vendors/meals/${itemId}`, { cache: "no-store" })
+    // Uncached: this page is where a moderation decision is made, and it must
+    // show the state the decision applies to (the actions send it back as
+    // expectedStatus). Images are stable public derivatives either way.
+    meal =await adminFetch<AdminMealDetail>(`/admin/v1/vendors/meals/${itemId}`, { cache: "no-store" })
   } catch (err) {
     if (err instanceof ApiCallError && err.status === 404) notFound()
     throw err
@@ -81,7 +89,10 @@ export default async function AdminMealDetailPage({ params }: Props) {
           </span>
           Back to Meals
         </Link>
-        <h1 className="mt-3 font-display text-2xl font-semibold tracking-tight text-foreground">{meal.name}</h1>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">{meal.name}</h1>
+          {meal.isArchived && <span className="badge-neutral">Archived by the vendor</span>}
+        </div>
         <p className="text-sm text-muted-foreground">
           Sold by{" "}
           <Link href={`/vendors/accounts/${meal.vendorId}`} className="text-primary hover:underline">
@@ -89,7 +100,13 @@ export default async function AdminMealDetailPage({ params }: Props) {
           </Link>
           {meal.section && ` · ${meal.section.name}`}
           {meal.prepTimeMinutes != null && ` · ${meal.prepTimeMinutes} min to prepare`}
+          {` · Tax: ${meal.taxCategory?.name ?? "country standard rate"}`}
         </p>
+        {meal.isArchived && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            The vendor has withdrawn this meal everywhere, so no customer sees it whatever the verdict below.
+          </p>
+        )}
       </div>
 
       {/* Evidence left, decision right — never a scroll apart. */}
@@ -98,7 +115,7 @@ export default async function AdminMealDetailPage({ params }: Props) {
           <div className="admin-card overflow-hidden p-0">
             <div className="relative aspect-[16/9] w-full bg-muted">
               {meal.mainImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL
+                // eslint-disable-next-line @next/next/no-img-element -- public derivative
                 <img src={meal.mainImageUrl} alt="" className="h-full w-full object-cover" />
               ) : (
                 <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-muted-foreground">
@@ -113,7 +130,7 @@ export default async function AdminMealDetailPage({ params }: Props) {
                 {meal.images.slice(1).map((img) => (
                   <div key={img.storageKey} className="h-16 w-20 shrink-0 overflow-hidden rounded-lg bg-muted">
                     {img.url ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL
+                      // eslint-disable-next-line @next/next/no-img-element -- public derivative
                       <img src={img.url} alt="" className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-muted-foreground">
@@ -167,7 +184,7 @@ export default async function AdminMealDetailPage({ params }: Props) {
                   <li
                     key={g.id}
                     className={`rounded-xl border px-4 py-3 ${
-                      g.flagged ? "border-destructive/40 bg-destructive/5" : "border-border/70"
+                      g.blocksDish ? "border-destructive/40 bg-destructive/5" : "border-border/70"
                     }`}
                   >
                     <div className="flex flex-wrap items-center gap-2">
@@ -176,12 +193,19 @@ export default async function AdminMealDetailPage({ params }: Props) {
                         {g.required ? "must choose" : "optional"}
                         {g.maxSelect > 1 ? ` · up to ${g.maxSelect}` : " · one"}
                       </span>
-                      {g.flagged && (
+                      {g.reviewStatus === "FLAGGED" && (
                         <span className="badge-danger inline-flex items-center gap-1">
                           <ShieldAlert className="h-3 w-3" />
-                          flagged
+                          flagged{g.flagReasons.length > 0 && ` · ${g.flagReasons.map((r) => GROUP_FLAG_LABEL[r] ?? r).join(", ")}`}
                         </span>
                       )}
+                      {g.reviewStatus === "MANUALLY_REJECTED" && (
+                        <span className="badge-danger inline-flex items-center gap-1">
+                          <Undo2 className="h-3 w-3" />
+                          sent back · waiting on the vendor
+                        </span>
+                      )}
+                      {g.reviewStatus === "MANUALLY_APPROVED" && <span className="badge-success">approved</span>}
                       {g.usedByCount > 1 && (
                         <span className="text-xs text-muted-foreground">
                           on {g.usedByCount} dishes
@@ -211,6 +235,12 @@ export default async function AdminMealDetailPage({ params }: Props) {
                         </span>
                       ))}
                     </div>
+                    {g.rejectionReason && g.reviewStatus === "MANUALLY_REJECTED" && (
+                      <p className="mt-2 whitespace-pre-line text-xs text-foreground">
+                        <span className="font-medium">Vendor was told:</span> {g.rejectionReason}
+                      </p>
+                    )}
+                    {canModerate && <ModifierGroupModerationActions group={g} />}
                   </li>
                 ))}
               </ul>
@@ -238,9 +268,26 @@ export default async function AdminMealDetailPage({ params }: Props) {
                         <Store className="h-3.5 w-3.5 shrink-0" />
                         {o.outletName}
                       </Link>
-                      <p className="truncate text-xs text-muted-foreground">{o.outletAddress}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {o.outletCity ? `${o.outletCity} · ` : ""}{o.outletAddress}
+                      </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* The outlet's own state, read-only — a dish hidden
+                          because of where it is sold is a different problem
+                          from one hidden for itself, and is fixed elsewhere. */}
+                      {o.outletAdminStatus !== "ACTIVE" && (
+                        <span className="badge-danger">outlet {o.outletAdminStatus.toLowerCase().replace("_", " ")}</span>
+                      )}
+                      {o.outletClearance !== "CLEARED" && (
+                        <span className="badge-warning">outlet not cleared</span>
+                      )}
+                      {(o.outletReviewStatus === "FLAGGED" || o.outletReviewStatus === "MANUALLY_REJECTED") && (
+                        <span className="badge-warning">outlet under review</span>
+                      )}
+                      {o.adminStatus !== "ACTIVE" && (
+                        <span className="badge-danger">{o.adminStatus.toLowerCase()} here</span>
+                      )}
                       {o.priceMinorOverride != null && (
                         <span className="text-xs tabular-nums text-foreground">
                           {price(o.priceMinorOverride)}

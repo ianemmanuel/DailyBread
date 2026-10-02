@@ -46,8 +46,15 @@ export interface AdminMealOutlet {
   outletId          : string
   outletName        : string
   outletAddress     : string
+  outletCity        : string | null
+  /** The OUTLET's own three axes — shown so a moderator can tell a dish that
+   *  is hidden because of where it is sold from one hidden for itself. */
+  outletAdminStatus : string
+  outletReviewStatus: ProfileReviewStatus
+  outletClearance   : string
   isAvailable       : boolean
   priceMinorOverride: number | null
+  /** Per-outlet platform status. Read-only: nothing in the ERP sets it yet. */
   adminStatus       : MealAdminStatus
 }
 
@@ -74,8 +81,14 @@ export interface AdminModifierGroup {
   minSelect  : number
   maxSelect  : number
   required   : boolean
-  flagged    : boolean
-  flagReasons: string[]
+  /** The group's OWN verdict — one group can sit on many dishes. */
+  reviewStatus   : ProfileReviewStatus
+  flagged        : boolean
+  /** Computed by the server (groupBlocksDish): while true, every dish using
+   *  this group stays off the marketplace. */
+  blocksDish     : boolean
+  flagReasons    : string[]
+  rejectionReason: string | null
   /** Other dishes carrying the same wording — the blast radius of the
    *  decision being made. */
   usedByCount: number
@@ -84,6 +97,7 @@ export interface AdminModifierGroup {
 
 export interface AdminMealDetail extends Omit<AdminMealRow, "outletCount"> {
   portionSize : string | null
+  taxCategory : { id: string; name: string } | null
   images      : { storageKey: string; url: string | null }[]
   cuisines    : { id: string; name: string }[]
   dietaryTags : { id: string; name: string }[]

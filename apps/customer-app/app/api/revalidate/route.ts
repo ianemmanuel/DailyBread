@@ -43,7 +43,14 @@ import { NextRequest, NextResponse } from "next/server"
  * you can name" endpoint, and a caller who learned a tag name could force
  * repeated re-renders of any page. Adding a tag here is a deliberate act.
  */
-const PURGEABLE_TAGS = new Set(["hero-promotion"])
+const PURGEABLE_TAGS = new Set([
+  "hero-promotion",
+  /* The anonymous city feeds (places + meals, lib/data/market/*). Purged by
+   * the backend when meal MODERATION changes what customers may see — a
+   * suspended or banned dish must not linger in a cached feed. Ordinary vendor
+   * edits ride the 60s revalidate, which is the documented bound for them. */
+  "city-inventory",
+])
 
 const SECRET = process.env.STOREFRONT_REVALIDATE_SECRET
 

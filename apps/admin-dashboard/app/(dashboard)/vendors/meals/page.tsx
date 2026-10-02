@@ -23,6 +23,7 @@ interface PageProps {
   searchParams: Promise<{
     page?: string; search?: string; country?: string; status?: string
     adminStatus?: string; vendor?: string; vendorName?: string
+    outlet?: string; outletName?: string; flagReason?: string
   }>
 }
 
@@ -57,7 +58,16 @@ const ADMIN_BADGE: Record<string, string> = {
 const FLAG_LABEL: Record<string, string> = {
   INAPPROPRIATE_NAME       : "Name",
   INAPPROPRIATE_DESCRIPTION: "Description",
+  INAPPROPRIATE_MODIFIER   : "Options",
 }
+
+/* The reasons screening writes onto a dish — the backend validates the value
+ * against the same list (MENU_ITEM_FLAG_REASONS) and ignores anything else. */
+const FLAG_REASON_OPTIONS = [
+  { value: "INAPPROPRIATE_NAME",        label: "Name" },
+  { value: "INAPPROPRIATE_DESCRIPTION", label: "Description" },
+  { value: "INAPPROPRIATE_MODIFIER",    label: "Options" },
+]
 
 export default async function VendorMealsPage({ searchParams }: PageProps) {
   const session = await getAdminSession()
@@ -69,10 +79,13 @@ export default async function VendorMealsPage({ searchParams }: PageProps) {
   const country     = params.country ?? ""
   const vendor      = params.vendor ?? ""
   const vendorName  = params.vendorName ?? ""
+  const outlet      = params.outlet ?? ""
+  const outletName  = params.outletName ?? ""
+  const flagReason  = params.flagReason ?? ""
   const adminStatus = params.adminStatus ?? ""
-  // Drilling into one vendor is a "show me everything" view, not a triage
-  // queue, so it defaults to All rather than rendering empty.
-  const statusTab   = params.status ?? (vendor ? "all" : "FLAGGED")
+  // Drilling into one vendor or outlet is a "show me everything" view, not a
+  // triage queue, so it defaults to All rather than rendering empty.
+  const statusTab   = params.status ?? (vendor || outlet ? "all" : "FLAGGED")
   const status      = statusTab === "all" ? "" : statusTab
 
   const { countries, showFilter } = await getFilterableCountries(session.scope.isGlobal)
@@ -83,6 +96,8 @@ export default async function VendorMealsPage({ searchParams }: PageProps) {
   if (status)      qsParams.reviewStatus = status
   if (adminStatus) qsParams.adminStatus  = adminStatus
   if (vendor)      qsParams.vendor       = vendor
+  if (outlet)      qsParams.outlet       = outlet
+  if (flagReason)  qsParams.flagReason   = flagReason
   const qs = new URLSearchParams(qsParams)
 
   const tabHref = (value: string) => {
@@ -91,13 +106,15 @@ export default async function VendorMealsPage({ searchParams }: PageProps) {
     if (country)     qp.set("country", country)
     if (adminStatus) qp.set("adminStatus", adminStatus)
     if (vendor)      { qp.set("vendor", vendor); if (vendorName) qp.set("vendorName", vendorName) }
+    if (outlet)      { qp.set("outlet", outlet); if (outletName) qp.set("outletName", outletName) }
+    if (flagReason)  qp.set("flagReason", flagReason)
     qp.set("status", value)
     return `/vendors/meals?${qp}`
   }
 
   const result = await adminFetch<AdminMealListResult>(`/admin/v1/vendors/meals?${qs}`, {
-    // Rows carry short-lived signed image URLs, so this stays brief — a longer
-    // TTL would serve dead images.
+    // Thumbnails are stable public derivatives; the short TTL is for the
+    // queue's own freshness, and every moderation action purges the tag.
     next: { revalidate: 60, tags: ["vendor-meals"] },
   }).catch(() => null)
 
@@ -142,10 +159,14 @@ export default async function VendorMealsPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {vendor && (
+      {(vendor || outlet) && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
           <span className="text-foreground">
-            Showing meals from <span className="font-medium">{vendorName || "this vendor"}</span> only.
+            {outlet ? (
+              <>Showing meals sold at <span className="font-medium">{outletName || "this location"}</span> only.</>
+            ) : (
+              <>Showing meals from <span className="font-medium">{vendorName || "this vendor"}</span> only.</>
+            )}
           </span>
           <Link href="/vendors/meals" className="view-all-link text-xs">Clear filter</Link>
         </div>
@@ -186,9 +207,13 @@ export default async function VendorMealsPage({ searchParams }: PageProps) {
         searchPlaceholder="Search meal or business name…"
         defaultSearch={search}
         {...(showFilter ? { countryOptions: countries.map((c) => ({ value: c.slug, label: c.name })), defaultCountry: country } : {})}
-        categoryLabel="Status"
-        categoryOptions={ADMIN_STATUS_OPTIONS}
-        defaultCategory={adminStatus}
+        extraFilters={[
+          // Named for the query key the page actually reads. This used to go
+          // through categoryOptions, which writes `?category=` — so the status
+          // filter never reached the backend.
+          { name: "adminStatus", label: "Status", icon: "status", options: ADMIN_STATUS_OPTIONS, defaultValue: adminStatus },
+          { name: "flagReason",  label: "Flagged for", allLabel: "Any finding", icon: "filter", options: FLAG_REASON_OPTIONS, defaultValue: flagReason },
+        ]}
       />
 
       {!result ? (
@@ -236,7 +261,7 @@ export default async function VendorMealsPage({ searchParams }: PageProps) {
                       <div className="flex items-center gap-3">
                         <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-muted">
                           {meal.mainImageUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL
+                            // eslint-disable-next-line @next/next/no-img-element -- public derivative, already sized
                             <img src={meal.mainImageUrl} alt="" className="h-full w-full object-cover" />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center text-muted-foreground">
@@ -300,6 +325,8 @@ export default async function VendorMealsPage({ searchParams }: PageProps) {
             status: statusTab,
             ...(adminStatus ? { adminStatus } : {}),
             ...(vendor ? { vendor, ...(vendorName ? { vendorName } : {}) } : {}),
+            ...(outlet ? { outlet, ...(outletName ? { outletName } : {}) } : {}),
+            ...(flagReason ? { flagReason } : {}),
           }}
           itemLabel="meals"
         />

@@ -10,8 +10,13 @@ import {
   approveMenuItem,
   sendBackMenuItem,
   setMenuItemStatus,
+  approveModifierGroup,
+  sendBackModifierGroup,
   type MenuItemFilters,
 } from "../services/moderation.service"
+import { MENU_ITEM_FLAG_REASONS } from "../lib/moderation.rules"
+
+const FLAG_REASONS: ReadonlySet<string> = new Set(MENU_ITEM_FLAG_REASONS)
 
 function filtersFrom(req: Parameters<RequestHandler>[0]): MenuItemFilters {
   const review = req.query.reviewStatus
@@ -20,6 +25,10 @@ function filtersFrom(req: Parameters<RequestHandler>[0]): MenuItemFilters {
     ...(typeof req.query.search === "string" && req.query.search ? { search: req.query.search } : {}),
     ...(typeof req.query.country === "string" && req.query.country ? { countrySlug: req.query.country } : {}),
     ...(typeof req.query.vendor === "string" && req.query.vendor ? { vendorId: req.query.vendor } : {}),
+    ...(typeof req.query.outlet === "string" && req.query.outlet ? { outletId: req.query.outlet } : {}),
+    ...(typeof req.query.flagReason === "string" && FLAG_REASONS.has(req.query.flagReason)
+      ? { flagReason: req.query.flagReason as MenuItemFilters["flagReason"] }
+      : {}),
     ...(typeof review === "string" && review in ProfileReviewStatus
       ? { reviewStatus: review as ProfileReviewStatus }
       : {}),
@@ -78,13 +87,19 @@ export const handleSendBackMenuItem: RequestHandler = async (req, res, next) => 
   } catch (err) { next(err) }
 }
 
-//* POST /admin/v1/vendors/meals/:itemId/status — suspend / ban / reinstate
+//* POST /admin/v1/vendors/meals/:itemId/status — suspend / ban / reinstate / unban
+//* Body: { status, reason?, expectedStatus? } — the act is named by the
+//* service from where the meal actually is (mealStatusTransition).
 export const handleSetMenuItemStatus: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
-    const status = req.body?.status
+    const status         = req.body?.status
+    const expectedStatus = req.body?.expectedStatus
     if (typeof status !== "string" || !(status in MealStatus)) {
       throw new ApiError(400, `status must be one of: ${Object.keys(MealStatus).join(", ")}`, "INVALID_STATUS")
+    }
+    if (expectedStatus !== undefined && (typeof expectedStatus !== "string" || !(expectedStatus in MealStatus))) {
+      throw new ApiError(400, `expectedStatus must be one of: ${Object.keys(MealStatus).join(", ")}`, "INVALID_STATUS")
     }
     const item = await setMenuItemStatus(
       req.params.itemId!,
@@ -92,7 +107,26 @@ export const handleSetMenuItemStatus: RequestHandler = async (req, res, next) =>
       typeof req.body?.reason === "string" ? req.body.reason : null,
       adminUser.id,
       adminScope,
+      expectedStatus as MealStatus | undefined,
     )
     return sendSuccess(res, item, "Meal status updated")
+  } catch (err) { next(err) }
+}
+
+//* POST /admin/v1/vendors/meals/modifier-groups/:groupId/approve
+export const handleApproveModifierGroup: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser, adminScope } = req as unknown as AdminRequest
+    const group = await approveModifierGroup(req.params.groupId!, adminUser.id, adminScope)
+    return sendSuccess(res, group, "Options approved")
+  } catch (err) { next(err) }
+}
+
+//* POST /admin/v1/vendors/meals/modifier-groups/:groupId/send-back
+export const handleSendBackModifierGroup: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser, adminScope } = req as unknown as AdminRequest
+    const group = await sendBackModifierGroup(req.params.groupId!, req.body?.reason, adminUser.id, adminScope)
+    return sendSuccess(res, group, "Options sent back for revision")
   } catch (err) { next(err) }
 }

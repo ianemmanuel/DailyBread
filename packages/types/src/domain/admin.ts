@@ -247,6 +247,8 @@ export interface AdminSessionData {
   // VENDORS_PROFILES_MODERATE (not the broader READ), since only an
   // admin who can actually act on a flagged profile should be nudged.
   hasFlaggedProfiles?: boolean
+  // And for the Meals nav dot — VENDORS_MEALS_MODERATE, same reasoning.
+  hasFlaggedMeals?: boolean
 }
 
 //* VENDOR MANAGEMENT

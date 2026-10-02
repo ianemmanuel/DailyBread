@@ -8,6 +8,7 @@ import {
   MAX_GROUP_DESCRIPTION_LENGTH, type NormalizedOption,
 } from "../lib/modifiers"
 import { normalizeOptionalText } from "@/lib/text/optionalText"
+import { MODIFIER_CONTENT_FLAG, groupBlocksDish, nextDishReview } from "../lib/moderation.rules"
 
 /*
  * The vendor's library of modifier groups.
@@ -20,10 +21,8 @@ import { normalizeOptionalText } from "@/lib/text/optionalText"
 
 const serviceLog = logger.child({ module: "vendor-modifier-group-service" })
 
-/** A dish whose modifier text is flagged carries this alongside its own
- *  reasons, so it surfaces in the existing meal review queue instead of
- *  needing a queue of its own. */
-export const MODIFIER_CONTENT_FLAG = "INAPPROPRIATE_MODIFIER"
+// Defined with the rule that applies it; re-exported for existing importers.
+export { MODIFIER_CONTENT_FLAG }
 
 async function loadActiveVendor(vendorId: string) {
   const vendor = await prisma.vendorAccount.findUnique({
@@ -123,23 +122,31 @@ async function screenGroup(
 }
 
 /**
- * Re-derives the modifier flag on every dish that uses these groups.
+ * Re-derives the modifier flag — and with it the review status — on every dish
+ * that uses these groups.
  *
- * A dish is flagged for modifier content when ANY group attached to it is
- * flagged, so removing the flag reads every attached group rather than assuming
- * this one was the only offender. Runs after a group is saved, deleted, or
- * attached to or detached from a dish.
+ * A dish is blocked while ANY live group attached to it is not cleared
+ * (groupBlocksDish), so this reads every attached group rather than assuming
+ * the one that changed was the only offender. Runs after a group is saved,
+ * deleted, attached, detached, or given an admin verdict.
+ *
+ * How each status moves — and why a manual verdict moves only when what it
+ * judged has changed — is nextDishReview's to say; this only applies it.
+ * `groupRescreened` is set when the VENDOR edited a group's screened text:
+ * that is them responding to a send-back, so a dish rejected over its options
+ * goes back to the queue.
  */
 export async function recomputeModifierFlagsForItems(
   itemIds: string[],
   tx     : Prisma.TransactionClient = prisma,
+  { groupRescreened = false }: { groupRescreened?: boolean } = {},
 ): Promise<void> {
   if (itemIds.length === 0) return
 
   const items = await tx.menuItem.findMany({
     where : { id: { in: itemIds } },
     select: {
-      id: true, flagReasons: true, reviewStatus: true,
+      id: true, flagReasons: true, reviewStatus: true, rejectionReason: true,
       modifierGroups: {
         select: { group: { select: { reviewStatus: true, deletedAt: true } } },
       },
@@ -147,37 +154,19 @@ export async function recomputeModifierFlagsForItems(
   })
 
   for (const item of items) {
-    const hasFlaggedGroup = item.modifierGroups.some(
-      (link) => link.group.deletedAt === null && link.group.reviewStatus === ProfileReviewStatus.FLAGGED,
+    const blocked = item.modifierGroups.some(
+      (link) => link.group.deletedAt === null && groupBlocksDish(link.group.reviewStatus),
     )
-    const carries = item.flagReasons.includes(MODIFIER_CONTENT_FLAG)
-    if (hasFlaggedGroup === carries) continue
-
-    const flagReasons = hasFlaggedGroup
-      ? [...item.flagReasons, MODIFIER_CONTENT_FLAG]
-      : item.flagReasons.filter((r) => r !== MODIFIER_CONTENT_FLAG)
-
-    /*
-     * A manual verdict an admin already gave is never overwritten here: they
-     * looked at this dish and decided. Only an automatic status moves, the
-     * same rule updateMenuItem follows when re-screening text.
-     */
-    const automatic =
-      item.reviewStatus === ProfileReviewStatus.AUTO_APPROVED ||
-      item.reviewStatus === ProfileReviewStatus.FLAGGED
+    const next = nextDishReview(item, { blocked, groupRescreened })
+    if (!next) continue
 
     await tx.menuItem.update({
       where: { id: item.id },
       data : {
-        flagReasons,
-        ...(automatic
-          ? {
-              reviewStatus: flagReasons.length > 0
-                ? ProfileReviewStatus.FLAGGED
-                : ProfileReviewStatus.AUTO_APPROVED,
-              flaggedAt   : flagReasons.length > 0 ? new Date() : null,
-            }
-          : {}),
+        flagReasons : next.flagReasons,
+        reviewStatus: next.reviewStatus,
+        ...(next.newlyFlagged ? { flaggedAt: new Date() } : {}),
+        ...(next.reviewStatus === ProfileReviewStatus.AUTO_APPROVED ? { flaggedAt: null } : {}),
       },
     })
   }
@@ -358,7 +347,7 @@ export async function updateModifierGroup(
     }
 
     if (textChanged) {
-      await recomputeModifierFlagsForItems(existing.menuItems.map((m) => m.menuItemId), tx)
+      await recomputeModifierFlagsForItems(existing.menuItems.map((m) => m.menuItemId), tx, { groupRescreened: true })
     }
   })
 

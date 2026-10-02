@@ -23,13 +23,13 @@ public flag — so a public path inside the private bucket would publish every
 payout proof and identity document in it.
 | Bucket | Env | Holds |
 |---|---|---|
-| private | `R2_BUCKET_NAME` | documents, payout proofs, menu photos, **and every original an admin uploads**. Leaves only as a short-lived signed URL |
-| public | `R2_PUBLIC_*` | marketing derivatives **this server produced**, uuid-named, `max-age=31536000, immutable` |
+| private | `R2_BUCKET_NAME` | documents, payout proofs, **every original an admin or vendor uploads** (menu-photo originals included). Leaves only as a short-lived signed URL |
+| public | `R2_PUBLIC_*` | derivatives **this server produced** (marketing, cuisine tiles, menu-photo WebP masters), uuid-named, `max-age=31536000, immutable` |
 Nothing a user uploaded is ever served byte for byte. `lib/storage/publicMedia.storage.ts`
 is the only writer to the public bucket and `publicUrl()` is the only place a key
 becomes a URL.
 
-Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**695 tests**), and the smoke scripts in `apps/backend/scripts/smoke/` (`pnpm dlx tsx --env-file=.env scripts/smoke/<name>.ts`). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
+Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**759 tests**), and the smoke scripts in `apps/backend/scripts/smoke/` (`pnpm dlx tsx --env-file=.env scripts/smoke/<name>.ts`). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
 
 ---
 
@@ -423,6 +423,7 @@ vendor photos need it, not for this.
 ## Backend conventions
 
 `routes/v1/*.routes.ts` → `controllers/*.controller.ts` → `services/*.service.ts`. Services hold the business logic and take an `AdminScopeContext` per call; controllers only map and delegate. Every mutation calls `auditService.log` (`entity.verb`) into the append-only `AuditLog`.
+> `auditService.log` is fire-and-forget; `drainAuditQueue` (shutdown) waits for writes in flight. Both MUST use the one list in `audit.queue.ts` (`trackAuditWrite`). They used to keep one each, the drain awaited an always-empty array, and writes in flight at shutdown were lost. `audit.queue.test.ts` goes through `auditService.log` for that reason.
 
 **Admin RBAC** is pool-based: `AdminRolePermission` = a role's ceiling, `AdminUserPermission` = individual grants within it. Roles: `super_admin`, `identity_admin`, `finance`, `vendor_ops`, `customer_care`, `courier_ops`, `operations_admin`. A `RECEIVE_ESCALATION` permission is always **ceiling-only** — granted individually to senior reviewers.
 
@@ -433,8 +434,20 @@ vendor photos need it, not for this.
 - **Full claim / escalate / reassign** — applications, compliance cases, appeals, payout accounts. Used only where concurrent action has consequences (money, a formal dispute). `admin.vendor.compliance-case.service.ts` is the reference implementation; escalate is a *free pool*, reassign is *targeted*; acting requires holding the claim; the escalator is permanently locked out; `claimedFromEscalation` is terminal.
 - **Plain approve / send-back** — outlets, profiles, meals. Two admins clearing the same food photo is a non-event.
 
+**Meal moderation** (`modules/meals`, ERP at `/vendors/meals`; rules in `meals/lib/moderation.rules.ts`):
+- **An option group (`ModifierGroup`) has its OWN verdict**, given at `/admin/v1/vendors/meals/modifier-groups/:id/{approve,send-back}` under `VENDORS_MEALS_MODERATE` and scoped through the group's vendor. One group sits on many dishes, so approving dishes one by one can never clear it. A group blocks every dish using it while it is FLAGGED **or** MANUALLY_REJECTED (`groupBlocksDish` = the complement of what the storefront shows), and **a dish cannot be approved while a group blocks it** (`MODIFIER_GROUP_UNRESOLVED`): it would sell with that choice silently missing.
+- **`nextDishReview` is the only rule for how a dish follows its groups.** Automatic statuses follow the reasons. A MANUALLY_APPROVED dish is re-flagged when a group newly blocks it. A MANUALLY_REJECTED dish carrying the modifier flag goes back to the **queue** (FLAGGED, never straight to approved) when the group clears or the vendor re-edits it. A rejection about the dish's own words is never moved by a group change.
+  > **A re-queued dish waits for an ADMIN.** It is FLAGGED with its `rejectionReason` still set. Only `approveMenuItem` or the vendor's own text re-screen clears that field, so on a FLAGGED dish it means exactly "re-queued after a send-back". No group event may auto-approve it: not the vendor editing a group again, and not an admin approving a group it shares. An earlier version treated it as an ordinary automatic FLAGGED and let the next group event clear it. `meals.adminModeration.smoke.ts` has three checks that fail if that guard is removed.
+- **Operational status is a fixed table, the outlet's**: suspend (ACTIVE→SUSPENDED), reinstate (SUSPENDED→ACTIVE), ban (ACTIVE|SUSPENDED→BANNED), unban (BANNED→ACTIVE). Nothing else. `/status` still takes a TARGET status, so the act is named from where the meal actually is, and the ERP sends `expectedStatus` — without it, a stale "Reinstate" on a meal someone just banned would silently become an unban. Each act has its own audit verb and vendor notification. The admin's reason is audit-only and never shown to the vendor, same as outlets.
+- **Pre-Phase-9 rows**: `apps/backend/scripts/audit/meal-blocked-option-groups.sql` (read-only; how to run it, what each column means and how to fix rows are in its header) finds dishes whose own status would show them while a group blocks them. The read-side guard hides them from customers, but they still read as approved in the ERP and to the vendor. Fix them through the ERP group actions, never with a hand-written UPDATE.
+- **No customer-visible dish may carry a blocking group, and that is enforced TWICE**: the rules above keep such a dish out of a visible review status on every write, and `SELLABLE_MENU_ITEM_WHERE` also refuses it on read (principle 10). The cart prices against every attached group without filtering by status, so before that read-side guard a row from before Phase 9 sold with a choice the customer was never shown. `meals.adminModeration.smoke.ts` plants such a row directly and checks storefront, meal page and cart together. A dish-level visibility check needs an always-sellable control dish at the outlet: an outlet with nothing sellable is itself hidden, and the check then passes for the wrong reason.
+- **Every meal moderation action purges the storefront's `city-inventory` tag** (the anonymous city feeds, cached 60s stale-while-revalidate) after its write commits, through `revalidateStorefront`, the same channel hero promotions use. A refused action purges nothing. Ordinary vendor edits are NOT purged; they ride the 60s revalidate, which is the documented bound for them.
+- **The vendor sees a group's verdict from its LIBRARY row** (`reviewStatus`, `rejectionReason` already on `ModifierGroup`). The dish notice joins attached group ids against that query (`MealOptionGroupIssues`), the same join the options section does, so the dish contract stays as it is.
+- **City-scoped admins see country-wide meals, deliberately**: meals follow `vendor.countryId`, exactly as outlet moderation does. Narrowing either is one scope-model change for both, not a Meals change. `Meal.adminStatus` (per outlet) is in `SELLABLE_MEAL_WHERE` but **nothing writes it** — dormant by decision; the ERP shows it read-only.
+
 **Uploads and secrets.**
-- One pipeline everywhere: presign → XHR `PUT` to R2 → submit the `storageKey`. The bucket is **private**, so keys are named `...Key` (never `...Url`) and become short-lived signed URLs at a **single exit point** per domain (`presentVendorProfile`, `presentMenuItem`, `signKey`). A key rendered straight into an `<img src>` is a 403.
+- One pipeline everywhere: presign → XHR `PUT` to R2 → submit the `storageKey`. The bucket is **private**, so keys are named `...Key` (never `...Url`) and become short-lived signed URLs at a **single exit point** per domain (`presentVendorProfile`, `signKey`). A key rendered straight into an `<img src>` is a 403.
+  > **Menu photos are the exception**: a save re-encodes each upload into a public WebP master (`meals/services/images.service.ts`) and keeps the original private. Readers get `presentMealImage` / `mealImageUrl`, a stable public URL, never a signed one. A soft-deleted or banned dish keeps its images (meal plans and, later, orders must stay resolvable), so its master stays publicly fetchable by URL. Taking one down is deferred to image moderation.
 - Every key carries the owner's id (`meal-images/<vendorId>/…`, `profile-media/<kind>/<vendorId>/…`, `payout-docs/<method>/<vendorId>/…`). That segment is **load-bearing**: `assertOwned*Key` is what stops a discard endpoint being a delete-anything primitive — it must check the exact prefix, one segment after it, no traversal, and no prefix collision (`vendor-1` must not match `vendor-1-extra`). Filenames are uuids, never fixed, so a replacement never destroys the evidence a decision rested on.
 - Payout identifiers are **AES-256-GCM at rest** with keyed-HMAC blind indexes for duplicate matching without decrypting. `presentPayoutAccount()` is the only exit to any client and returns masked values — a vendor never gets their own numbers back (Stripe's model). `decryptPayoutIdentifiers` is reachable from no route.
 
@@ -670,6 +683,7 @@ of them.
   cannot use a static import, so that LQIP is the only way to get
   `placeholder="blur"` on hero imagery.
 - Shared: `TableFilterBar` (extend via the generic `extraFilters`, never a new prop trio), `TablePagination`, `SearchableSelect`, `EmptyState`. `AlertDialog` for confirmations, `Sheet` for forms.
+  > The named `category*` props write **`?category=`**. A page that reads any other key must use `extraFilters` with `name` set to that key. The meals queue's status filter read `?adminStatus=` through `categoryOptions` and silently filtered nothing (bug class #1).
 - **Action colour is SEMANTIC, and it is a Button variant, never a className.**
   The ERP's house style is a TINT (`bg-X/10 text-X hover:bg-X/20`), not a solid
   fill: this app is dense and operational, and a wall of saturated buttons
@@ -852,6 +866,18 @@ durable preference to answer "where does tonight's order go".
 ## Current state
 
 Everything through the **customer backend module + customer frontend scaffold** is shipped and verified. Latest migration: `20260913120000_drop_outlet_cuisine_and_repair_city_timezones`.
+
+**ERP meal moderation (Phase 9) and Meals hardening (Phase 10) are built** — see
+*Backend conventions → Meal moderation*. Latest migration:
+`20261001090000_meal_status_and_option_group_notifications` (Phase 10 adds none).
+Verified: `pnpm check-types` 5/5, backend `vitest run` **759/759**,
+`meals.adminModeration` smoke **80/80**, `meals` smoke 244/244 (+1 known pin),
+`customer.meals` smoke **83/83**, `customer.cityBrowse` 23/23,
+`customer.moderation` 14/14, `customer.cuisines` 16/16,
+`marketing.heroPromotion` 40/40; `next build` clean in admin- and
+vendor-dashboard as of Phase 9 (neither changed in Phase 10).
+**The ERP and vendor pages were built, not walked in a browser** (no browser
+automation in that session; Clerk sign-in needed).
 
 Verified green as of the market-navigation pass: `pnpm check-types` 5/5,
 backend `vitest run` **695/695**, `customer.address` smoke **68/68** (per-city
@@ -1733,7 +1759,20 @@ list would pass every other check.
 - **Free-text "Other" category / vendor-created dietary tags.** Refused deliberately: a controlled vocabulary is what filters, facets and analytics run on, and a dietary tag is a *safety claim*. The right shape is a "request a tag" suggestion queue — not built.
 - **KYC / PEP screening / data-retention tooling** — blocked on business and legal decisions, not on code. Do not invent a retention period.
 - **City boundary/service-area Mapbox UI** and `Outlet.serviceMode` computation (`serviceMode`/`isUnzoned` were dropped as dead).
-- **Admin-side image moderation** — needs an `ImageModerationProvider`.
+- **Admin-side image moderation** — needs an `ImageModerationProvider`. Photo
+  takedown belongs with it: a soft-deleted or banned dish's public WebP master
+  stays fetchable by URL until then.
+- **Hard-delete integrity for dishes.** `Meal → MenuItem` and
+  `MealPlanMeal → Meal` are `onDelete: Cascade`, so a HARD delete of a dish
+  would silently empty meal plans (pinned as a `known(...)` line in
+  `meals.smoke.ts`). No application path hard-deletes a dish, meal, outlet or
+  vendor, so nothing reaches it today. The fix (`NoAction` on `MealPlanMeal.meal`,
+  which still lets a whole-vendor delete cascade) belongs in the meal-plan
+  cleanup in *Next up*, which reshapes `MealPlanMeal` anyway.
+- **Orphaned meal-image objects.** Deleting a replaced photo's two objects is
+  best-effort after commit and logs on failure; nothing sweeps what it misses.
+  Only the staging prefix has a lifecycle rule. Add a sweep when volume
+  justifies a job.
 
 ### External-API pause points
 Each is a hard stop where the user provisions keys; each is then one adapter file behind an existing seam.
