@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { describePlacement, zoneCoverageStatus } from "./vendor.placement"
+import { describePlacement, zoneCoverageStatus, toVendorOutletZone } from "./vendor.placement"
 import type { ResolvedZoneCapabilities } from "@repo/geo/types"
 
 /*
@@ -107,5 +107,45 @@ describe("zoneCoverageStatus", () => {
 
   it("never paints a paused zone as capable, however high its level", () => {
     expect(zoneCoverageStatus("FULL_OPERATIONS", "SUSPENDED")).toBe("PAUSED")
+  })
+})
+
+/*
+ * The outlet page's zone, as the VENDOR is sent it. The shared go-live status
+ * carries the capability `level` and `operationalStatus` for admin; neither
+ * may reach a vendor — only the public name and what they can do there.
+ */
+describe("toVendorOutletZone", () => {
+  const adminZone = {
+    id: "z-1", name: "Karen-Langata-SouthC-Upperhill Area",
+    level: "FULL_OPERATIONS", operationalStatus: "ACTIVE", onDemandAllowed: true,
+  }
+
+  it("sends exactly the vendor's keys — no level, no operational status, no ops name", () => {
+    const zone = toVendorOutletZone(adminZone, "Karen")
+    expect(Object.keys(zone).sort()).toEqual(["capabilities", "id", "isOperational", "name", "onDemandAllowed"])
+    expect(JSON.stringify(zone)).not.toMatch(/FULL_OPERATIONS|"level"|operationalStatus|Upperhill/)
+    expect(zone.name).toBe("Karen")
+  })
+
+  it("translates the level into what the vendor can do there", () => {
+    expect(toVendorOutletZone(adminZone, "Karen").capabilities)
+      .toEqual({ orders: true, weDeliver: true, selfDeliver: false, mealPlans: true })
+    expect(toVendorOutletZone({ ...adminZone, level: "MARKETPLACE" }, "Karen").capabilities)
+      .toMatchObject({ orders: true, weDeliver: false, mealPlans: false })
+  })
+
+  it("says a paused area is not operational without saying why", () => {
+    const zone = toVendorOutletZone({ ...adminZone, operationalStatus: "EMERGENCY", onDemandAllowed: false }, "Karen")
+    expect(zone.isOperational).toBe(false)
+    expect(JSON.stringify(zone)).not.toContain("EMERGENCY")
+  })
+
+  it("an unzoned outlet has no capabilities", () => {
+    const zone = toVendorOutletZone({ id: null, name: null, level: null, operationalStatus: null, onDemandAllowed: false }, null)
+    expect(zone).toEqual({
+      id: null, name: null, isOperational: false, onDemandAllowed: false,
+      capabilities: { orders: false, weDeliver: false, selfDeliver: false, mealPlans: false },
+    })
   })
 })

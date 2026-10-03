@@ -20,9 +20,10 @@ import {
 } from "./images.service"
 import { buildOriginalKey } from "@/lib/images/publicImage"
 import { resolveImageExtension } from "@/lib/images/uploadType"
-import { resolveGroupSelection, assertGroupCannotZeroOutDish } from "../lib/modifiers"
+import { assertGroupCannotZeroOutDish } from "../lib/modifiers"
 import {
   recomputeModifierFlagsForItems, MODIFIER_CONTENT_FLAG,
+  prepareDishGroups, applyDishGroups, currentDishGroupsForPricing,
 } from "./modifierGroup.service"
 import {
   normalizePrepTime, resolveOrdering, nextPosition, assertSectionName,
@@ -56,8 +57,11 @@ const serviceLog = logger.child({ module: "vendor-menu-service" })
 /** Which field a moderation hit came from. MenuItem has no flagDetails column,
  *  so the reason string carries the granularity, same as Outlet. */
 const MENU_FLAG_BY_FIELD: Record<string, string> = {
-  name: "INAPPROPRIATE_NAME",
-  bio : "INAPPROPRIATE_DESCRIPTION",
+  name       : "INAPPROPRIATE_NAME",
+  bio        : "INAPPROPRIATE_DESCRIPTION",
+  // Shown to customers beside the price (storefront card, meal page), so it
+  // is screened like any other dish text. It used to be the one that wasn't.
+  portionSize: "INAPPROPRIATE_PORTION",
 }
 
 async function loadActiveVendor(vendorId: string) {
@@ -330,7 +334,7 @@ const ITEM_SELECT = {
       group   : {
         select: {
           id: true, name: true, description: true, minSelect: true, maxSelect: true,
-          reviewStatus: true, deletedAt: true,
+          reviewStatus: true, rejectionReason: true, deletedAt: true,
           options: {
             where  : { deletedAt: null },
             orderBy: { position: "asc" },
@@ -478,6 +482,10 @@ async function presentMenuItem(
         maxSelect  : link.group.maxSelect,
         required   : link.group.minSelect >= 1,
         flagged    : link.group.reviewStatus === "FLAGGED",
+        /** The group's own moderation verdict — a dish owns its groups, so the
+         *  dish page is where a send-back is read and answered. */
+        reviewStatus   : link.group.reviewStatus,
+        rejectionReason: link.group.rejectionReason,
         position   : link.position,
         options    : link.group.options,
       })),
@@ -645,10 +653,26 @@ export interface UpsertMenuItemInput {
   dietaryTagIds ?: unknown
   outletIds     ?: unknown
   priceOverrides?: unknown
+  /** The dish's OWN option groups, in order: [{ id?, name, description,
+   *  minSelect, maxSelect, options: [{ id?, name, priceDeltaMinor, isAvailable }] }].
+   *  On update, ABSENT leaves the groups as they are (null clears them). */
+  modifierGroups?: unknown
+  /** The shared-library field this replaced. Refused, never ignored: a client
+   *  still sending it would otherwise believe it attached groups it did not. */
   modifierGroupIds?: unknown
 }
 
-async function screenMenuItem(name: string, description: string | null): Promise<string[]> {
+function assertNoLegacyGroupIds(input: UpsertMenuItemInput) {
+  if (input.modifierGroupIds !== undefined) {
+    throw new ApiError(
+      400,
+      "modifierGroupIds is no longer accepted — send the dish's option groups as modifierGroups.",
+      "UNSUPPORTED_FIELD",
+    )
+  }
+}
+
+async function screenMenuItem(name: string, description: string | null, portionSize: string | null): Promise<string[]> {
   /*
    * Same non-blocking stance as outlets and profiles: a hit raises a flag for
    * review and never refuses the save. The vendor's meal is created either way,
@@ -656,7 +680,8 @@ async function screenMenuItem(name: string, description: string | null): Promise
    */
   const hits = await getModerationProvider().screenText({
     name,
-    bio: description ?? undefined,
+    bio        : description ?? undefined,
+    portionSize: portionSize ?? undefined,
   })
   const flags: string[] = []
   for (const hit of hits) {
@@ -714,17 +739,17 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
 
   const sectionId       = await resolveSectionId(vendorId, input.sectionId)
   const taxCategoryId   = await resolveTaxCategoryId(vendor.countryId, input.taxCategoryId)
+  assertNoLegacyGroupIds(input)
+  const dishGroups = await prepareDishGroups(vendorId, null, input.modifierGroups ?? [])
   // Checked at the dish's CHEAPEST outlet price, not the catalogue price — an
   // outlet override below the base is where options could reach zero.
-  const modifierGroupIds = await resolveModifierGroups(
-    vendorId, lowestEffectivePriceMinor(basePriceMinor, outletIds, overrides), input.modifierGroupIds,
-  )
+  assertGroupCannotZeroOutDish(lowestEffectivePriceMinor(basePriceMinor, outletIds, overrides), dishGroups.groups)
   const { cuisineIds, dietaryTagIds } = await resolveSelectedFoodTags(vendor.countryId, {
     cuisineIds   : input.cuisineIds,
     dietaryTagIds: input.dietaryTagIds,
   }, { maxCuisines: MAX_MEAL_CUISINES, maxDietaryTags: MAX_MEAL_DIETARY_TAGS })
 
-  const flagReasons = await screenMenuItem(name, description)
+  const flagReasons = await screenMenuItem(name, description, portionSize)
 
   // End of its section, never the top — see nextPosition.
   const last = await prisma.menuItem.findFirst({
@@ -774,14 +799,10 @@ export async function createMenuItem(vendorId: string, input: UpsertMenuItemInpu
       })
     }
 
-    if (modifierGroupIds.length > 0) {
-      await tx.menuItemModifierGroup.createMany({
-        data: modifierGroupIds.map((groupId, position) => ({
-          menuItemId: item.id, groupId, position,
-        })),
-      })
-      // An already-flagged group flags the dish too, so it lands in the
-      // existing meal review queue rather than needing one of its own.
+    if (dishGroups.groups.length > 0) {
+      await applyDishGroups(tx, vendorId, item.id, dishGroups)
+      // A group whose words were flagged flags the dish too, so it lands in
+      // the existing meal review queue rather than needing one of its own.
       await recomputeModifierFlagsForItems([item.id], tx)
     }
 
@@ -823,7 +844,7 @@ export async function updateMenuItem(
   const existing = await prisma.menuItem.findFirst({
     where : { id: itemId, vendorId, deletedAt: null },
     select: {
-      id: true, name: true, description: true,
+      id: true, name: true, description: true, portionSize: true,
       reviewStatus: true, flagReasons: true, adminStatus: true, taxCategoryId: true,
       images: { select: { id: true, originalKey: true, imageKey: true } },
     },
@@ -867,10 +888,17 @@ export async function updateMenuItem(
   const taxCategoryId = input.taxCategoryId === undefined
     ? existing.taxCategoryId
     : await resolveTaxCategoryId(vendor.countryId, input.taxCategoryId)
+  assertNoLegacyGroupIds(input)
+  // Absent = leave this dish's groups alone, the same rule as taxCategoryId.
+  const dishGroups = input.modifierGroups === undefined
+    ? null
+    : await prepareDishGroups(vendorId, itemId, input.modifierGroups)
   // Checked at the dish's CHEAPEST outlet price, not the catalogue price — an
-  // outlet override below the base is where options could reach zero.
-  const modifierGroupIds = await resolveModifierGroups(
-    vendorId, lowestEffectivePriceMinor(basePriceMinor, outletIds, overrides), input.modifierGroupIds,
+  // outlet override below the base is where options could reach zero. Run
+  // even when the groups are not resubmitted: a price cut alone can do it.
+  assertGroupCannotZeroOutDish(
+    lowestEffectivePriceMinor(basePriceMinor, outletIds, overrides),
+    dishGroups ? dishGroups.groups : await currentDishGroupsForPricing(itemId),
   )
   const { cuisineIds, dietaryTagIds } = await resolveSelectedFoodTags(vendor.countryId, {
     cuisineIds   : input.cuisineIds,
@@ -883,7 +911,8 @@ export async function updateMenuItem(
    * Any edit that DOES re-screen clears a prior rejection for a fresh look —
    * the same convention updateOutlet and upsertVendorProfile follow.
    */
-  const textChanged = name !== existing.name || description !== existing.description
+  const textChanged =
+    name !== existing.name || description !== existing.description || portionSize !== existing.portionSize
   /*
    * Re-screening replaces the whole reason array, so the modifier flag has to
    * be carried across deliberately — it comes from the attached groups, not
@@ -894,7 +923,7 @@ export async function updateMenuItem(
     ? [MODIFIER_CONTENT_FLAG]
     : []
   const flagReasons = textChanged
-    ? [...await screenMenuItem(name, description), ...carriedModifierFlag]
+    ? [...await screenMenuItem(name, description, portionSize), ...carriedModifierFlag]
     : existing.flagReasons
   const reviewStatus = textChanged
     ? (flagReasons.length > 0 ? ProfileReviewStatus.FLAGGED : ProfileReviewStatus.AUTO_APPROVED)
@@ -971,18 +1000,12 @@ export async function updateMenuItem(
     }
 
     /*
-     * Group attachments are replaced wholesale — this is a full-form save, so
-     * the submitted list IS the list. Unlike Meal rows there is nothing to
-     * preserve: a join row carries only the fact that a dish currently offers
-     * a group, plus its order.
+     * The dish's own groups: edited in place by id, added, or removed — this
+     * is a full-form save, so the submitted list IS the list. Only this dish's
+     * groups can be touched (prepareDishGroups refuses any other id).
      */
-    await tx.menuItemModifierGroup.deleteMany({ where: { menuItemId: itemId } })
-    if (modifierGroupIds.length > 0) {
-      await tx.menuItemModifierGroup.createMany({
-        data: modifierGroupIds.map((groupId, position) => ({ menuItemId: itemId, groupId, position })),
-      })
-    }
-    await recomputeModifierFlagsForItems([itemId], tx)
+    if (dishGroups) await applyDishGroups(tx, vendorId, itemId, dishGroups)
+    await recomputeModifierFlagsForItems([itemId], tx, { groupRescreened: dishGroups?.rescreened ?? false })
 
     await writeImageRows(tx, itemId, {
       removedIds: imageDiff.removed.map((r) => r.id),
@@ -1001,36 +1024,6 @@ export async function updateMenuItem(
 
   serviceLog.info({ vendorId, menuItemId: itemId, outlets: outletIds.length }, "Menu item updated")
   return getMenuItem(vendorId, itemId, offers)
-}
-
-/**
- * The groups this dish offers, validated against the vendor's own library.
- *
- * The zero-out check runs HERE rather than when a group is saved, because it
- * is the only place both halves are known: a group of discounting options is
- * perfectly fine on an expensive dish and ruinous on a cheap one, so the
- * question can only be answered against a specific base price.
- */
-async function resolveModifierGroups(
-  vendorId      : string,
-  basePriceMinor: number,
-  value         : unknown,
-): Promise<string[]> {
-  const owned = await prisma.modifierGroup.findMany({
-    where : { vendorId, deletedAt: null },
-    select: {
-      id: true, name: true, minSelect: true,
-      options: { where: { deletedAt: null }, select: { priceDeltaMinor: true } },
-    },
-  })
-
-  const groupIds = resolveGroupSelection(value, owned.map((g) => g.id))
-  if (groupIds.length === 0) return []
-
-  const chosen = owned.filter((g) => groupIds.includes(g.id))
-  assertGroupCannotZeroOutDish(basePriceMinor, chosen)
-
-  return groupIds
 }
 
 /**

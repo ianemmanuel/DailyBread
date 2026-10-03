@@ -12,9 +12,12 @@ import {
   handleDeleteMenuItem,
   handleListModifierGroups,
   handleGetModifierGroup,
-  handleCreateModifierGroup,
-  handleUpdateModifierGroup,
-  handleDeleteModifierGroup,
+  handleRetiredModifierGroupWrite,
+  handleListMenus,
+  handleListOutletMealsForMenu,
+  handleGetMenu,
+  handleCreateMenu,
+  handleUpdateMenu,
   handleSetModifierOptionAvailability,
   handleRenameMenuSection,
   handleDeleteMenuSection,
@@ -72,14 +75,25 @@ export function createMealsVendorRouter(deps: { offerPreview: OfferPreview }): R
   menuRouter.patch ("/items/:itemId/archive", handleSetMenuItemArchived)
   menuRouter.delete("/items/:itemId",         handleDeleteMenuItem)
 
-  //* Modifier groups — what a customer chooses ON a dish. A vendor-level
-  //* library, reusable across dishes, so this is its own resource rather than a
-  //* field nested under one meal.
+  //* Modifier groups — what a customer chooses ON a dish. Each belongs to one
+  //* dish and is WRITTEN with it (PUT /items/:itemId, `modifierGroups`). These
+  //* reads list them across the menu, which is what "copy an existing group"
+  //* starts from.
   menuRouter.get   ("/modifier-groups",          handleListModifierGroups)
-  menuRouter.post  ("/modifier-groups",          handleCreateModifierGroup)
   menuRouter.get   ("/modifier-groups/:groupId", handleGetModifierGroup)
-  menuRouter.put   ("/modifier-groups/:groupId", handleUpdateModifierGroup)
-  menuRouter.delete("/modifier-groups/:groupId", handleDeleteModifierGroup)
+  menuRouter.post  ("/modifier-groups",          handleRetiredModifierGroupWrite)
+  menuRouter.put   ("/modifier-groups/:groupId", handleRetiredModifierGroupWrite)
+  menuRouter.delete("/modifier-groups/:groupId", handleRetiredModifierGroupWrite)
+
+  //* Menus — an outlet's named selection of the meals it already sells. Owned
+  //* through the outlet; every handler checks ownership in the service. No
+  //* delete yet (not requested); no customer route reads these.
+  menuRouter.get ("/menus",              handleListMenus)
+  menuRouter.post("/menus",              handleCreateMenu)
+  //* Before /menus/:menuId, so the literal segment wins.
+  menuRouter.get ("/menus/outlet-meals", handleListOutletMealsForMenu)
+  menuRouter.get ("/menus/:menuId",      handleGetMenu)
+  menuRouter.put ("/menus/:menuId",      handleUpdateMenu)
 
   //* 86-ing one choice mid-shift, the option-level counterpart to meal
   //* availability below.

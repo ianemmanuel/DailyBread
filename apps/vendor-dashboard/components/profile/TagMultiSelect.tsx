@@ -27,10 +27,13 @@ interface Props {
   /** Shown instead of the chips when the vendor's country offers nothing. */
   emptyHint  : string
   disabled?  : boolean
+  /** Dietary tags select in the same green they are shown in (FoodTagChips),
+   *  so the two kinds read as different in the form too. */
+  tone?      : "cuisine" | "dietary"
 }
 
 export function TagMultiSelect({
-  label, hint, options, selected, onChange, max, emptyHint, disabled,
+  label, hint, options, selected, onChange, max, emptyHint, disabled, tone = "cuisine",
 }: Props) {
   const atCap = selected.length >= max
 
@@ -72,7 +75,11 @@ export function TagMultiSelect({
                 className={cn(
                   "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                   isSelected
-                    ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
+                    ? tone === "dietary"
+                      ? "border-success/40 bg-success-bg text-success-ink"
+                      // Foreground text: orange text on its own tint is too
+                      // low-contrast at 12px. The border and check carry it.
+                      : "border-primary bg-primary/10 text-foreground [&_svg]:text-primary"
                     : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
                   isDisabled && !isSelected && "cursor-not-allowed opacity-45 hover:text-[var(--muted-foreground)]",
                 )}

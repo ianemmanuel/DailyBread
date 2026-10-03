@@ -40,6 +40,16 @@
   --deep-foreground:     var(--color-neutral-0);
 
   --shadow-card: oklch(0.400 0.060 45 / 8%);
+
+  /* A FILLED success action (the Go live button). The shared --success
+     (oklch 0.58) is a status colour and reaches only 4.01:1 under white text —
+     below AA's 4.5:1 for a 14px label. This step is the same hue, darker:
+     5.17:1 under white. Hover goes darker still, never lighter. */
+  --success-strong:       oklch(0.520 0.140 148);
+  --success-strong-hover: oklch(0.470 0.130 148);
+  /* Green TEXT on the pale --success-bg tint (dietary tags): 5.56:1. The
+     shared --success manages only ~3.6:1 there. */
+  --success-ink:          oklch(0.470 0.130 148);
 }
 
 @theme {
@@ -79,6 +89,9 @@
   --color-success:                   var(--success);
   --color-success-foreground:        var(--success-foreground);
   --color-success-bg:                var(--success-bg);
+  --color-success-strong:            var(--success-strong);
+  --color-success-strong-hover:      var(--success-strong-hover);
+  --color-success-ink:               var(--success-ink);
   --color-warning:                   var(--warning);
   --color-warning-foreground:        var(--warning-foreground);
   --color-warning-bg:                var(--warning-bg);
@@ -103,7 +116,8 @@
   /* ── Sidebar nav item ── */
   .sidebar-item {
     @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
-           transition-all duration-200;
+           transition-all duration-200
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50;
     color: var(--muted-foreground);
   }
   .sidebar-item:hover {
@@ -111,14 +125,16 @@
     color: var(--foreground);
   }
 
+  /* The brand colour marks the current link (tint, bar, icon); the LABEL
+     stays foreground — brand-500 text on this ground is 2.77:1, under AA. */
   .sidebar-item-active {
     @apply font-semibold;
     background-color: color-mix(in oklch, var(--primary) 12%, transparent);
-    color: var(--primary);
+    color: var(--foreground);
   }
   .sidebar-item-active:hover {
     background-color: color-mix(in oklch, var(--primary) 16%, transparent);
-    color: var(--primary);
+    color: var(--foreground);
   }
 
   /* ── Stat card ── */

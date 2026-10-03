@@ -1,5 +1,5 @@
 import "server-only"
-import { revalidateTag } from "next/cache"
+import { expireTags } from "@/lib/cache/expire"
 import { backendFetch, BackendApiError } from "@/lib/api/server"
 import type { MenuContext, MenuItem, MenuItemListResult } from "@/lib/queries/menu"
 
@@ -15,12 +15,12 @@ import type { MenuContext, MenuItem, MenuItemListResult } from "@/lib/queries/me
 export const MENU_TAG = "vendor-menu"
 export const menuItemTag = (id: string) => `vendor-menu-item-${id}`
 
-/** After a lifecycle or availability change: the list and the dish page are
- *  server-rendered from cached reads, and a change the vendor just made must
- *  show on the next render, not a minute later. */
+/** After ANY menu write: the list, the meal form's context and the dish page
+ *  are server-rendered from cached reads, and a change the vendor just made
+ *  must show on the next render, not a minute later. Expires rather than marks
+ *  stale — see lib/cache/expire.ts for why that distinction is the bug. */
 export function revalidateMenuItem(itemId?: string) {
-  revalidateTag(MENU_TAG, "default")
-  if (itemId) revalidateTag(menuItemTag(itemId), "default")
+  expireTags(MENU_TAG, ...(itemId ? [menuItemTag(itemId)] : []))
 }
 
 const LIST_REVALIDATE = 60

@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server"
-import { revalidateTag } from "next/cache"
+import { expireTags } from "@/lib/cache/expire"
 import { NextRequest, NextResponse } from "next/server"
 
 const BACKEND = process.env.BACKEND_API_URL
@@ -28,8 +28,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const data = await res.json()
 
     if (res.ok) {
-      revalidateTag("vendor-outlets","default")
-      revalidateTag(`vendor-outlet-${id}`,"default")
+      expireTags("vendor-outlets")
+      expireTags(`vendor-outlet-${id}`)
     }
     return NextResponse.json(data, { status: res.status })
   } catch {

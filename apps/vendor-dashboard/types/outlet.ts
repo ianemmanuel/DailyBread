@@ -1,5 +1,5 @@
 import type {
-  OutletGoLiveStatus, OutletClearanceStatus, OutletGoLiveBlocker,
+  VendorOutletGoLiveStatus as OutletGoLiveStatus, OutletClearanceStatus, OutletGoLiveBlocker,
   OutletInspectionStatus, OutletInspectionRow, OutletMealPlanReadiness, OutletMealPlanBlocker,
 } from "@repo/types/vendor-app"
 export type {

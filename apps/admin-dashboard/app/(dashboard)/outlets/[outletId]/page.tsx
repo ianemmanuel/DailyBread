@@ -11,6 +11,7 @@ import { OutletGoLiveStatus } from "@/components/vendors/OutletGoLiveStatus"
 import { OutletDocumentsPanel } from "@/components/vendors/OutletDocumentsPanel"
 import { OutletMealPlanReadiness } from "@/components/vendors/OutletMealPlanReadiness"
 import { OutletInspectionsPanel } from "@/components/vendors/OutletInspectionsPanel"
+import { OutletMenusPanel, type AdminOutletMenu } from "@/components/vendors/OutletMenusPanel"
 import { AdminPermissions } from "@repo/types/admin-app"
 import type { AdminOutlet, OutletReviewStatus, AdminOutletDocumentRow, OutletInspectionRow } from "@/types"
 
@@ -61,7 +62,7 @@ export default async function OutletDetailPage({ params }: Props) {
     throw err
   }
 
-  const [outletDocuments, outletInspections] = await Promise.all([
+  const [outletDocuments, outletInspections, outletMenus] = await Promise.all([
     adminFetch<AdminOutletDocumentRow[]>(
       `/admin/v1/vendors/outlets/${outletId}/documents`,
       { next: { revalidate: 60, tags: [`outlet-${outletId}`] } },
@@ -70,6 +71,12 @@ export default async function OutletDetailPage({ params }: Props) {
       `/admin/v1/vendors/outlets/${outletId}/inspections`,
       { next: { revalidate: 60, tags: [`outlet-${outletId}`] } },
     ).catch(() => [] as OutletInspectionRow[]),
+    // Read only, under meals:read. A failed read stays null — never shown as
+    // "no menus".
+    canReadMeals
+      ? adminFetch<AdminOutletMenu[]>(`/admin/v1/vendors/meals/menus?outletId=${encodeURIComponent(outletId)}`)
+          .catch(() => null)
+      : Promise.resolve(undefined),
   ])
 
   return (
@@ -177,6 +184,8 @@ export default async function OutletDetailPage({ params }: Props) {
       {outlet.goLiveStatus && <OutletGoLiveStatus status={outlet.goLiveStatus} />}
 
       {outlet.mealPlanReadiness && <OutletMealPlanReadiness readiness={outlet.mealPlanReadiness} />}
+
+      {outletMenus !== undefined && <OutletMenusPanel menus={outletMenus} />}
 
       <OutletInspectionsPanel
         outletId={outletId}

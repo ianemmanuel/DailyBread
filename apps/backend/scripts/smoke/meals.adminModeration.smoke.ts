@@ -275,34 +275,54 @@ async function main() {
 
   try {
     // ════════════════════════════════════════════════════════════════════
-    console.log("  ── 1. a shared option group\n")
+    console.log("  ── 1. the same option group on three dishes — one copy each\n")
 
+    /*
+     * Groups belong to ONE dish (migration 20261003090000). The scenarios below
+     * are the ones this smoke has always run, with the vendor's wording edit
+     * applied to each dish's own copy of "Sauces" — exactly what a vendor does
+     * now — and every group verdict acting on the group of the dish it names.
+     */
     asVendor(vendorA.userId)
     const groupBody = (optionName: string) => ({
       name: `${MARKER} Sauces`, description: "Pick one", minSelect: 1, maxSelect: 1,
       options: [{ name: optionName, priceDeltaMinor: 0 }, { name: "Garlic", priceDeltaMinor: 500 }],
     })
-    const group = (await call("POST", G, groupBody("Mild"))).json.data as Json
-    /** Renames the first option IN PLACE (by id), as the dashboard does — the
-     *  vendor's edit that re-screens the group. */
-    const editGroup = async (optionName: string) => {
-      const [first, second] = (await call("GET", `${G}/${group.id}`)).json.data.options as Json[]
-      return call("PUT", `${G}/${group.id}`, {
-        ...groupBody(optionName),
-        options: [
-          { id: first!.id, name: optionName, priceDeltaMinor: 0 },
-          { id: second!.id, name: "Garlic", priceDeltaMinor: 500 },
-        ],
-      })
+    const dishBody = (name: string, groups: Json[]) => ({
+      name: `${MARKER} ${name}`, basePriceMinor: 10000, outletIds: [o1.id], modifierGroups: groups,
+    })
+    const dish = async (name: string) => {
+      const created = (await call("POST", "/api/vendor/v1/menu/items", dishBody(name, [groupBody("Mild")]))).json.data as Json
+      return { id: created.id as string, name, groupId: (created.modifierGroups as Json[])[0]!.id as string }
     }
-    check("a clean group is auto-approved", group?.reviewStatus === "AUTO_APPROVED", group)
+    const p1 = await dish("Plate One")
+    const p2 = await dish("Plate Two")
+    const p3 = await dish("Plate Three")
+    const [d1, d2, d3] = [p1.id, p2.id, p3.id]
+    /** Plate One's own group — the one every group verdict below acts on. */
+    const group = { id: p1.groupId }
+    check("three dishes, three independent groups", new Set([p1.groupId, p2.groupId, p3.groupId]).size === 3)
+    check("a clean group is auto-approved",
+      (await call("GET", `${G}/${group.id}`)).json.data?.reviewStatus === "AUTO_APPROVED")
 
-    const dish = async (name: string) => (await call("POST", "/api/vendor/v1/menu/items", {
-      name: `${MARKER} ${name}`, basePriceMinor: 10000, outletIds: [o1.id], modifierGroupIds: [group.id],
-    })).json.data.id as string
-    const d1 = await dish("Plate One")
-    const d2 = await dish("Plate Two")
-    const d3 = await dish("Plate Three")
+    /** Renames each dish's first option IN PLACE (by id), through that dish's
+     *  own save — the dashboard's only way to edit a group. Returns Plate One's
+     *  group as it now reads. */
+    const editGroup = async (optionName: string) => {
+      for (const d of [p1, p2, p3]) {
+        const current = ((await call("GET", `/api/vendor/v1/menu/items/${d.id}`)).json.data.modifierGroups as Json[])[0]!
+        const [first, second] = current.options as Json[]
+        await call("PUT", `/api/vendor/v1/menu/items/${d.id}`, dishBody(d.name, [{
+          ...groupBody(optionName),
+          id     : d.groupId,
+          options: [
+            { id: first!.id, name: optionName, priceDeltaMinor: 0 },
+            { id: second!.id, name: "Garlic", priceDeltaMinor: 500 },
+          ],
+        }]))
+      }
+      return call("GET", `${G}/${group.id}`)
+    }
     /* A control dish with no options, always sellable. Without it, blocking
      * every dish at the outlet hides the OUTLET (it has nothing to sell), and
      * every "dish is hidden" check below would pass for the wrong reason. */
@@ -320,7 +340,7 @@ async function main() {
     check("vendor wording that fails screening flags the group", flaggedEdit.json.data?.reviewStatus === "FLAGGED", flaggedEdit.json.data)
     {
       const [r1, r2, r3] = await Promise.all([review(d1), review(d2), review(d3)])
-      check("…and every dish sharing it is flagged with the modifier reason",
+      check("…and every dish whose group it is gets flagged with the modifier reason",
         [r1, r2].every((r) => r.reviewStatus === "FLAGGED" && r.flagReasons.includes("INAPPROPRIATE_MODIFIER")), { r1, r2 })
       check("…including the one an admin had approved (new content re-opens it)",
         r3.reviewStatus === "FLAGGED" && r3.flagReasons.includes("INAPPROPRIATE_MODIFIER"), r3)
@@ -372,7 +392,7 @@ async function main() {
       const detail = (await call("GET", `${M}/${d1}`)).json.data as Json
       const g = (detail.modifierGroups as Json[])[0]!
       check("the dish detail shows the group's own verdict",
-        g.reviewStatus === "FLAGGED" && g.blocksDish === true && g.usedByCount === 3, g)
+        g.reviewStatus === "FLAGGED" && g.blocksDish === true && g.usedByCount === 1, g)
 
       const noReason = await call("POST", `${M}/modifier-groups/${group.id}/send-back`, {})
       check("group send-back without a reason is refused", noReason.status === 400 && noReason.json.code === "REASON_REQUIRED", noReason.json)
@@ -387,10 +407,10 @@ async function main() {
       })
       check("…the vendor is told, with the reason and the meals it holds back",
         (await noteCount("MEAL_OPTIONS_REJECTED")) === before + 1 &&
-        !!note?.message.includes("Rename the first sauce.") && !!note?.message.includes("3 meals"), note)
-      const h2 = await hiddenEverywhere(d2)
-      check("…a sent-back group still blocks its dishes, on every customer path",
-        (await review(d2)).reviewStatus === "FLAGGED" && h2.outletVisible && h2.storefront && h2.detailHidden && h2.cartRefused, h2)
+        !!note?.message.includes("Rename the first sauce.") && !!note?.message.includes("1 meal"), note)
+      const h1 = await hiddenEverywhere(d1)
+      check("…a sent-back group still blocks its dish, on every customer path",
+        (await review(d1)).reviewStatus === "FLAGGED" && h1.outletVisible && h1.storefront && h1.detailHidden && h1.cartRefused, h1)
       await invariant("group sent back")
 
       // The OLD way to act on a modifier flag: send the dish back.
@@ -408,20 +428,20 @@ async function main() {
       check("a dish sent back over its options returns to the QUEUE, not straight to approved",
         r1.reviewStatus === "FLAGGED" && !r1.flagReasons.includes("INAPPROPRIATE_MODIFIER"), r1)
       check("automatic dishes clear on their own", r2.reviewStatus === "AUTO_APPROVED" && r3.reviewStatus === "AUTO_APPROVED", { r2, r3 })
-      check("…and are back on the storefront with the group", (await onStorefront(d2))?.modifierGroups[0]?.id === group.id)
+      check("…and are back on the storefront with their group", (await onStorefront(d2))?.modifierGroups[0]?.id === p2.groupId)
       check("…while the re-queued one stays hidden until an admin looks", !(await onStorefront(d1)))
       await invariant("group fixed by the vendor")
     }
 
     /* The re-queued dish is waiting for an ADMIN. No later group event may
      * clear it on its own: not the vendor editing the group again, and not an
-     * admin approving the group from another dish's page. */
+     * admin approving the group itself. */
     await editGroup("Mellow")
     check("a re-queued dish stays in the queue when the vendor edits the group again",
       (await review(d1)).reviewStatus === "FLAGGED")
     asAdmin(admin.id, [READ, MOD], SCOPE_A)
     await call("POST", `${M}/modifier-groups/${group.id}/approve`)
-    check("…and when an admin approves a group it shares",
+    check("…and when an admin approves its group",
       (await review(d1)).reviewStatus === "FLAGGED" && !(await onStorefront(d1)))
     check("…while its siblings are unaffected", (await review(d2)).reviewStatus === "AUTO_APPROVED")
     await invariant("re-queued dish, group approved")
@@ -447,12 +467,14 @@ async function main() {
       const ap = await call("POST", `${M}/modifier-groups/${group.id}/approve`)
       check("group approve → MANUALLY_APPROVED", ap.status === 200 && ap.json.data?.reviewStatus === "MANUALLY_APPROVED", ap.json)
       check("…the vendor is notified", (await noteCount("MEAL_OPTIONS_APPROVED")) === before + 1)
+      // Each dish's own group gets its own verdict.
+      for (const other of [p2.groupId, p3.groupId]) await call("POST", `${M}/modifier-groups/${other}/approve`)
       const [r1, r2, r3] = await Promise.all([review(d1), review(d2), review(d3)])
       check("…dishes it held back by screening alone clear in the same write",
         [r1, r2].every((r) => r.reviewStatus === "AUTO_APPROVED" && r.flagReasons.length === 0), { r1, r2 })
       check("…but a re-queued, sent-back dish stays in the queue for an admin (modifier reason dropped)",
         r3.reviewStatus === "FLAGGED" && r3.flagReasons.length === 0 && !(await onStorefront(d3)), r3)
-      check("…an admin-approved group is shown to customers", (await onStorefront(d2))?.modifierGroups[0]?.id === group.id)
+      check("…an admin-approved group is shown to customers", (await onStorefront(d2))?.modifierGroups[0]?.id === p2.groupId)
       await invariant("group approved")
       const again = await call("POST", `${M}/modifier-groups/${group.id}/approve`)
       check("approving it twice is refused", again.status === 400 && again.json.code === "ALREADY_APPROVED", again.json)
@@ -482,13 +504,15 @@ async function main() {
      * SELLABLE_MENU_ITEM_WHERE must still keep it off every customer path. */
     {
       asVendor(vendorA.userId)
-      const legacyGroup = (await call("POST", G, {
-        name: `${MARKER} Legacy Sides`, minSelect: 1, maxSelect: 1,
-        options: [{ name: "Rice", priceDeltaMinor: 0 }, { name: "Chips", priceDeltaMinor: 0 }],
+      const legacyDish = (await call("POST", "/api/vendor/v1/menu/items", {
+        name: `${MARKER} Legacy Plate`, basePriceMinor: 7000, outletIds: [o1.id],
+        modifierGroups: [{
+          name: `${MARKER} Legacy Sides`, minSelect: 1, maxSelect: 1,
+          options: [{ name: "Rice", priceDeltaMinor: 0 }, { name: "Chips", priceDeltaMinor: 0 }],
+        }],
       })).json.data as Json
-      const legacy = (await call("POST", "/api/vendor/v1/menu/items", {
-        name: `${MARKER} Legacy Plate`, basePriceMinor: 7000, outletIds: [o1.id], modifierGroupIds: [legacyGroup.id],
-      })).json.data.id as string
+      const legacy = legacyDish.id as string
+      const legacyGroup = (legacyDish.modifierGroups as Json[])[0]!
       check("control: the legacy dish is on sale before the bad state is planted", !!(await onStorefront(legacy)))
 
       await prisma.modifierGroup.update({ where: { id: legacyGroup.id }, data: { reviewStatus: "FLAGGED" } })
@@ -501,7 +525,6 @@ async function main() {
       check("…and returns once the group is cleared", !!(await onStorefront(legacy)))
       asVendor(vendorA.userId)
       await call("DELETE", `/api/vendor/v1/menu/items/${legacy}`)
-      await call("DELETE", `${G}/${legacyGroup.id}`)
     }
 
     asAdmin(admin.id, [READ, MOD], SCOPE_A)
@@ -515,6 +538,75 @@ async function main() {
       await purgesDuring(() => call("POST", `${M}/modifier-groups/${group.id}/approve`))
       const refused = await purgesDuring(() => call("POST", `${M}/modifier-groups/${group.id}/approve`))
       check("a REFUSED action purges nothing", refused.length === 0, refused)
+    }
+
+    console.log("\n  ── 3c. copies and unattached groups cannot bypass a verdict\n")
+
+    /*
+     * Groups belong to one meal since migration 20261003090000. Two paths that
+     * change brings into play: a COPY is new content (no ids), screened fresh;
+     * and a group attached to NO meal (left from the library era) is a copy
+     * source only. Neither may produce a visible group an admin has not cleared.
+     */
+    {
+      const I = "/api/vendor/v1/menu/items"
+      const sauces = (first: string) => ({
+        name: `${MARKER} Copy Sauces`, description: "Pick one", minSelect: 1, maxSelect: 1,
+        options: [{ name: first, priceDeltaMinor: 0 }, { name: "Garlic", priceDeltaMinor: 500 }],
+      })
+      const make = async (name: string, groups: Json[]) =>
+        (await call("POST", I, { name: `${MARKER} ${name}`, basePriceMinor: 9000, outletIds: [o1.id], modifierGroups: groups })).json.data as Json
+
+      asVendor(vendorA.userId)
+      const source = await make("Copy Source", [sauces("Smoky")])
+      const sourceGroup = (source.modifierGroups as Json[])[0]!
+      check("control: the source group passes the word filter", sourceGroup.reviewStatus === "AUTO_APPROVED", sourceGroup)
+
+      asAdmin(admin.id, [READ, MOD], SCOPE_A)
+      await call("POST", `${M}/modifier-groups/${sourceGroup.id}/send-back`, { reason: "Rename Smoky — misleading." })
+
+      asVendor(vendorA.userId)
+      const copy = await make("Copy Target", [sauces("Smoky")])
+      const copyGroup = (copy.modifierGroups as Json[])[0]!
+      const copyRow = await prisma.modifierGroup.findUniqueOrThrow({ where: { id: copyGroup.id }, select: { reviewStatus: true, flagReasons: true } })
+      check("a copy with the SAME words as a sent-back group is held, not auto-approved",
+        copyRow.reviewStatus === "FLAGGED" && copyRow.flagReasons.includes("MATCHES_UNRESOLVED_GROUP"), copyRow)
+      const h = await hiddenEverywhere(copy.id as string)
+      check("…so its meal is hidden on every customer path",
+        (await review(copy.id as string)).reviewStatus === "FLAGGED" && h.storefront && h.detailHidden && h.cartRefused, h)
+      await invariant("copy of a sent-back group")
+
+      const reworded = await make("Copy Reworded", [sauces("Chipotle")])
+      check("…while a copy whose words were CHANGED is screened on its own merits",
+        (reworded.modifierGroups as Json[])[0]!.reviewStatus === "AUTO_APPROVED" && !!(await onStorefront(reworded.id as string)))
+
+      // An unattached group: present only as something to copy.
+      const orphan = await prisma.modifierGroup.create({
+        data: {
+          vendorId: vendorA.id, name: `${MARKER} Orphan`, minSelect: 0, maxSelect: 1,
+          reviewStatus: "MANUALLY_REJECTED", rejectionReason: "No.", options: { create: [{ name: "Leftover" }] },
+        },
+        include: { options: true },
+      })
+      const listed = ((await call("GET", G)).json.data as Json[]).find((g) => g.id === orphan.id)
+      check("an unattached group is listed as a copy source with no meal", !!listed && listed.dish === null, listed)
+      const adopt = await call("PUT", `${I}/${copy.id}`, {
+        name: `${MARKER} Copy Target`, basePriceMinor: 9000, outletIds: [o1.id],
+        modifierGroups: [{ id: orphan.id, name: `${MARKER} Orphan`, minSelect: 0, maxSelect: 1, options: [{ id: orphan.options[0]!.id, name: "Leftover" }] }],
+      })
+      check("…it cannot be attached or edited through a meal by id (404 GROUP_NOT_FOUND)",
+        adopt.status === 404 && adopt.json.code === "GROUP_NOT_FOUND", adopt.json)
+      const toggle = await call("PATCH", `/api/vendor/v1/menu/modifier-options/${orphan.options[0]!.id}/availability`, { isAvailable: false })
+      check("…nor have a choice toggled (404)", toggle.status === 404 && toggle.json.code === "NOT_FOUND", toggle.json)
+      const orphanCopy = await make("Orphan Copy", [{ name: `${MARKER} Orphan`, minSelect: 0, maxSelect: 1, options: [{ name: "Leftover" }] }])
+      check("…and copying its rejected words is held too",
+        (await prisma.modifierGroup.findUniqueOrThrow({ where: { id: (orphanCopy.modifierGroups as Json[])[0]!.id } })).reviewStatus === "FLAGGED")
+      check("the orphan itself is untouched",
+        (await prisma.modifierGroup.findUniqueOrThrow({ where: { id: orphan.id } })).reviewStatus === "MANUALLY_REJECTED")
+
+      for (const d of [source, copy, reworded, orphanCopy]) await call("DELETE", `${I}/${d.id}`)
+      await prisma.modifierGroup.delete({ where: { id: orphan.id } })
+      await invariant("copies cleaned up")
     }
 
     // ════════════════════════════════════════════════════════════════════

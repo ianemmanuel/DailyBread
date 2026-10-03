@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { clientFetch } from "@/lib/api/client"
+import { useRefreshServerState } from "./server-refresh"
 import type {
   VendorProfile, UpsertVendorProfileRequest, VendorGoLiveStatus, VendorFoodTagOptions,
 } from "@repo/types/vendor-app"
@@ -52,28 +53,34 @@ function invalidateProfile(queryClient: ReturnType<typeof useQueryClient>) {
 
 export function useUpsertVendorProfile() {
   const queryClient = useQueryClient()
+  // Profile state and publication are go-live readiness; see server-refresh.ts.
+  const refreshServer = useRefreshServerState()
   return useMutation({
     mutationFn: (input: UpsertVendorProfileRequest) =>
       clientFetch<VendorProfile>("/api/profile", {
         method: "PUT",
         body  : JSON.stringify(input),
       }),
-    onSuccess: () => invalidateProfile(queryClient),
+    onSuccess: () => { invalidateProfile(queryClient); refreshServer() },
   })
 }
 
 export function usePublishProfile() {
   const queryClient = useQueryClient()
+  // Profile state and publication are go-live readiness; see server-refresh.ts.
+  const refreshServer = useRefreshServerState()
   return useMutation({
     mutationFn: () => clientFetch<VendorProfile>("/api/profile/publish", { method: "POST" }),
-    onSuccess : () => invalidateProfile(queryClient),
+    onSuccess : () => { invalidateProfile(queryClient); refreshServer() },
   })
 }
 
 export function useUnpublishProfile() {
   const queryClient = useQueryClient()
+  // Profile state and publication are go-live readiness; see server-refresh.ts.
+  const refreshServer = useRefreshServerState()
   return useMutation({
     mutationFn: () => clientFetch<VendorProfile>("/api/profile/unpublish", { method: "POST" }),
-    onSuccess : () => invalidateProfile(queryClient),
+    onSuccess : () => { invalidateProfile(queryClient); refreshServer() },
   })
 }

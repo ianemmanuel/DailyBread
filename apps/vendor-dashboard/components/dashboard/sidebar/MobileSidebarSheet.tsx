@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { Menu } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -10,10 +11,15 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { SidebarNav } from './SidebarNav'
+import { SidebarIdentity } from './SidebarIdentity'
 
 export function MobileSidebarSheet() {
+  // Controlled, so choosing a link closes the drawer instead of leaving it
+  // covering the page that just opened.
+  const [open, setOpen] = useState(false)
+
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         {/* Burger — only visible below lg breakpoint */}
         <Button
@@ -47,21 +53,16 @@ export function MobileSidebarSheet() {
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 overflow-hidden">
+        <div
+          className="flex-1 overflow-hidden"
+          onClickCapture={(e) => { if ((e.target as HTMLElement).closest('a')) setOpen(false) }}
+        >
           <SidebarNav />
         </div>
 
-        {/* Vendor profile */}
+        {/* Who is signed in */}
         <div className="shrink-0 border-t border-border/60 p-3">
-          <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/70 px-3 py-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
-              WK
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-foreground">Wanjiku's Kitchen</p>
-              <p className="truncate text-xs text-muted-foreground">wanjiku@example.com</p>
-            </div>
-          </div>
+          <SidebarIdentity />
         </div>
       </SheetContent>
     </Sheet>

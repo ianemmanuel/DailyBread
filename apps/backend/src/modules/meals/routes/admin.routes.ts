@@ -10,6 +10,8 @@ import {
   handleSetMenuItemStatus,
   handleApproveModifierGroup,
   handleSendBackModifierGroup,
+  handleListMenusForAdmin,
+  handleGetMenuForAdmin,
 } from "../controllers/meals.admin.controller"
 
 /*
@@ -31,6 +33,11 @@ const MEALS_MODERATE = requirePermission(AdminPermissions.VENDORS_MEALS_MODERATE
 mealsAdminRouter.get("/", MEALS_READ, handleListMenuItems)
 // Before "/:itemId", or the literal segment parses as an id and 404s.
 mealsAdminRouter.get("/export", MEALS_READ, handleExportMenuItemsCsv)
+// Vendor menus are READ-ONLY to the ERP: GET routes only, and the service has
+// no admin write function — a POST/PUT/DELETE here matches no route. Before
+// "/:itemId" for the same reason as /export.
+mealsAdminRouter.get("/menus",         MEALS_READ, handleListMenusForAdmin)
+mealsAdminRouter.get("/menus/:menuId", MEALS_READ, handleGetMenuForAdmin)
 mealsAdminRouter.get("/:itemId", MEALS_READ, handleGetMenuItem)
 mealsAdminRouter.post("/:itemId/approve",   MEALS_MODERATE, handleApproveMenuItem)
 mealsAdminRouter.post("/:itemId/send-back", MEALS_MODERATE, handleSendBackMenuItem)

@@ -587,14 +587,17 @@ export async function setMenuItemStatus(
   return updated
 }
 
-// ─── Option groups: a verdict on wording shared by many dishes ────────────────
+// ─── Option groups: a verdict on the group's own wording ─────────────────────
 
 /*
  * A ModifierGroup is screened like a dish and flagged like one, and a flag on
- * it re-flags every dish using it. Its verdict is its OWN, given here, because
- * the words live on the group and one group can sit on a dozen dishes:
- * approving each dish in turn could never clear the group, and the storefront
- * kept hiding it — a required choice silently gone from a dish on sale.
+ * it re-flags the dish it belongs to. Its verdict is its OWN, given here,
+ * because the words live on the group: approving the dish could never clear
+ * the group, and the storefront kept hiding it — a required choice silently
+ * gone from a dish on sale. (A group belongs to ONE dish since migration
+ * 20261003090000; before that one group could sit on a dozen. The code below
+ * still reads the dish list rather than assuming one, so it is correct either
+ * way.)
  *
  * Same shape as the dish verdict (approve / send back with a reason), same
  * permission, same scope rule — through the group's vendor, never re-derived —

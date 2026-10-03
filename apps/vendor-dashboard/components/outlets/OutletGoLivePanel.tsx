@@ -75,7 +75,7 @@ export function OutletGoLivePanel({ status }: { status: OutletGoLiveStatus }) {
           <p className="text-sm font-semibold text-[var(--foreground)]">This outlet is accepting orders</p>
           <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
             Live in {status.zone.name ?? "your area"}
-            {status.zone.level ? ` · ${humanLevel(status.zone.level)}` : ""}.
+            {describeCapabilities(status.zone.capabilities)}.
           </p>
         </div>
       </div>
@@ -120,11 +120,14 @@ export function OutletGoLivePanel({ status }: { status: OutletGoLiveStatus }) {
   )
 }
 
-function humanLevel(level: string): string {
-  return {
-    REGISTRATION_ONLY: "Registration only",
-    MARKETPLACE      : "On-demand meals",
-    PLATFORM_DELIVERY: "On-demand + platform delivery",
-    FULL_OPERATIONS  : "On-demand + meal plans",
-  }[level] ?? level
+/** What the vendor can do in this area, from the capability flags the server
+ *  sends — never from a zone level, which the vendor is not sent. */
+function describeCapabilities(caps: OutletGoLiveStatus["zone"]["capabilities"]): string {
+  const parts = [
+    caps.orders      && "on-demand orders",
+    caps.weDeliver   && "we deliver",
+    caps.selfDeliver && "you deliver",
+    caps.mealPlans   && "meal plans",
+  ].filter(Boolean)
+  return parts.length > 0 ? ` · ${parts.join(", ")}` : ""
 }

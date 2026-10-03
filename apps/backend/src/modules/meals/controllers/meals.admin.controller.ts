@@ -15,6 +15,7 @@ import {
   type MenuItemFilters,
 } from "../services/moderation.service"
 import { MENU_ITEM_FLAG_REASONS } from "../lib/moderation.rules"
+import { listMenusForAdmin, getMenuForAdmin } from "../services/menus.service"
 
 const FLAG_REASONS: ReadonlySet<string> = new Set(MENU_ITEM_FLAG_REASONS)
 
@@ -128,5 +129,24 @@ export const handleSendBackModifierGroup: RequestHandler = async (req, res, next
     const { adminUser, adminScope } = req as unknown as AdminRequest
     const group = await sendBackModifierGroup(req.params.groupId!, req.body?.reason, adminUser.id, adminScope)
     return sendSuccess(res, group, "Options sent back for revision")
+  } catch (err) { next(err) }
+}
+
+// ─── Menus: READ ONLY ────────────────────────────────────────────────────────
+
+//* GET /admin/v1/vendors/meals/menus?vendorId=&outletId=
+export const handleListMenusForAdmin: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminScope } = req as unknown as AdminRequest
+    const menus = await listMenusForAdmin(adminScope, { vendorId: req.query.vendorId, outletId: req.query.outletId })
+    return sendSuccess(res, menus, "Menus fetched")
+  } catch (err) { next(err) }
+}
+
+//* GET /admin/v1/vendors/meals/menus/:menuId
+export const handleGetMenuForAdmin: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminScope } = req as unknown as AdminRequest
+    return sendSuccess(res, await getMenuForAdmin(req.params.menuId!, adminScope), "Menu fetched")
   } catch (err) { next(err) }
 }

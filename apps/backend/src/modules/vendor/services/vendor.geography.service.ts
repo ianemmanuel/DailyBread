@@ -109,6 +109,23 @@ export async function resolveCapabilitiesForOutlet(
 }
 
 /**
+ * The name a VENDOR is shown for a zone.
+ *
+ * Resolution (here and in @repo/geo) rightly carries the OPERATIONAL
+ * `Zone.name` — admin screens and audit need it. `publicName` is the required
+ * second name written for people outside operations, and the vendor dashboard
+ * is outside operations: the dev database's ops name was
+ * "Karen-Langata-SouthC-Upperhill Area". So vendor-facing responses swap it in
+ * at their own boundary, the way customer.geo.service's withCity does, and the
+ * shared resolver stays untouched for admin.
+ */
+export async function getZonePublicName(zoneId: string | null | undefined): Promise<string | null> {
+  if (!zoneId) return null
+  const zone = await prisma.zone.findUnique({ where: { id: zoneId }, select: { publicName: true } })
+  return zone?.publicName ?? null
+}
+
+/**
  * Re-resolve Outlet.zoneId for every outlet in a city. Call after any admin
  * change to the operational geography that can move outlets between zones:
  * a zone boundary edit, a zone activate/deactivate, a new zone, or a city

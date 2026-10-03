@@ -248,6 +248,7 @@ export function ProfileForm() {
           />
           <TagMultiSelect
             label="Dietary options"
+            tone="dietary"
             options={foodTags?.dietaryTags ?? []}
             selected={dietaryTagIds}
             onChange={setDietaryTagIds}

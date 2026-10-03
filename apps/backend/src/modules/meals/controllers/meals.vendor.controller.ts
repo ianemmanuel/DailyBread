@@ -5,9 +5,6 @@ import { ApiError } from "@/middleware/error"
 import {
   listModifierGroups,
   getModifierGroup,
-  createModifierGroup,
-  updateModifierGroup,
-  deleteModifierGroup,
   setModifierOptionAvailability,
 } from "../services/modifierGroup.service"
 import {
@@ -28,6 +25,9 @@ import {
   setMenuItemArchived,
   deleteMenuItem,
 } from "../services/menu.service"
+import {
+  listMenus, listOutletMealsForMenu, getMenu, createMenu, updateMenu,
+} from "../services/menus.service"
 import type { VendorOffers } from "../lib/pricing/offers"
 
 /*
@@ -151,6 +151,13 @@ function menuItemInputFrom(body: Record<string, unknown> | undefined) {
     dietaryTagIds : body?.dietaryTagIds,
     outletIds     : body?.outletIds,
     priceOverrides: body?.priceOverrides,
+    // The dish's own groups. Passed as received and validated field by field
+    // in normalizeDishGroups — never spread into a write, so a client cannot
+    // set a group's reviewStatus or flagReasons through it.
+    modifierGroups: body?.modifierGroups,
+    // Forwarded only so the service can REFUSE it (it was replaced by
+    // modifierGroups); dropping it here would let an old client think it
+    // attached groups it never did.
     modifierGroupIds: body?.modifierGroupIds,
   }
 }
@@ -207,21 +214,6 @@ export const handleDeleteMenuItem: RequestHandler = async (req, res, next) => {
 
 // ─── Modifier groups ─────────────────────────────────────────────────────────
 
-/*
- * Same field-by-field rule as the meal body above, and it matters more here:
- * a spread would let a client set reviewStatus or flagReasons on a group and
- * clear its own moderation flag.
- */
-function modifierGroupInputFrom(body: Record<string, unknown> | undefined) {
-  return {
-    name       : body?.name,
-    description: body?.description,
-    minSelect  : body?.minSelect,
-    maxSelect  : body?.maxSelect,
-    options    : body?.options,
-  }
-}
-
 //* GET /vendor/v1/menu/modifier-groups
 export const handleListModifierGroups: RequestHandler = async (req, res, next) => {
   try {
@@ -237,30 +229,21 @@ export const handleGetModifierGroup: RequestHandler = async (req, res, next) => 
   } catch (err) { next(err) }
 }
 
-//* POST /vendor/v1/menu/modifier-groups
-export const handleCreateModifierGroup: RequestHandler = async (req, res, next) => {
-  try {
-    const group = await createModifierGroup(await vendorIdOf(req), modifierGroupInputFrom(req.body))
-    return sendSuccess(res, group, "Option group created", 201)
-  } catch (err) { next(err) }
-}
-
-//* PUT /vendor/v1/menu/modifier-groups/:groupId
-export const handleUpdateModifierGroup: RequestHandler = async (req, res, next) => {
-  try {
-    const group = await updateModifierGroup(
-      await vendorIdOf(req), req.params.groupId!, modifierGroupInputFrom(req.body),
-    )
-    return sendSuccess(res, group, "Option group updated")
-  } catch (err) { next(err) }
-}
-
-//* DELETE /vendor/v1/menu/modifier-groups/:groupId
-export const handleDeleteModifierGroup: RequestHandler = async (req, res, next) => {
-  try {
-    const result = await deleteModifierGroup(await vendorIdOf(req), req.params.groupId!)
-    return sendSuccess(res, result, "Option group removed")
-  } catch (err) { next(err) }
+/*
+ * POST /modifier-groups, PUT and DELETE /modifier-groups/:groupId — retired.
+ *
+ * A group belongs to one dish now and is written only with that dish's save
+ * (PUT /items/:itemId with `modifierGroups`). A standalone create would make a
+ * group with no dish, and a standalone edit was exactly the path that changed
+ * other dishes behind the vendor's back. 410 rather than 404, so a stale
+ * client is told what changed instead of guessing at a typo.
+ */
+export const handleRetiredModifierGroupWrite: RequestHandler = (_req, _res, next) => {
+  next(new ApiError(
+    410,
+    "Option groups are now saved with their meal — edit them on the meal itself.",
+    "GROUPS_BELONG_TO_MEALS",
+  ))
 }
 
 //* PATCH /vendor/v1/menu/modifier-options/:optionId/availability — 86-ing one
@@ -316,5 +299,61 @@ export const handleReorderMenuItems: RequestHandler = async (req, res, next) => 
       : null
     const result = await reorderMenuItems(await vendorIdOf(req), sectionId, req.body?.itemIds)
     return sendSuccess(res, result, "Dishes rearranged")
+  } catch (err) { next(err) }
+}
+
+// ─── Menus ───────────────────────────────────────────────────────────────────
+
+/*
+ * Field by field, never spread (principle 7). `outletId` is mapped on update
+ * too — only so the service can REFUSE a change, rather than a dropped field
+ * letting a client believe the menu moved (bug class #1).
+ */
+function menuInputFrom(body: Record<string, unknown> | undefined) {
+  return {
+    outletId   : body?.outletId,
+    name       : body?.name,
+    description: body?.description,
+    imageKey   : body?.imageKey,
+    mealIds    : body?.mealIds,
+  }
+}
+
+//* GET /vendor/v1/menu/menus?outletId=
+export const handleListMenus: RequestHandler = async (req, res, next) => {
+  try {
+    const menus = await listMenus(await vendorIdOf(req), { outletId: req.query.outletId })
+    return sendSuccess(res, menus, "Menus fetched")
+  } catch (err) { next(err) }
+}
+
+//* GET /vendor/v1/menu/menus/outlet-meals?outletId= — what a menu there may list
+export const handleListOutletMealsForMenu: RequestHandler = async (req, res, next) => {
+  try {
+    const result = await listOutletMealsForMenu(await vendorIdOf(req), req.query.outletId)
+    return sendSuccess(res, result, "Meals fetched")
+  } catch (err) { next(err) }
+}
+
+//* GET /vendor/v1/menu/menus/:menuId
+export const handleGetMenu: RequestHandler = async (req, res, next) => {
+  try {
+    return sendSuccess(res, await getMenu(await vendorIdOf(req), req.params.menuId!), "Menu fetched")
+  } catch (err) { next(err) }
+}
+
+//* POST /vendor/v1/menu/menus
+export const handleCreateMenu: RequestHandler = async (req, res, next) => {
+  try {
+    const menu = await createMenu(await vendorIdOf(req), menuInputFrom(req.body))
+    return sendSuccess(res, menu, "Menu created", 201)
+  } catch (err) { next(err) }
+}
+
+//* PUT /vendor/v1/menu/menus/:menuId
+export const handleUpdateMenu: RequestHandler = async (req, res, next) => {
+  try {
+    const menu = await updateMenu(await vendorIdOf(req), req.params.menuId!, menuInputFrom(req.body))
+    return sendSuccess(res, menu, "Menu updated")
   } catch (err) { next(err) }
 }

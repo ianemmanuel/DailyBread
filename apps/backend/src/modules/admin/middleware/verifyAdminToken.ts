@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import type { AuthenticatedAdminRequest } from "@repo/types/backend"
 
-import { verifyClerkJwt } from "@/lib/clerk"
+import { verifyClerkJwt, describeJwtFailure } from "@/lib/clerk"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
 import { logger } from "@/lib/pino/logger"
@@ -35,7 +35,8 @@ export async function verifyAdminToken(req: Request, _res: Response, next: NextF
     ;(req as AuthenticatedAdminRequest).adminClerkUserId = verified.clerkUserId
     next()
   } catch (err) {
-    authLog.debug({ err }, "Token verification failed")
+    // Classified, never the token or its claims — see describeJwtFailure.
+    authLog.warn({ path: req.originalUrl.split("?")[0], ...describeJwtFailure(err) }, "Token verification failed")
     next(new ApiError(HttpStatus.UNAUTHORIZED, "Unauthorized", "INVALID_TOKEN"))
   }
 }

@@ -1924,6 +1924,7 @@ model Outlet {
   zone                     Zone?                       @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   meals                    Meal[]
   mealPlans                MealPlan[]
+  menus                    Menu[]
   discounts                DiscountOutlet[]
   documents                OutletDocument[]
   inspections              OutletInspection[]
@@ -2258,6 +2259,11 @@ model MenuItem {
   //* CountryTaxRate. A vendor in a flat-rate market never sees this field.
   taxCategoryId  String?
   //* Photographs live in MenuItemImage — position 0 is the main image.
+  //*
+  //* Free-text description of how much ONE order of this dish is ("Serves 2",
+  //* "500 g"), max 60 chars, shown to customers beside the price. Purely
+  //* descriptive: it changes no price, stock or option rule, and it is the
+  //* same at every outlet. A choice of sizes is a ModifierGroup, not this.
   portionSize    String?
 
   //* Where this dish sits INSIDE its section. Authored, never alphabetical —
@@ -2405,13 +2411,76 @@ model Meal {
   outlet    Outlet         @relation(fields: [outletId], references: [id], onDelete: Cascade)
   menuItem  MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
   mealPlans MealPlanMeal[]
+  menus     MenuMeal[]
 
   @@unique([outletId, menuItemId])
+  //* The target of MenuMeal's composite FK: a menu row names its OUTLET, and
+  //* this is what makes a meal from another outlet structurally unlinkable.
+  @@unique([id, outletId])
   @@index([outletId])
   @@index([menuItemId])
   @@index([adminStatus])
   @@index([deletedAt])
   @@index([createdAt])
+}
+
+//* ─── MENUS ─────────────────────────────────────────────────────────────────
+//*
+//* A Menu is ONE outlet's named, branded selection of the dishes that outlet
+//* already sells ("Breakfast", "All day"). It owns nothing about a dish: it
+//* REFERENCES that outlet's Meal rows, so price, availability, moderation and
+//* options stay exactly where they are, and grouping comes from each dish's
+//* existing MenuSection. An outlet may have several menus. (Not MenuSection,
+//* which is a vendor-wide heading, and not MenuItem, which is the dish.)
+//*
+//* Vendor-facing and ERP-readable only. No customer read touches this table,
+//* and nothing a customer sees changes because a menu exists. Scheduling,
+//* publishing and deletion are deliberately not modelled yet.
+//*
+//* Ownership is the OUTLET's (outlet.vendorId) — not copied onto the menu, so
+//* it cannot disagree. The logo is a single image on the meal-photo pipeline:
+//* the original kept privately under menu-images/<vendorId>/, a re-encoded
+//* public WebP master under menus/; keys only, never URLs.
+model Menu {
+  id          String  @id @default(uuid())
+  outletId    String
+  name        String
+  description String?
+
+  imageOriginalKey String @unique
+  imageKey         String @unique
+  imageWidth       Int
+  imageHeight      Int
+  imageBlurDataUrl String
+
+  vendorUpdatedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  outlet Outlet     @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  meals  MenuMeal[]
+
+  //* The target of MenuMeal's composite FK.
+  @@unique([id, outletId])
+  @@index([outletId])
+}
+
+//* Which of its outlet's meals a menu lists. `outletId` is carried on the row
+//* and BOTH foreign keys include it, so the database itself refuses a meal
+//* from a different outlet than the menu's — the same structural guarantee
+//* the finance module uses to make cross-country routing impossible.
+model MenuMeal {
+  menuId    String
+  mealId    String
+  outletId  String
+  createdAt DateTime @default(now())
+
+  menu Menu @relation(fields: [menuId, outletId], references: [id, outletId], onDelete: Cascade)
+  meal Meal @relation(fields: [mealId, outletId], references: [id, outletId], onDelete: Cascade)
+
+  @@id([menuId, mealId])
+  @@index([mealId])
+  @@index([outletId])
 }
 
 //* ─── MODIFIERS ─────────────────────────────────────────────────────────────
@@ -2426,10 +2495,15 @@ model Meal {
 //* tables would mean two pricing paths, two forms and two order-line shapes,
 //* and every future rule (a discount, a tax category) written twice.
 //*
-//* Groups are VENDOR-scoped and reusable: one "Sauces" group attached to
-//* twelve dishes, edited once. That reuse is the whole reason a vendor with a
-//* real menu can maintain this at all, and it is what Deliveroo, Toast, Square
-//* and Olo all do.
+//* Groups belong to ONE dish (MenuItemModifierGroup.groupId is unique). They
+//* used to be a vendor-wide library shared across dishes, and that made two
+//* things impossible: a "Size" whose prices differ between two dishes, and
+//* editing one dish's options without silently changing every other dish that
+//* shared them (including pushing a cheaper dish's price below zero, which no
+//* group-level save could see). Reuse is now COPYING: the dish form starts a
+//* new group from an existing one, and the copy is independent from then on.
+//* `vendorId` stays — it is the ownership and moderation-scope key — but group
+//* names are unique only within a dish, which the service enforces.
 //*
 //* Deliberately NOT here, and each is a real decision rather than an oversight:
 //*   - NESTED modifiers (an option opening its own group, DoorDash's
@@ -2473,7 +2547,6 @@ model ModifierGroup {
   options   ModifierOption[]
   menuItems MenuItemModifierGroup[]
 
-  @@unique([vendorId, name])
   @@index([vendorId])
   @@index([reviewStatus])
   @@index([deletedAt])
@@ -2511,10 +2584,12 @@ model ModifierOption {
   @@index([deletedAt])
 }
 
-//* Which dishes use which group. Carries the per-dish ORDER only: the
-//* selection rule belongs to the group, so the same group behaves identically
-//* everywhere it appears. A vendor wanting different rules makes a second
-//* group, which keeps "what does this group do" a question with one answer.
+//* Which dish a group belongs to, and where on it. `groupId` is UNIQUE: a
+//* group is owned by exactly one dish, so editing it can never reach another.
+//* Kept as a join (rather than a menuItemId column on the group) so every
+//* read path — storefront, cart, moderation — is unchanged. A group with no
+//* row here is an orphan left from the shared-library era: never shown to a
+//* customer, still offered to the vendor as something to copy.
 model MenuItemModifierGroup {
   menuItemId String
   groupId    String
@@ -2524,7 +2599,7 @@ model MenuItemModifierGroup {
   group    ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@id([menuItemId, groupId])
-  @@index([groupId])
+  @@unique([groupId])
 }
 
 //* ─── DISCOUNTS ─────────────────────────────────────────────────────────────

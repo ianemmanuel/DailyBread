@@ -4,11 +4,12 @@ import { logger } from "@/lib/pino/logger"
 import { R2Service } from "@/lib/r2/r2.service"
 import { publicMediaStorage } from "@/lib/storage/publicMedia.storage"
 import { processPublicBoundedImage } from "@/lib/images/publicImage"
-import { DISH_PHOTO_SPEC } from "@/lib/images/transform"
+import { DISH_PHOTO_SPEC, MENU_LOGO_SPEC, type BoundedImageSpec } from "@/lib/images/transform"
 import { MAX_IMAGE_SIZE_BYTES } from "@/lib/images/uploadType"
 import {
   MEAL_PUBLIC_PREFIX, mealUploadPrefix, originalKeyForStaged,
 } from "../lib/images.rules"
+import { MENU_PUBLIC_PREFIX, menuOriginalKeyForStaged } from "../lib/menus.rules"
 
 /*
  * Dish photographs: turning a staged upload into a saved image, and back into
@@ -54,14 +55,44 @@ const REJECTED_UPLOAD_CODES = new Set([
   "FILE_TOO_LARGE", "UNSUPPORTED_MEDIA_TYPE", "IMAGE_TOO_SMALL", "IMAGE_TOO_LARGE", "EMPTY_FILE",
 ])
 
-async function publishOne(vendorId: string, stagedKey: string, position: number): Promise<PublishedImage> {
+/**
+ * What differs between the images this pipeline publishes: where the public
+ * master goes, how big it is, and where the private original is kept. The
+ * STAGING prefix is the same for all of them (one presign endpoint, one R2
+ * lifecycle rule) and so is everything else — validation, decoding, the
+ * prefix guards, cleanup — so a menu logo is not a second pipeline.
+ */
+export interface ImageProfile {
+  publicPrefix  : string
+  spec          : BoundedImageSpec
+  originalKeyFor: (stagedKey: string, vendorId: string) => string
+}
+
+export const MEAL_PHOTO_PROFILE: ImageProfile = {
+  publicPrefix  : MEAL_PUBLIC_PREFIX,
+  spec          : DISH_PHOTO_SPEC,
+  originalKeyFor: originalKeyForStaged,
+}
+
+export const MENU_LOGO_PROFILE: ImageProfile = {
+  publicPrefix  : MENU_PUBLIC_PREFIX,
+  spec          : MENU_LOGO_SPEC,
+  originalKeyFor: menuOriginalKeyForStaged,
+}
+
+async function publishOne(
+  vendorId : string,
+  stagedKey: string,
+  position : number,
+  profile  : ImageProfile,
+): Promise<PublishedImage> {
   let processed
   try {
     processed = await processPublicBoundedImage({
       sourceKey   : stagedKey,
       sourcePrefix: mealUploadPrefix(vendorId),
-      publicPrefix: MEAL_PUBLIC_PREFIX,
-      spec        : DISH_PHOTO_SPEC,
+      publicPrefix: profile.publicPrefix,
+      spec        : profile.spec,
       maxBytes    : MAX_IMAGE_SIZE_BYTES,
     })
   } catch (err) {
@@ -74,7 +105,7 @@ async function publishOne(vendorId: string, stagedKey: string, position: number)
   // The original is kept (privately) so a future master size or crop can be
   // produced without asking the vendor again. A server-side copy: the bytes
   // never leave R2.
-  const originalKey = originalKeyForStaged(stagedKey, vendorId)
+  const originalKey = profile.originalKeyFor(stagedKey, vendorId)
   try {
     await R2Service.copyObject(stagedKey, originalKey)
   } catch (err) {
@@ -90,11 +121,12 @@ async function publishOne(vendorId: string, stagedKey: string, position: number)
 export async function publishStagedImages(
   vendorId: string,
   staged  : ReadonlyArray<{ stagedKey: string; position: number }>,
+  profile : ImageProfile = MEAL_PHOTO_PROFILE,
 ): Promise<PublishedImage[]> {
   const published: PublishedImage[] = []
   for (let i = 0; i < staged.length; i += PROCESS_CONCURRENCY) {
     const batch = staged.slice(i, i + PROCESS_CONCURRENCY)
-    const results = await Promise.allSettled(batch.map((s) => publishOne(vendorId, s.stagedKey, s.position)))
+    const results = await Promise.allSettled(batch.map((s) => publishOne(vendorId, s.stagedKey, s.position, profile)))
     for (const r of results) if (r.status === "fulfilled") published.push(r.value)
     const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected")
     if (failed) {

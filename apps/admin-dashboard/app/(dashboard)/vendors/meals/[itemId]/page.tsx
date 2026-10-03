@@ -18,6 +18,7 @@ interface Props { params: Promise<{ itemId: string }> }
 const FLAG_FIELD: Record<string, string> = {
   INAPPROPRIATE_NAME       : "the name",
   INAPPROPRIATE_DESCRIPTION: "the description",
+  INAPPROPRIATE_PORTION    : "the portion size",
   INAPPROPRIATE_MODIFIER   : "one of the choice groups",
 }
 
@@ -25,6 +26,8 @@ const FLAG_FIELD: Record<string, string> = {
 const GROUP_FLAG_LABEL: Record<string, string> = {
   INAPPROPRIATE_NAME  : "name or description",
   INAPPROPRIATE_OPTION: "option names",
+  // A new group (usually a copy) with the exact words of one still held.
+  MATCHES_UNRESOLVED_GROUP: "same wording as a group under review or sent back",
 }
 
 /* Vendor-facing wording for the send-back message. A vendor told
@@ -38,6 +41,8 @@ function buildSuggestedReason(meal: AdminMealDetail): string {
         ? "Name: please rewrite this for a general audience — the wording was flagged by our checks."
         : r === "INAPPROPRIATE_DESCRIPTION"
           ? "Description: please rewrite this for a general audience — the wording was flagged by our checks."
+          : r === "INAPPROPRIATE_PORTION"
+          ? "Portion size: please rewrite this for a general audience — the wording was flagged by our checks."
           : r === "INAPPROPRIATE_MODIFIER"
             // Named by group, because the vendor has to know WHICH one to fix
             // and it may be shared across several of their dishes.

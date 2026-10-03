@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import type { AuthenticatedVendorRequest } from "@repo/types/backend"
 
-import { verifyClerkJwt } from "@/lib/clerk"
+import { verifyClerkJwt, describeJwtFailure } from "@/lib/clerk"
 import { extractBearerToken } from "@/lib/clerk/extractBearerToken"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
@@ -34,7 +34,8 @@ export async function verifyVendorToken(req: Request, _res: Response, next: Next
     ;(req as AuthenticatedVendorRequest).vendorClerkUserId = verified.clerkUserId
     next()
   } catch (err) {
-    authLog.debug({ err }, "Token verification failed")
+    // Classified, never the token or its claims — see describeJwtFailure.
+    authLog.warn({ path: req.originalUrl.split("?")[0], ...describeJwtFailure(err) }, "Token verification failed")
     next(new ApiError(HttpStatus.UNAUTHORIZED, "Unauthorized", "INVALID_TOKEN"))
   }
 }

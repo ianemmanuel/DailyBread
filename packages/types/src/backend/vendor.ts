@@ -35,6 +35,8 @@ export type {
   VendorGoLiveStatus,
   VendorGoLiveBlocker,
   OutletGoLiveStatus,
+  VendorOutletGoLiveStatus,
+  VendorOutletZone,
   OutletClearanceStatus,
   OutletGoLiveBlocker,
   OutletInspectionPolicy,

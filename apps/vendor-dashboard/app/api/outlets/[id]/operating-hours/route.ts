@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server"
-import { revalidateTag } from "next/cache"
+import { expireTags } from "@/lib/cache/expire"
 import { NextRequest, NextResponse } from "next/server"
 
 const BACKEND = process.env.BACKEND_API_URL
@@ -22,7 +22,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       body   : JSON.stringify(body),
     })
     const data = await res.json()
-    if (res.ok) revalidateTag(`vendor-outlet-${id}`, "default")
+    if (res.ok) expireTags(`vendor-outlet-${id}`)
     return NextResponse.json(data, { status: res.status })
   } catch {
     return NextResponse.json({ status: "error", message: "Internal error" }, { status: 500 })

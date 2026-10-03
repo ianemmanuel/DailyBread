@@ -11,9 +11,9 @@ import { MealOptionGroupIssues } from "./MealOptionGroupIssues"
  * exactly what the notice tells them to do.
  *
  * A dish can also be held back by one of its OPTION GROUPS (the modifier
- * reason). That fix is made on the group, not here, so the notice names the
- * group and its own verdict — "under review", or "changes needed" with the
- * admin's reason — and links to where it is edited.
+ * reason). The notice names the group and its own verdict — "under review",
+ * or "changes needed" with the admin's reason — and links down to the meal's
+ * Options section, where the group is edited.
  */
 
 const OPTIONS_REASON = "INAPPROPRIATE_MODIFIER"
@@ -21,11 +21,11 @@ const OPTIONS_REASON = "INAPPROPRIATE_MODIFIER"
 const REASON_COPY: Record<string, string> = {
   INAPPROPRIATE_NAME       : "the name",
   INAPPROPRIATE_DESCRIPTION: "the description",
+  INAPPROPRIATE_PORTION    : "the portion size",
 }
 
 export function MealReviewNotice({ item }: { item: MenuItem }) {
   const heldByOptions = item.flagReasons.includes(OPTIONS_REASON)
-  const groupIds      = item.modifierGroups.map((g) => g.id)
 
   if (item.reviewStatus === "MANUALLY_REJECTED") {
     return (
@@ -39,10 +39,10 @@ export function MealReviewNotice({ item }: { item: MenuItem }) {
         </p>
         <p className="mt-2 text-xs text-[var(--muted-foreground)]">
           {heldByOptions
-            ? "If the change is to its options, edit the option group below — this meal goes back in for review once you do. Otherwise, edit it here and save."
+            ? "If the change is to its options, edit that group in Options below and save — this meal goes back in for review. Otherwise, edit it here and save."
             : "Edit it below and save — that puts it straight back in for review."}
         </p>
-        {heldByOptions && <MealOptionGroupIssues groupIds={groupIds} />}
+        {heldByOptions && <MealOptionGroupIssues groups={item.modifierGroups} />}
       </div>
     )
   }
@@ -79,7 +79,7 @@ export function MealReviewNotice({ item }: { item: MenuItem }) {
           Your changes are with us for a quick review, and it stays off the menu until then.
         </p>
       )}
-      {heldByOptions && <MealOptionGroupIssues groupIds={groupIds} />}
+      {heldByOptions && <MealOptionGroupIssues groups={item.modifierGroups} />}
       <p className="mt-2 text-xs text-[var(--muted-foreground)]">
         If you spot the problem yourself, editing and saving re-runs the checks immediately.
       </p>

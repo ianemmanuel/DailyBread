@@ -228,7 +228,9 @@ function ModifierGroupInfo({ group, meal }: { group: StorefrontModifierGroup; me
                   ? `+${formatMoneyCompact(option.priceDeltaMinor, meal.currency)}`
                   : option.priceDeltaMinor < 0
                     ? `−${formatMoneyCompact(-option.priceDeltaMinor, meal.currency)}`
-                    : "Included"}
+                    // Not "Included": nothing is pre-selected, and on an
+                    // optional group that word read as if it came with the dish.
+                    : "No extra charge"}
             </span>
           </li>
         ))}

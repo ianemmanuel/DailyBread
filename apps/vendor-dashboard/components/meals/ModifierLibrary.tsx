@@ -1,38 +1,30 @@
 "use client"
 
-import * as React from "react"
+import Link from "next/link"
 import { toast } from "sonner"
-import {
-  Plus, Pencil, Trash2, Loader2, AlertTriangle, SlidersHorizontal,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { AlertTriangle, SlidersHorizontal, ArrowRight } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { ClientApiError } from "@/lib/api/client"
-import { formatPrice, type MenuCurrency } from "@/lib/menu/money"
-import { ModifierGroupSheet } from "./ModifierGroupSheet"
-import {
-  useModifierGroups, useDeleteModifierGroup, useSetOptionAvailability,
-  type ModifierGroup,
-} from "@/lib/queries/menu"
+import type { MenuCurrency } from "@/lib/menu/money"
+import { describeDelta, ruleLabel } from "@/lib/menu/option-groups"
+import { useModifierGroups, useSetOptionAvailability, type ModifierGroup } from "@/lib/queries/menu"
 
 /*
- * Every option group the vendor has, in one place.
+ * Every meal's options, in one place — for SERVICE, not authoring.
  *
- * The same groups are created and edited from the meal form, so this page is
- * not where they are born — it is where a vendor fixes prices across the whole
- * menu at once, and where they 86 an option mid-shift without opening a dish.
+ * Each option group belongs to one meal and is edited on that meal (where its
+ * prices sit beside the meal's price). This page is where a kitchen 86es a
+ * choice mid-shift without opening a meal, and sees every meal's choices at a
+ * glance. "Edit" goes to the meal.
+ *
+ * Groups that belong to no meal are left from when groups were a shared
+ * library. They are never shown to customers; they can be copied into a meal
+ * from that meal's Options.
  */
 
 export function ModifierLibrary({ currency }: { currency: MenuCurrency }) {
   const { data: groups, isLoading, error } = useModifierGroups()
-  const [editing, setEditing] = React.useState<ModifierGroup | null>(null)
-  const [creating, setCreating] = React.useState(false)
-  const [deleting, setDeleting] = React.useState<ModifierGroup | null>(null)
 
   if (isLoading) {
     return (
@@ -43,169 +35,135 @@ export function ModifierLibrary({ currency }: { currency: MenuCurrency }) {
     )
   }
 
-  /* A failed load is said out loud rather than drawn as an empty library — the
+  /* A failed load is said out loud rather than drawn as an empty list — the
    * two look identical otherwise, which is how a working page reads as broken. */
   if (error) {
     return (
-      <div className="dash-card border-[var(--destructive)]/40 p-6">
-        <p className="text-sm font-medium text-[var(--destructive)]">Couldn&apos;t load your option groups.</p>
-        <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+      <div className="dash-card border-destructive/40 p-6">
+        <p className="text-sm font-medium text-destructive">Couldn&apos;t load your options.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
           The request failed rather than coming back empty. Try refreshing.
         </p>
       </div>
     )
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-[var(--muted-foreground)]">
-          {groups!.length === 0
-            ? "Groups you create here can be reused on any dish."
-            : `${groups!.length} group${groups!.length === 1 ? "" : "s"}, reusable on any dish.`}
-        </p>
-        <Button type="button" size="sm" onClick={() => setCreating(true)}>
-          <Plus className="size-4" />
-          New group
-        </Button>
+  const onMeals = groups!.filter((g) => g.dish)
+  const orphans = groups!.filter((g) => !g.dish)
+
+  if (groups!.length === 0) {
+    return (
+      <div className="dash-card flex flex-col items-center gap-3 px-6 py-12 text-center">
+        <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10">
+          <SlidersHorizontal className="size-5 text-primary" />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-foreground">No options yet</p>
+          <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-muted-foreground">
+            Options are added on a meal: open one and use <span className="font-medium">Add group</span> under
+            Options. To reuse a group on another meal, copy it there.
+          </p>
+        </div>
+        <Link href="/meals" className="text-sm font-medium text-primary hover:underline">Go to your meals</Link>
       </div>
+    )
+  }
 
-      {groups!.length === 0 ? (
-        <div className="dash-card flex flex-col items-center gap-3 px-6 py-12 text-center">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-[var(--primary)]/10">
-            <SlidersHorizontal className="size-5 text-[var(--primary)]" />
+  // One heading per meal, groups in name order underneath.
+  const byMeal = new Map<string, { name: string; groups: ModifierGroup[] }>()
+  for (const g of onMeals) {
+    const entry = byMeal.get(g.dish!.id) ?? { name: g.dish!.name, groups: [] }
+    entry.groups.push(g)
+    byMeal.set(g.dish!.id, entry)
+  }
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        Turn a choice off when you run out — it comes back when you turn it on. To change names, prices or rules,
+        edit the meal.
+      </p>
+
+      {[...byMeal].map(([mealId, meal]) => (
+        <section key={mealId} className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="min-w-0 truncate text-sm font-semibold text-foreground">{meal.name}</h2>
+            <Link
+              href={`/meals/${mealId}#options`}
+              className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              Edit on the meal <ArrowRight className="size-3" />
+            </Link>
           </div>
-          <div>
-            <p className="text-sm font-medium text-[var(--foreground)]">No option groups yet</p>
-            <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-[var(--muted-foreground)]">
-              A group is something a customer picks on a dish: a size, a flavour, a drink, extra
-              toppings. Build one once and tick it on every dish that offers it.
-            </p>
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => setCreating(true)}>
-            <Plus className="size-4" />
-            Add your first
-          </Button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {groups!.map((group) => (
-            <GroupRow
-              key={group.id}
-              group={group}
-              currency={currency}
-              onEdit={() => setEditing(group)}
-              onDelete={() => setDeleting(group)}
-            />
-          ))}
-        </div>
+          {meal.groups.map((group) => <GroupRow key={group.id} group={group} currency={currency} />)}
+        </section>
+      ))}
+
+      {orphans.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-foreground">Not on any meal</h2>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Left from before each meal had its own options. Customers never see these. To use one, open a meal and
+            copy it under Options → Add group.
+          </p>
+          {orphans.map((group) => <GroupRow key={group.id} group={group} currency={currency} readOnly />)}
+        </section>
       )}
-
-      <ModifierGroupSheet open={creating} onClose={() => setCreating(false)} currency={currency} />
-      <ModifierGroupSheet
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        currency={currency}
-        group={editing}
-      />
-      <DeleteDialog group={deleting} onClose={() => setDeleting(null)} />
     </div>
   )
 }
 
-function GroupRow({
-  group, currency, onEdit, onDelete,
-}: {
-  group: ModifierGroup; currency: MenuCurrency; onEdit: () => void; onDelete: () => void
-}) {
+function GroupRow({ group, currency, readOnly }: { group: ModifierGroup; currency: MenuCurrency; readOnly?: boolean }) {
   const setAvailability = useSetOptionAvailability()
 
   async function toggle(optionId: string, isAvailable: boolean) {
     try {
       await setAvailability.mutateAsync({ optionId, isAvailable })
     } catch (err) {
-      // The refusal that matters: turning off the last option in a "must
-      // choose" group would make every dish using it unorderable, so the
-      // backend blocks it and the reason is worth showing verbatim.
+      // The refusal that matters: turning off the last choice in a required
+      // group would make the meal unorderable, so the backend blocks it and
+      // the reason is worth showing verbatim.
       toast.error(err instanceof ClientApiError ? err.message : "Couldn't update that option")
     }
   }
 
   return (
     <div className="dash-card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-[var(--foreground)]">{group.name}</h3>
-            <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-              {ruleLabel(group)}
-            </span>
-            {group.reviewStatus === "FLAGGED" && (
-              <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--destructive)]">
-                <AlertTriangle className="size-3" />
-                Under review
-              </span>
-            )}
-            {group.reviewStatus === "MANUALLY_REJECTED" && (
-              <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--destructive)]">
-                <AlertTriangle className="size-3" />
-                Changes needed
-              </span>
-            )}
-          </div>
-          {group.description && (
-            <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{group.description}</p>
-          )}
-          {group.reviewStatus === "MANUALLY_REJECTED" && (
-            // The admin's own words, so the vendor knows what to change before
-            // opening the editor. Every dish using the group waits on this.
-            <p className="mt-1 whitespace-pre-line text-xs text-[var(--destructive)]">
-              {group.rejectionReason ?? "An admin asked for changes to these options."}
-            </p>
-          )}
-          <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-            {group.usedByCount === 0
-              ? "Not on any dish yet"
-              : `On ${group.usedByCount} dish${group.usedByCount === 1 ? "" : "es"}`}
-          </p>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1">
-          <Button type="button" variant="ghost" size="sm" onClick={onEdit}>
-            <Pencil className="size-4" />
-            <span className="sr-only">Edit {group.name}</span>
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onDelete}>
-            <Trash2 className="size-4" />
-            <span className="sr-only">Remove {group.name}</span>
-          </Button>
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold text-foreground">{group.name}</h3>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          {ruleLabel(group.minSelect, group.maxSelect)}
+        </span>
+        {(group.reviewStatus === "FLAGGED" || group.reviewStatus === "MANUALLY_REJECTED") && (
+          <span className="flex items-center gap-1 text-[11px] font-medium text-destructive">
+            <AlertTriangle className="size-3" />
+            {group.reviewStatus === "FLAGGED" ? "Under review" : "Changes needed"}
+          </span>
+        )}
       </div>
+      {group.reviewStatus === "MANUALLY_REJECTED" && (
+        <p className="mt-1 whitespace-pre-line text-xs text-destructive">
+          {group.rejectionReason ?? "An admin asked for changes to these options."}
+        </p>
+      )}
 
-      <ul className="mt-3 space-y-1.5 border-t border-[var(--border)] pt-3">
+      <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
         {group.options.map((option) => (
           <li key={option.id} className="flex items-center justify-between gap-3">
-            <span
-              className={cn(
-                "min-w-0 truncate text-sm",
-                option.isAvailable
-                  ? "text-[var(--foreground)]"
-                  : "text-[var(--muted-foreground)] line-through",
-              )}
-            >
+            <span className={cn("min-w-0 truncate text-sm", option.isAvailable ? "text-foreground" : "text-muted-foreground line-through")}>
               {option.name}
             </span>
             <div className="flex shrink-0 items-center gap-3">
-              <span className="text-xs tabular-nums text-[var(--muted-foreground)]">
-                {option.priceDeltaMinor === 0
-                  ? "same price"
-                  : `${option.priceDeltaMinor > 0 ? "+" : "−"}${formatPrice(Math.abs(option.priceDeltaMinor), currency)}`}
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {describeDelta(option.priceDeltaMinor, currency)}
               </span>
-              <AvailabilityToggle
-                isAvailable={option.isAvailable}
-                label={option.name}
-                onChange={(next) => toggle(option.id, next)}
-              />
+              {!readOnly && (
+                <AvailabilityToggle
+                  isAvailable={option.isAvailable}
+                  label={option.name}
+                  onChange={(next) => toggle(option.id, next)}
+                />
+              )}
             </div>
           </li>
         ))}
@@ -232,11 +190,7 @@ function AvailabilityToggle({
   onChange   : (next: boolean) => void
 }) {
   return (
-    <div
-      className="inline-flex rounded-lg border border-[var(--border)] p-0.5"
-      role="group"
-      aria-label={`${label} availability`}
-    >
+    <div className="inline-flex rounded-lg border border-border p-0.5" role="group" aria-label={`${label} availability`}>
       {[
         { value: true,  text: "On"  },
         { value: false, text: "Off" },
@@ -252,9 +206,9 @@ function AvailabilityToggle({
               "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
               active
                 ? segment.value
-                  ? "cursor-default bg-emerald-600 text-white"
-                  : "cursor-default bg-[var(--muted-foreground)] text-[var(--background)]"
-                : "cursor-pointer text-[var(--muted-foreground)] hover:bg-[var(--muted)]",
+                  ? "cursor-default bg-success-strong text-white"
+                  : "cursor-default bg-muted-foreground text-background"
+                : "cursor-pointer text-muted-foreground hover:bg-muted",
             )}
           >
             {segment.text}
@@ -263,58 +217,4 @@ function AvailabilityToggle({
       })}
     </div>
   )
-}
-
-function DeleteDialog({ group, onClose }: { group: ModifierGroup | null; onClose: () => void }) {
-  const deleteGroup = useDeleteModifierGroup()
-  const [pending, setPending] = React.useState(false)
-
-  async function confirm() {
-    if (!group) return
-    setPending(true)
-    try {
-      const result = await deleteGroup.mutateAsync(group.id)
-      toast.success(
-        result.detachedFrom > 0
-          ? `Removed, and taken off ${result.detachedFrom} dish${result.detachedFrom === 1 ? "" : "es"}`
-          : "Removed",
-      )
-      onClose()
-    } catch (err) {
-      toast.error(err instanceof ClientApiError ? err.message : "Something went wrong")
-    } finally {
-      setPending(false)
-    }
-  }
-
-  return (
-    <AlertDialog open={!!group} onOpenChange={(next) => !next && onClose()}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Remove “{group?.name}”?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {group && group.usedByCount > 0
-              ? `It will come off ${group.usedByCount} dish${
-                  group.usedByCount === 1 ? "" : "es"
-                }, and customers will no longer be offered these options. The dishes themselves stay exactly as they are.`
-              : "It isn't on any dish, so nothing else changes."}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={confirm} disabled={pending}>
-            {pending && <Loader2 className="size-4 animate-spin" />}
-            Remove
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  )
-}
-
-function ruleLabel(group: ModifierGroup): string {
-  if (group.required && group.maxSelect === 1) return "pick one"
-  if (!group.required && group.maxSelect === 1) return "optional, one"
-  if (group.required) return `pick 1–${group.maxSelect}`
-  return `optional, up to ${group.maxSelect}`
 }

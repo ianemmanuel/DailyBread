@@ -51,8 +51,10 @@ async function loadOwnedOutlet(vendorId: string, outletId: string): Promise<Outl
       vendor: { select: { id: true, status: true, countryId: true, vendorTypeId: true, userId: true, deletedAt: true } },
     },
   })
-  if (!outlet || outlet.deletedAt) throw new ApiError(404, "Outlet not found", "NOT_FOUND")
-  if (outlet.vendorId !== vendorId) throw new ApiError(403, "Unauthorized", "FORBIDDEN")
+  // Another vendor's outlet answers exactly like a missing one (principle 6).
+  if (!outlet || outlet.deletedAt || outlet.vendorId !== vendorId) {
+    throw new ApiError(404, "Outlet not found", "NOT_FOUND")
+  }
   if (outlet.vendor.deletedAt || outlet.vendor.status !== "ACTIVE") {
     throw new ApiError(403, "Your account is not active", "ACCOUNT_INACTIVE")
   }

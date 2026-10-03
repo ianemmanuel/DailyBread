@@ -2,6 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { clientFetch } from "@/lib/api/client"
+import { useRefreshServerState } from "./server-refresh"
+import { profileKeys } from "./profile"
 import type {
   AvailablePayoutMethod,
   VendorPayoutAccount,
@@ -92,6 +94,8 @@ export function usePayoutAccounts() {
 
 export function useAddPayoutAccount() {
   const queryClient = useQueryClient()
+  // A verified payout account is a go-live requirement; see server-refresh.ts.
+  const refreshServer = useRefreshServerState()
   return useMutation({
     mutationFn: (input: AddPayoutAccountRequest) =>
       clientFetch<VendorPayoutAccount>("/api/payout/accounts", {
@@ -100,28 +104,38 @@ export function useAddPayoutAccount() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.accounts })
+      queryClient.invalidateQueries({ queryKey: profileKeys.goLiveStatus })
+      refreshServer()
     },
   })
 }
 
 export function useSetDefaultPayoutAccount() {
   const queryClient = useQueryClient()
+  // A verified payout account is a go-live requirement; see server-refresh.ts.
+  const refreshServer = useRefreshServerState()
   return useMutation({
     mutationFn: (id: string) =>
       clientFetch<{ success: boolean }>(`/api/payout/accounts/${id}/set-default`, { method: "POST" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.accounts })
+      queryClient.invalidateQueries({ queryKey: profileKeys.goLiveStatus })
+      refreshServer()
     },
   })
 }
 
 export function useRemovePayoutAccount() {
   const queryClient = useQueryClient()
+  // A verified payout account is a go-live requirement; see server-refresh.ts.
+  const refreshServer = useRefreshServerState()
   return useMutation({
     mutationFn: (id: string) =>
       clientFetch<{ success: boolean }>(`/api/payout/accounts/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: payoutKeys.accounts })
+      queryClient.invalidateQueries({ queryKey: profileKeys.goLiveStatus })
+      refreshServer()
     },
   })
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { SidebarNav } from './SidebarNav'
+import { SidebarIdentity } from './SidebarIdentity'
 import Link from 'next/link'
 
 export function SidebarDesktop() {
@@ -28,17 +29,9 @@ export function SidebarDesktop() {
         <SidebarNav />
       </div>
 
-      {/* Vendor profile card */}
+      {/* Who is signed in — from the session, never a placeholder */}
       <div className="relative shrink-0 border-t border-border/60 p-3">
-        <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/70 px-3 py-2.5 transition-colors duration-200 hover:bg-sidebar-accent">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground shadow-[0_2px_8px_var(--shadow-primary)]">
-            WK
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-foreground">Wanjiku's Kitchen</p>
-            <p className="truncate text-xs text-muted-foreground">wanjiku@example.com</p>
-          </div>
-        </div>
+        <SidebarIdentity />
       </div>
 
     </aside>

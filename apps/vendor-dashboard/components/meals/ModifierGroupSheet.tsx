@@ -2,120 +2,125 @@
 
 import * as React from "react"
 import { toast } from "sonner"
-import { Loader2, Plus, Trash2, GripVertical, AlertTriangle } from "lucide-react"
+import { Plus, Trash2, ChevronUp, ChevronDown, AlertTriangle, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { MoneyInput } from "./MoneyInput"
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet"
-import { cn } from "@/lib/utils"
-import { ClientApiError } from "@/lib/api/client"
-import { toMinorUnits, fromMinorUnits, type MenuCurrency } from "@/lib/menu/money"
 import {
-  useCreateModifierGroup, useUpdateModifierGroup,
-  type ModifierGroup, type UpsertModifierGroupRequest,
-} from "@/lib/queries/menu"
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+import { formatPrice, type MenuCurrency } from "@/lib/menu/money"
+import type { ModifierGroup } from "@/lib/queries/menu"
+import {
+  draftCopyOf, draftKey, draftGroupProblem, joinDelta, splitDelta, ruleSentence, describeDelta,
+  type DeltaKind, type DraftGroup,
+} from "@/lib/menu/option-groups"
 
 /*
- * Build or edit one option group.
+ * Build or edit ONE of this meal's option groups — as a DRAFT.
  *
- * The selection rule is the only thing separating a "variant" from an "addon",
- * and asking a vendor for a minimum and a maximum directly is how you get a
- * group nobody can satisfy. So the form asks two questions in the vendor's own
- * words — must they choose, and how many — and derives min/max from the
- * answers. The raw numbers are shown underneath in a sentence, so nothing is
- * hidden, just not typed.
+ * Nothing here talks to the server. "Add to meal" / "Update group" hands the
+ * draft back to the meal form, and the meal's own Save writes it. So a vendor
+ * can build several groups, read the whole dish back, change their mind, and
+ * only then commit — and closing the sheet, or the page, loses nothing that
+ * was ever live.
+ *
+ * The selection rule is asked as two plain questions — must they choose, and
+ * how many — and min/max derived from the answers, with the rule stated in a
+ * sentence underneath:
  *
  *   must choose + one   -> 1..1   the size picker
  *   optional    + one   -> 0..1   pick a drink, or don't
  *   must choose + many  -> 1..N   at least one topping
  *   optional    + many  -> 0..N   sauces
+ *
+ * Each choice's PRICE CHANGE is a kind (no change / extra / discount) plus a
+ * positive amount, never a signed number: "-50" in a box is a typo waiting to
+ * happen, and "+KSh -50" is what the old single field displayed.
  */
 
 type Choose = "required" | "optional"
 type HowMany = "one" | "many"
 
-interface DraftOption {
-  /** Present for an existing option, so the save reconciles rather than
-   *  recreating it — an option id is what a future order line will have
-   *  snapshotted against. */
-  id?        : string
+interface Row {
   key        : string
+  id        ?: string
   name       : string
-  /** Major units as typed, converted on submit like every other price. */
-  price      : string
+  kind       : DeltaKind
+  /** Major units as typed, always positive; the kind carries the sign. */
+  amount     : string
   isAvailable: boolean
 }
 
 interface Props {
-  open      : boolean
-  onClose   : () => void
-  currency  : MenuCurrency
-  /** Absent when creating. */
-  group?    : ModifierGroup | null
-  /** Called with the saved group, so the meal form can attach a brand-new one
-   *  without the vendor having to go and find it. */
-  onSaved?  : (group: ModifierGroup) => void
+  open          : boolean
+  onClose       : () => void
+  currency      : MenuCurrency
+  /** The meal's typed price, for the "customers pay" preview. Null until valid. */
+  basePriceMinor: number | null
+  /** The group being edited; null to add a new one. */
+  group         : DraftGroup | null
+  /** The meal's OTHER groups' names — one meal can't have two "Size"s. */
+  otherNames    : string[]
+  /** Groups on the vendor's other meals, offered as a starting point. */
+  copySources   : ModifierGroup[]
+  onDone        : (group: DraftGroup) => void
 }
 
-let seq = 0
-const nextKey = () => `draft-${seq++}`
+const emptyRow = (): Row => ({ key: draftKey(), name: "", kind: "none", amount: "", isAvailable: true })
 
-const emptyOption = (): DraftOption => ({
-  key: nextKey(), name: "", price: "", isAvailable: true,
-})
+function rowsFrom(group: DraftGroup, currency: MenuCurrency): Row[] {
+  return group.options.map((o) => ({
+    key: o.key, id: o.id, name: o.name, isAvailable: o.isAvailable, ...splitDelta(o.priceDeltaMinor, currency),
+  }))
+}
 
-export function ModifierGroupSheet({ open, onClose, currency, group, onSaved }: Props) {
+export function ModifierGroupSheet({
+  open, onClose, currency, basePriceMinor, group, otherNames, copySources, onDone,
+}: Props) {
   const isEdit = !!group
-  const createGroup = useCreateModifierGroup()
-  const updateGroup = useUpdateModifierGroup(group?.id ?? "")
+  const formId = React.useId()
 
   const [name, setName] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [choose, setChoose] = React.useState<Choose>("optional")
   const [howMany, setHowMany] = React.useState<HowMany>("one")
   const [maxMany, setMaxMany] = React.useState(2)
-  const [options, setOptions] = React.useState<DraftOption[]>([emptyOption(), emptyOption()])
-  const [saving, setSaving] = React.useState(false)
+  const [rows, setRows] = React.useState<Row[]>([emptyRow(), emptyRow()])
+  const [copiedFrom, setCopiedFrom] = React.useState<string | undefined>()
+
+  function load(source: DraftGroup | null) {
+    setName(source?.name ?? "")
+    setDescription(source?.description ?? "")
+    setChoose(source && source.minSelect >= 1 ? "required" : "optional")
+    setHowMany(source && source.maxSelect > 1 ? "many" : "one")
+    setMaxMany(Math.max(2, source?.maxSelect ?? 2))
+    setRows(source ? rowsFrom(source, currency) : [emptyRow(), emptyRow()])
+    setCopiedFrom(source?.copiedFrom)
+  }
 
   /* Resync on open so a cancelled edit never shows its abandoned values next
    * time — the sheet stays mounted so it can animate closed. */
   React.useEffect(() => {
-    if (!open) return
-    if (group) {
-      setName(group.name)
-      setDescription(group.description ?? "")
-      setChoose(group.required ? "required" : "optional")
-      setHowMany(group.maxSelect > 1 ? "many" : "one")
-      setMaxMany(Math.max(2, group.maxSelect))
-      setOptions(group.options.map((o) => ({
-        id         : o.id,
-        key        : o.id,
-        name       : o.name,
-        price      : o.priceDeltaMinor === 0 ? "" : fromMinorUnits(o.priceDeltaMinor, currency),
-        isAvailable: o.isAvailable,
-      })))
-    } else {
-      setName("")
-      setDescription("")
-      setChoose("optional")
-      setHowMany("one")
-      setMaxMany(2)
-      setOptions([emptyOption(), emptyOption()])
-    }
-  }, [open, group, currency])
+    if (open) load(group)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when (re)opened
+  }, [open, group])
 
-  const filled = options.filter((o) => o.name.trim())
+  const filled = rows.filter((r) => r.name.trim())
   const minSelect = choose === "required" ? 1 : 0
   const maxSelect = howMany === "one" ? 1 : Math.min(maxMany, Math.max(filled.length, 1))
 
-  function patch(key: string, changes: Partial<DraftOption>) {
-    setOptions((prev) => prev.map((o) => (o.key === key ? { ...o, ...changes } : o)))
+  function patch(key: string, changes: Partial<Row>) {
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...changes } : r)))
   }
 
   function move(index: number, delta: number) {
-    setOptions((prev) => {
+    setRows((prev) => {
       const next = [...prev]
       const target = index + delta
       if (target < 0 || target >= next.length) return prev
@@ -124,141 +129,162 @@ export function ModifierGroupSheet({ open, onClose, currency, group, onSaved }: 
     })
   }
 
-  async function submit(event: React.FormEvent) {
+  function startFrom(sourceId: string) {
+    const source = copySources.find((g) => g.id === sourceId)
+    if (!source) return
+    load(draftCopyOf(source, source.dish?.name ?? "an earlier group"))
+  }
+
+  function submit(event: React.FormEvent) {
     event.preventDefault()
+    // The sheet is portalled in the DOM, but React bubbles synthetic events up
+    // the REACT tree. The meal form renders this sheet outside its <form>, so
+    // nothing should be listening — this is the belt to that brace: finishing
+    // a group must never save the meal.
+    event.stopPropagation()
 
-    if (!name.trim()) { toast.error("Give this group a name."); return }
-    if (filled.length === 0) { toast.error("Add at least one option."); return }
+    const options: DraftGroup["options"] = []
+    for (const row of filled) {
+      const delta = joinDelta(row.kind, row.amount, currency)
+      if (delta === null) {
+        toast.error(`Enter how much “${row.name.trim()}” ${row.kind === "extra" ? "adds" : "takes off"}, or choose No change.`)
+        return
+      }
+      options.push({ key: row.key, ...(row.id ? { id: row.id } : {}), name: row.name.trim(), priceDeltaMinor: delta, isAvailable: row.isAvailable })
+    }
 
-    const body: UpsertModifierGroupRequest = {
+    const draft: DraftGroup = {
+      ...(group ?? {}),
+      key        : group?.key ?? draftKey(),
       name       : name.trim(),
       description: description.trim() || null,
       minSelect,
       maxSelect,
-      options    : filled.map((o) => ({
-        ...(o.id ? { id: o.id } : {}),
-        name           : o.name.trim(),
-        // An empty price box means no adjustment, which is the common case:
-        // "Small" costs the same as the dish.
-        priceDeltaMinor: o.price.trim() ? (toMinorUnits(o.price, currency) ?? 0) : 0,
-        isAvailable    : o.isAvailable,
-      })),
+      options,
+      copiedFrom,
     }
+    const problem = draftGroupProblem(draft, otherNames)
+    if (problem) { toast.error(problem); return }
 
-    setSaving(true)
-    try {
-      const saved = isEdit
-        ? await updateGroup.mutateAsync(body)
-        : await createGroup.mutateAsync(body)
-      toast.success(isEdit ? "Option group updated" : "Option group created")
-      onSaved?.(saved)
-      onClose()
-    } catch (err) {
-      toast.error(err instanceof ClientApiError ? err.message : "Something went wrong")
-    } finally {
-      setSaving(false)
-    }
+    onDone(draft)
+    onClose()
   }
+
+  const sources = copySources.filter((g) => g.options.length > 0)
 
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
       <SheetContent className="flex w-full flex-col sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle>{isEdit ? `Edit “${group!.name}”` : "New option group"}</SheetTitle>
+          <SheetTitle>{isEdit ? `Edit “${group!.name}”` : "Add an option group"}</SheetTitle>
           <SheetDescription>
-            Sizes, flavours, drinks, extras — all the same thing. How many a customer picks is what
-            makes it a size picker or a list of add-ons.
+            Sizes, flavours, drinks, extras. This group belongs to this meal only — changing it never changes
+            another meal.
           </SheetDescription>
         </SheetHeader>
 
-        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+        <form id={formId} onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
-            {isEdit && group!.usedByCount > 1 && (
-              <p className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/40 px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                Used on {group!.usedByCount} dishes. Saving updates all of them.
-              </p>
-            )}
-
             {isEdit && group!.reviewStatus === "MANUALLY_REJECTED" && (
-              <div className="rounded-lg border border-[var(--destructive)]/30 bg-[var(--destructive)]/5 px-3 py-2 text-xs text-[var(--foreground)]">
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-foreground">
                 <p className="flex items-center gap-2 font-medium">
-                  <AlertTriangle className="size-3.5 shrink-0 text-[var(--destructive)]" />
+                  <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
                   Changes needed
                 </p>
                 <p className="mt-1 whitespace-pre-line">
                   {group!.rejectionReason ?? "An admin asked for changes to these options."}
                 </p>
-                <p className="mt-1 text-[var(--muted-foreground)]">
-                  Every dish using this group stays off the menu until you change the wording and save — that
-                  sends it for a fresh check.
+                <p className="mt-1 text-muted-foreground">
+                  The meal stays off the menu until you change the wording and save the meal — that sends it for a
+                  fresh check.
+                </p>
+              </div>
+            )}
+            {isEdit && group!.reviewStatus === "FLAGGED" && (
+              <p className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-foreground">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+                Some wording here is under review, so the meal is too. Editing the wording sends it straight back
+                for a fresh check when you save the meal.
+              </p>
+            )}
+
+            {!isEdit && sources.length > 0 && (
+              <div className="space-y-1.5 rounded-lg border border-dashed border-border p-3">
+                <Label htmlFor={`${formId}-copy`} className="flex items-center gap-1.5 text-sm">
+                  <Copy className="size-3.5 text-muted-foreground" /> Start from one you already have
+                </Label>
+                <Select onValueChange={startFrom}>
+                  <SelectTrigger id={`${formId}-copy`} className="w-full">
+                    <SelectValue placeholder="Copy a group from another meal…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sources.map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.name} — {g.dish ? g.dish.name : "not on a meal"} ({g.options.length} choice{g.options.length === 1 ? "" : "s"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {copiedFrom
+                    ? `Copied from ${copiedFrom}. It's this meal's own copy now — edit anything.`
+                    : "Copies the choices and prices into this meal. The original isn't linked or changed."}
                 </p>
               </div>
             )}
 
-            {isEdit && group!.reviewStatus === "FLAGGED" && (
-              <p className="flex items-start gap-2 rounded-lg border border-[var(--destructive)]/30 bg-[var(--destructive)]/5 px-3 py-2 text-xs text-[var(--foreground)]">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--destructive)]" />
-                Some wording here is under review, so every dish using it is too. Editing the wording
-                sends it straight back for a fresh check.
-              </p>
-            )}
-
             <div className="space-y-1.5">
-              <Label className="text-sm">
-                Name <span className="text-[var(--destructive)]">*</span>
+              <Label htmlFor={`${formId}-name`} className="text-sm">
+                Group name <span className="text-destructive">*</span>
               </Label>
               <Input
+                id={`${formId}-name`}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Size"
+                placeholder="Size, Choose a side, Extra toppings"
                 maxLength={60}
                 autoFocus
               />
-              <p className="text-xs text-[var(--muted-foreground)]">
-                What the customer sees above the options.
-              </p>
+              <p className="text-xs text-muted-foreground">What the customer sees above the choices.</p>
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-sm">Short note</Label>
+              <Label htmlFor={`${formId}-note`} className="text-sm">Short note</Label>
               <Input
+                id={`${formId}-note`}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Pick a size"
+                placeholder="Optional, e.g. The first side is included"
                 maxLength={200}
               />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label className="text-sm">Does the customer have to pick one?</Label>
+                <p className="text-sm font-medium" id={`${formId}-choose`}>Does the customer have to choose?</p>
                 <Segments
+                  labelledBy={`${formId}-choose`}
                   value={choose}
                   onChange={(v) => setChoose(v as Choose)}
-                  options={[
-                    { value: "required", label: "Yes" },
-                    { value: "optional", label: "No" },
-                  ]}
+                  options={[{ value: "required", label: "Required" }, { value: "optional", label: "Optional" }]}
                 />
               </div>
-
               <div className="space-y-1.5">
-                <Label className="text-sm">How many can they pick?</Label>
+                <p className="text-sm font-medium" id={`${formId}-many`}>How many can they pick?</p>
                 <Segments
+                  labelledBy={`${formId}-many`}
                   value={howMany}
                   onChange={(v) => setHowMany(v as HowMany)}
-                  options={[
-                    { value: "one",  label: "Just one" },
-                    { value: "many", label: "Several" },
-                  ]}
+                  options={[{ value: "one", label: "Just one" }, { value: "many", label: "Several" }]}
                 />
               </div>
             </div>
 
             {howMany === "many" && (
               <div className="flex items-center gap-2">
-                <Label className="text-sm">Up to</Label>
+                <Label htmlFor={`${formId}-max`} className="text-sm">Up to</Label>
                 <Input
+                  id={`${formId}-max`}
                   type="number"
                   min={2}
                   max={Math.max(2, filled.length)}
@@ -266,108 +292,59 @@ export function ModifierGroupSheet({ open, onClose, currency, group, onSaved }: 
                   onChange={(e) => setMaxMany(Math.max(2, Number(e.target.value) || 2))}
                   className="w-20"
                 />
-                <span className="text-sm text-[var(--muted-foreground)]">options</span>
+                <span className="text-sm text-muted-foreground">choices</span>
               </div>
             )}
 
             {/* Nothing is hidden — the rule is just stated rather than typed. */}
-            <p className="rounded-lg bg-[var(--muted)]/50 px-3 py-2 text-xs text-[var(--muted-foreground)]">
+            <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
               {ruleSentence(minSelect, maxSelect)}
             </p>
 
-            <div className="space-y-2">
+            <fieldset className="space-y-2">
               <div className="flex items-baseline justify-between">
-                <Label className="text-sm">
-                  Options <span className="text-[var(--destructive)]">*</span>
-                </Label>
-                <span className="text-xs tabular-nums text-[var(--muted-foreground)]">
-                  {filled.length} added
-                </span>
+                <legend className="text-sm font-medium">
+                  Choices <span className="text-destructive">*</span>
+                </legend>
+                <span className="text-xs tabular-nums text-muted-foreground">{filled.length} added</span>
               </div>
 
-              <div className="space-y-2">
-                {options.map((option, index) => (
-                  <div
-                    key={option.key}
-                    className="flex items-center gap-2 rounded-lg border border-[var(--border)] p-2"
-                  >
-                    <div className="flex flex-col">
-                      <button
-                        type="button"
-                        onClick={() => move(index, -1)}
-                        disabled={index === 0}
-                        className="cursor-pointer p-0.5 text-[var(--muted-foreground)] disabled:cursor-not-allowed disabled:opacity-30"
-                        aria-label="Move up"
-                      >
-                        <GripVertical className="size-3.5 rotate-90" />
-                      </button>
-                    </div>
-
-                    <Input
-                      value={option.name}
-                      onChange={(e) => patch(option.key, { name: e.target.value })}
-                      placeholder={index === 0 ? "Small" : "Large"}
-                      maxLength={60}
-                      className="min-w-0 flex-1"
-                    />
-
-                    <div className="relative w-28 shrink-0">
-                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--muted-foreground)]">
-                        +{currency.symbol}
-                      </span>
-                      <Input
-                        value={option.price}
-                        onChange={(e) => patch(option.key, { price: e.target.value })}
-                        inputMode="decimal"
-                        placeholder="0"
-                        className="pl-9 text-sm tabular-nums"
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setOptions((prev) => prev.filter((o) => o.key !== option.key))}
-                      disabled={options.length === 1}
-                      className="cursor-pointer p-1.5 text-[var(--muted-foreground)] hover:text-[var(--destructive)] disabled:cursor-not-allowed disabled:opacity-30"
-                      aria-label={`Remove ${option.name || "option"}`}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  </div>
+              <ol className="space-y-2">
+                {rows.map((row, index) => (
+                  <ChoiceRow
+                    key={row.key}
+                    row={row}
+                    index={index}
+                    count={rows.length}
+                    currency={currency}
+                    basePriceMinor={basePriceMinor}
+                    onPatch={(changes) => patch(row.key, changes)}
+                    onMove={(delta) => move(index, delta)}
+                    onRemove={() => setRows((prev) => prev.filter((r) => r.key !== row.key))}
+                  />
                 ))}
-              </div>
+              </ol>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setOptions((prev) => [...prev, emptyOption()])}
-              >
+              <Button type="button" variant="outline" size="sm" onClick={() => setRows((prev) => [...prev, emptyRow()])}>
                 <Plus className="size-4" />
-                Add an option
+                Add a choice
               </Button>
+            </fieldset>
 
-              <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">
-                The price is what this option <em>adds</em> to the dish, not the dish&apos;s price.
-                Leave it blank when it costs the same.
-              </p>
-            </div>
             {/*
               * The actions end the FORM and scroll with it, rather than being
-              * pinned to the bottom of the sheet. A pinned bar reads as page
-              * chrome — you look at it and ask whether it belongs to the form
-              * or to the app — and on a phone it permanently eats height from
-              * the thing being filled in. Scrolling to the end to submit is
-              * how a form has always worked.
+              * pinned to the bottom of the sheet: a pinned bar reads as page
+              * chrome, and on a phone it permanently eats height from the
+              * thing being filled in.
               */}
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] pt-4">
-              <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving && <Loader2 className="size-4 animate-spin" />}
-                {isEdit ? "Save changes" : "Create option group"}
-              </Button>
+            <div className="space-y-2 border-t border-border pt-4">
+              <p className="text-xs text-muted-foreground">
+                Nothing is saved yet — this goes onto the meal, and you save the meal when it looks right.
+              </p>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+                <Button type="submit">{isEdit ? "Update group" : "Add to meal"}</Button>
+              </div>
             </div>
           </div>
         </form>
@@ -376,24 +353,133 @@ export function ModifierGroupSheet({ open, onClose, currency, group, onSaved }: 
   )
 }
 
-/** The rule in the vendor's words, so the derived min/max is visible without
- *  being something they have to get right themselves. */
-function ruleSentence(minSelect: number, maxSelect: number): string {
-  if (minSelect === 1 && maxSelect === 1) return "A customer must pick exactly one."
-  if (minSelect === 0 && maxSelect === 1) return "A customer can pick one, or skip it."
-  if (minSelect === 0) return `A customer can pick up to ${maxSelect}, or skip it.`
-  return `A customer must pick at least one, up to ${maxSelect}.`
+function ChoiceRow({
+  row, index, count, currency, basePriceMinor, onPatch, onMove, onRemove,
+}: {
+  row           : Row
+  index         : number
+  count         : number
+  currency      : MenuCurrency
+  basePriceMinor: number | null
+  onPatch       : (changes: Partial<Row>) => void
+  onMove        : (delta: number) => void
+  onRemove      : () => void
+}) {
+  const id = React.useId()
+  const delta = joinDelta(row.kind, row.amount, currency)
+  const label = row.name.trim() || `Choice ${index + 1}`
+
+  /* What it does to the price, said in words — and, while the meal has a
+   * valid price, what a customer pays with it. A preview: the server prices
+   * every order from what it stored. */
+  const effect =
+    delta === null
+      ? `Enter the amount it ${row.kind === "extra" ? "adds" : "takes off"}.`
+      : basePriceMinor !== null && basePriceMinor > 0 && delta !== 0
+        ? `${describeDelta(delta, currency)} · customers pay ${formatPrice(Math.max(0, basePriceMinor + delta), currency)} at the main price`
+        : describeDelta(delta, currency)
+
+  return (
+    <li className="space-y-2 rounded-lg border border-border p-3">
+      <div className="flex items-end gap-2">
+        <div className="flex flex-col pb-1">
+          <button
+            type="button"
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+            className="cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label={`Move ${label} up`}
+          >
+            <ChevronUp className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onMove(1)}
+            disabled={index === count - 1}
+            className="cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label={`Move ${label} down`}
+          >
+            <ChevronDown className="size-3.5" />
+          </button>
+        </div>
+
+        <div className="min-w-0 flex-1 space-y-1">
+          <Label htmlFor={`${id}-name`} className="text-xs text-muted-foreground">Choice {index + 1}</Label>
+          <Input
+            id={`${id}-name`}
+            value={row.name}
+            onChange={(e) => onPatch({ name: e.target.value })}
+            placeholder={index === 0 ? "e.g. Regular" : "e.g. Large"}
+            maxLength={60}
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={count === 1}
+          className="mb-1.5 cursor-pointer rounded p-1.5 text-muted-foreground hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label={`Remove ${label}`}
+        >
+          <Trash2 className="size-4" />
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 pl-6">
+        <span className="text-xs text-muted-foreground" id={`${id}-kind`}>Price change</span>
+        <Segments
+          compact
+          labelledBy={`${id}-kind`}
+          value={row.kind}
+          onChange={(v) => onPatch({ kind: v as DeltaKind })}
+          options={[
+            { value: "none",  label: "No change" },
+            { value: "extra", label: "Extra charge" },
+            { value: "less",  label: "Discount" },
+          ]}
+        />
+        {row.kind !== "none" && (
+          <MoneyInput
+            size="sm"
+            currency={currency}
+            sign={row.kind === "extra" ? "+" : "−"}
+            label={`${row.kind === "extra" ? "Extra charge" : "Discount"} for ${label}`}
+            value={row.amount}
+            onChange={(e) => onPatch({ amount: e.target.value })}
+            placeholder={currency.minorUnitDigits === 0 ? "50" : `50.${"0".repeat(currency.minorUnitDigits)}`}
+            aria-invalid={delta === null}
+            className="w-36"
+          />
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 pl-6">
+        <p className={cn("text-xs", delta === null ? "text-destructive" : "text-muted-foreground")}>{effect}</p>
+        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={!row.isAvailable}
+            onChange={(e) => onPatch({ isAvailable: !e.target.checked })}
+            className="size-3.5 cursor-pointer accent-[var(--primary)]"
+          />
+          Sold out
+        </label>
+      </div>
+    </li>
+  )
 }
 
 function Segments({
-  value, onChange, options,
+  value, onChange, options, labelledBy, compact,
 }: {
-  value: string
-  onChange: (value: string) => void
-  options: { value: string; label: string }[]
+  value     : string
+  onChange  : (value: string) => void
+  options   : { value: string; label: string }[]
+  labelledBy: string
+  compact?  : boolean
 }) {
   return (
-    <div className="inline-flex w-full rounded-lg border border-[var(--border)] p-0.5" role="group">
+    <div className={cn("inline-flex rounded-lg border border-border p-0.5", !compact && "w-full")} role="group" aria-labelledby={labelledBy}>
       {options.map((option) => {
         const active = option.value === value
         return (
@@ -403,12 +489,13 @@ function Segments({
             aria-pressed={active}
             onClick={() => onChange(option.value)}
             className={cn(
-              "flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              "flex-1 rounded-md font-medium transition-colors",
+              compact ? "px-2 py-1 text-xs" : "px-3 py-1.5 text-sm",
               // The active option gets the default cursor: a pointer there
               // would promise an action that does nothing.
               active
-                ? "cursor-default bg-[var(--primary)] text-[var(--primary-foreground)]"
-                : "cursor-pointer text-[var(--muted-foreground)] hover:bg-[var(--muted)]",
+                ? "cursor-default bg-primary text-primary-foreground"
+                : "cursor-pointer text-muted-foreground hover:bg-muted",
             )}
           >
             {option.label}

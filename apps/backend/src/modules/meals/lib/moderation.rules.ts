@@ -202,5 +202,6 @@ export function mealStatusTransition(from: MealStatus, to: MealStatus): MealStat
 export const MENU_ITEM_FLAG_REASONS = [
   "INAPPROPRIATE_NAME",
   "INAPPROPRIATE_DESCRIPTION",
+  "INAPPROPRIATE_PORTION",
   MODIFIER_CONTENT_FLAG,
 ] as const

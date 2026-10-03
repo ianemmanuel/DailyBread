@@ -42,7 +42,11 @@ export default async function EditMealPage({ params }: { params: Promise<{ itemI
         currency={context.currency}
       />
       <MealOutletAvailability item={item} />
-      <MealForm item={item} />
+      {/* Keyed on the saved version: after a save the page refreshes in place,
+          and the form must re-seed from what the server now holds — a photo
+          the last save published is no longer the staged upload the form's
+          state still names. */}
+      <MealForm key={item.updatedAt} item={item} />
       <MealLifecycleActions item={item} />
     </PageGrid>
   )

@@ -2,7 +2,7 @@ import { prisma } from "@repo/db"
 import { ApiError } from "@/middleware/error"
 import type { CityCoverage, CityCoverageZone, OutletPlacement } from "@repo/types/backend"
 import type { ZoneBoundary } from "@repo/types/backend"
-import { resolveCapabilitiesForPoint } from "./vendor.geography.service"
+import { resolveCapabilitiesForPoint, getZonePublicName } from "./vendor.geography.service"
 import { describePlacement, zoneCoverageStatus } from "./vendor.placement"
 
 /*
@@ -95,15 +95,16 @@ export async function getCityCoverageForVendor(vendorId: string, cityId: string)
       id: true, name: true, latitude: true, longitude: true, boundary: true,
       zones: {
         where  : { status: "ACTIVE" },
-        orderBy: { name: "asc" },
-        select : { id: true, name: true, boundaries: true, level: true, operationalStatus: true },
+        orderBy: { publicName: "asc" },
+        // publicName, never the operational name — see getZonePublicName.
+        select : { id: true, publicName: true, boundaries: true, level: true, operationalStatus: true },
       },
     },
   })
 
   const zones: CityCoverageZone[] = city.zones.map((z) => ({
     id        : z.id,
-    name      : z.name,
+    name      : z.publicName,
     status    : zoneCoverageStatus(z.level, z.operationalStatus),
     boundaries: z.boundaries as unknown as ZoneBoundary,
   }))
@@ -143,5 +144,9 @@ export async function previewOutletPlacement(
   const resolved = await resolveCapabilitiesForPoint(id, { latitude, longitude })
   if (!resolved) throw new ApiError(404, "City not found", "NOT_FOUND")
 
-  return describePlacement(resolved)
+  const placement = describePlacement(resolved)
+  // The verdict names the zone in the vendor's words, not operations'.
+  return placement.zoneName
+    ? { ...placement, zoneName: await getZonePublicName(resolved.zoneId) }
+    : placement
 }

@@ -18,15 +18,18 @@ import { FormSection, FormField } from "@/components/dashboard/form"
 import { TagMultiSelect } from "@/components/profile/TagMultiSelect"
 import { MealImageGallery, type MealImageValue } from "./MealImageGallery"
 import { MealModifierSection } from "./MealModifierSection"
+import { MoneyInput } from "./MoneyInput"
+import { ModifierGroupSheet } from "./ModifierGroupSheet"
 import { validateMeal, MEAL_LIMITS, type MealFormValues } from "@/lib/validations/meal"
 import { toMinorUnits, fromMinorUnits, formatPrice, type MenuCurrency } from "@/lib/menu/money"
 import { releasePreview } from "@/lib/menu/media"
 import { ClientApiError } from "@/lib/api/client"
 import {
-  useMenuContext, useCreateMenuItem, useUpdateMenuItem, useCreateMenuSection,
+  useMenuContext, useCreateMenuItem, useUpdateMenuItem, useCreateMenuSection, useModifierGroups,
   type MenuItem,
   type MenuTaxContext,
 } from "@/lib/queries/menu"
+import { draftFromAttached, toDishGroupPayload, type DraftGroup } from "@/lib/menu/option-groups"
 
 /*
  * Create or edit one dish.
@@ -69,10 +72,16 @@ export function MealForm({ item }: Props) {
   const [images, setImages] = React.useState<MealImageValue[]>([])
   /** Per-outlet local prices, keyed by outlet id, in major units as typed. */
   const [overrides, setOverrides] = React.useState<Record<string, string>>({})
-  /* Attached option groups, in the vendor's display order. Held outside
-   * `values` because there is nothing to validate on this side — an id is
-   * either one of the vendor's own groups or the backend refuses it. */
-  const [modifierGroupIds, setModifierGroupIds] = React.useState<string[]>([])
+  /* This meal's OWN option groups, as a draft in display order. Nothing about
+   * them is written until the meal is saved — the option sheet only edits
+   * this list — so the vendor reviews the whole dish before it goes anywhere. */
+  const [groups, setGroups] = React.useState<DraftGroup[]>([])
+  /** The saved groups, as the payload they would produce — the "unsaved
+   *  changes" baseline. */
+  const savedGroups = React.useRef("[]")
+  /** Which group the sheet is open on: "new", an index, or closed. */
+  const [sheet, setSheet] = React.useState<"new" | number | null>(null)
+  const { data: allGroups } = useModifierGroups()
   const [errors, setErrors] = React.useState<Partial<Record<keyof MealFormValues, string>>>({})
   const [newSection, setNewSection] = React.useState("")
   const [addingSection, setAddingSection] = React.useState(false)
@@ -101,7 +110,9 @@ export function MealForm({ item }: Props) {
         outletIds    : item.outlets.map((o) => o.outletId),
         imageKeys    : item.images.map((i) => i.storageKey),
       })
-      setModifierGroupIds([...item.modifierGroups].sort((a, b) => a.position - b.position).map((g) => g.id))
+      const drafts = [...item.modifierGroups].sort((a, b) => a.position - b.position).map(draftFromAttached)
+      setGroups(drafts)
+      savedGroups.current = JSON.stringify(toDishGroupPayload(drafts))
       setImages(item.images.map((i) => ({ storageKey: i.storageKey, url: i.url, isLocal: false })))
       setOverrides(
         Object.fromEntries(
@@ -190,7 +201,9 @@ export function MealForm({ item }: Props) {
       dietaryTagIds : values.dietaryTagIds,
       outletIds     : values.outletIds,
       priceOverrides,
-      modifierGroupIds,
+      // Field by field, ids only for THIS meal's own groups and choices — a
+      // copied group carries none, so it is created as this meal's own.
+      modifierGroups: toDishGroupPayload(groups),
     }
 
     setSaving(true)
@@ -198,12 +211,17 @@ export function MealForm({ item }: Props) {
       if (isEdit) {
         await updateItem.mutateAsync(body)
         toast.success("Meal updated")
+        // Stay on this meal. The route handler has already EXPIRED its cached
+        // reads, so a refresh re-renders the page — review notice, outlet
+        // availability — from what the server now holds.
+        router.refresh()
       } else {
-        await createItem.mutateAsync(body)
+        const created = await createItem.mutateAsync(body)
         toast.success("Meal added to your menu")
+        // To the new meal's own page: its review status and where it sells
+        // are what a vendor checks next, and the list is one link away.
+        router.push(`/meals/${created.id}`)
       }
-      router.push("/meals")
-      router.refresh()
     } catch (err) {
       toast.error(err instanceof ClientApiError ? err.message : "Couldn't save the meal")
     } finally {
@@ -238,8 +256,19 @@ export function MealForm({ item }: Props) {
 
   const multiOutlet   = context.outlets.length > 1
   const previewPrice  = toMinorUnits(values.price, currency)
+  const groupsDirty   = JSON.stringify(toDishGroupPayload(groups)) !== savedGroups.current
+  const editingGroup  = typeof sheet === "number" ? groups[sheet] ?? null : null
+  // Copy sources: groups on the vendor's OTHER meals (and any left from the
+  // shared-library era). This meal's own are edited, not copied.
+  const ownIds        = new Set(groups.flatMap((g) => (g.id ? [g.id] : [])))
+  // Groups still under review or sent back are not offered: the server would
+  // hold an unchanged copy anyway (MATCHES_UNRESOLVED_GROUP).
+  const copySources   = (allGroups ?? []).filter(
+    (g) => !ownIds.has(g.id) && g.reviewStatus !== "FLAGGED" && g.reviewStatus !== "MANUALLY_REJECTED",
+  )
 
   return (
+    <>
     <form onSubmit={submit} className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <div className="space-y-4">
@@ -279,16 +308,22 @@ export function MealForm({ item }: Props) {
             </FormField>
 
             <div className="grid gap-4 sm:grid-cols-2">
+              {/*
+                * Free text, shown to customers beside the price — it describes
+                * the ONE dish this is and changes nothing about price, stock or
+                * options. A choice of sizes is an option group, not this.
+                */}
               <FormField
                 label="Portion size"
+                counter={`${(values.portionSize ?? "").length}/${MEAL_LIMITS.portionSize}`}
                 error={errors.portionSize}
-                hint="Optional, e.g. Serves 1 or 500g."
+                hint="Optional. How much a customer gets, shown next to the price — e.g. Serves 2, 500 g, 6 pieces. It doesn't change the price; if customers choose between sizes, add a Size option group instead."
               >
                 <Input
                   value={values.portionSize}
                   onChange={(e) => set("portionSize", e.target.value)}
                   maxLength={MEAL_LIMITS.portionSize}
-                  placeholder="Serves 1"
+                  placeholder="e.g. Serves 1"
                 />
               </FormField>
 
@@ -354,18 +389,15 @@ export function MealForm({ item }: Props) {
             description={`Set in ${currency.code}. This is what a customer pays before any delivery fee.`}
           >
             <FormField label="Price" required error={errors.price}>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-[var(--muted-foreground)]">
-                  {currency.symbol}
-                </span>
-                <Input
-                  value={values.price}
-                  onChange={(e) => set("price", e.target.value)}
-                  inputMode="decimal"
-                  className="pl-10 text-base font-medium tabular-nums"
-                  placeholder={currency.minorUnitDigits === 0 ? "1250" : "1250.00"}
-                />
-              </div>
+              <MoneyInput
+                currency={currency}
+                label="Price"
+                value={values.price}
+                onChange={(e) => set("price", e.target.value)}
+                aria-invalid={!!errors.price}
+                className="font-medium"
+                placeholder={currency.minorUnitDigits === 0 ? "1250" : `1250.${"0".repeat(currency.minorUnitDigits)}`}
+              />
             </FormField>
 
             <FormField
@@ -433,6 +465,7 @@ export function MealForm({ item }: Props) {
             />
             <TagMultiSelect
               label="Dietary tags"
+              tone="dietary"
               hint=""
               options={context.dietaryTags}
               selected={values.dietaryTagIds}
@@ -451,8 +484,11 @@ export function MealForm({ item }: Props) {
 
       <MealModifierSection
         currency={currency}
-        value={modifierGroupIds}
-        onChange={setModifierGroupIds}
+        groups={groups}
+        dirty={groupsDirty}
+        onChange={setGroups}
+        onAdd={() => setSheet("new")}
+        onEdit={(index) => setSheet(index)}
       />
 
       {/* Only shown when there is a real choice to make. */}
@@ -474,9 +510,12 @@ export function MealForm({ item }: Props) {
                     selected ? "border-primary/50 bg-primary/5" : "border-[var(--border)]",
                   )}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                  {/* Wraps to two rows when space is short: the outlet on top, its
+                      price underneath — never the price squeezed beside a long name. */}
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                     <button
                       type="button"
+                      aria-pressed={selected}
                       onClick={() =>
                         set(
                           "outletIds",
@@ -485,7 +524,7 @@ export function MealForm({ item }: Props) {
                             : [...values.outletIds, outlet.id],
                         )
                       }
-                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
+                      className="flex min-w-0 flex-1 basis-48 cursor-pointer items-center gap-3 text-left"
                     >
                       <span
                         className={cn(
@@ -497,11 +536,14 @@ export function MealForm({ item }: Props) {
                       >
                         {selected && <Check className="size-3.5" />}
                       </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-[var(--foreground)]">
-                          {outlet.name}
+                      <span className="min-w-0 flex-1">
+                        {/* The name truncates; the "Main" marker never does. */}
+                        <span className="flex min-w-0 items-baseline gap-2">
+                          <span className="truncate text-sm font-medium text-[var(--foreground)]" title={outlet.name}>
+                            {outlet.name}
+                          </span>
                           {outlet.isMainOutlet && (
-                            <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">Main</span>
+                            <span className="shrink-0 text-xs font-normal text-[var(--muted-foreground)]">Main</span>
                           )}
                         </span>
                         <span className="block truncate text-xs text-[var(--muted-foreground)]">
@@ -511,22 +553,18 @@ export function MealForm({ item }: Props) {
                     </button>
 
                     {selected && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-2 pl-8 sm:pl-0">
                         <span className="text-xs text-[var(--muted-foreground)]">Price here</span>
-                        <div className="relative w-32">
-                          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--muted-foreground)]">
-                            {currency.symbol}
-                          </span>
-                          <Input
-                            value={overrides[outlet.id] ?? ""}
-                            onChange={(e) =>
-                              setOverrides((prev) => ({ ...prev, [outlet.id]: e.target.value }))
-                            }
-                            inputMode="decimal"
-                            placeholder={values.price || "same"}
-                            className="h-9 pl-7 text-sm tabular-nums"
-                          />
-                        </div>
+                        <MoneyInput
+                          currency={currency}
+                          label={`Price at ${outlet.name}`}
+                          value={overrides[outlet.id] ?? ""}
+                          onChange={(e) =>
+                            setOverrides((prev) => ({ ...prev, [outlet.id]: e.target.value }))
+                          }
+                          placeholder={values.price || "same"}
+                          className="w-36"
+                        />
                       </div>
                     )}
                   </div>
@@ -572,6 +610,29 @@ export function MealForm({ item }: Props) {
         </div>
       </div>
     </form>
+
+    {/*
+      * OUTSIDE the <form>, on purpose. The sheet is portalled in the DOM, but
+      * React bubbles synthetic events along the React tree — rendered inside
+      * the form, finishing a group submitted the whole meal (and before the
+      * new group was even in this list). The sheet stops propagation too;
+      * this makes it structural rather than one line someone could delete.
+      */}
+    <ModifierGroupSheet
+      open={sheet !== null}
+      onClose={() => setSheet(null)}
+      currency={currency}
+      basePriceMinor={previewPrice != null && previewPrice > 0 ? previewPrice : null}
+      group={editingGroup}
+      otherNames={groups.filter((_, i) => i !== sheet).map((g) => g.name)}
+      copySources={copySources}
+      onDone={(draft) =>
+        setGroups((prev) =>
+          typeof sheet === "number" ? prev.map((g, i) => (i === sheet ? draft : g)) : [...prev, draft],
+        )
+      }
+    />
+    </>
   )
 }
 

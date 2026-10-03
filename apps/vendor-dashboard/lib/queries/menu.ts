@@ -195,33 +195,40 @@ export interface ModifierGroup {
   flagReasons    : string[]
   rejectionReason: string | null
   options        : ModifierOption[]
-  /** How many dishes use it — the blast radius of an edit, which a vendor
-   *  cannot otherwise see before making one. */
-  usedByCount    : number
+  /** The ONE dish this group belongs to. Null for a group left from the old
+   *  shared library with no dish: it can still be copied, never shown. */
+  dish           : { id: string; name: string } | null
   createdAt      : string
   updatedAt      : string
 }
 
-/** As attached to one dish. A thinner shape than the library row: the dish
- *  does not care how many OTHER dishes use the group. */
+/** One of a dish's own groups, as the dish returns it. */
 export interface AttachedModifierGroup {
-  id         : string
-  name       : string
-  description: string | null
-  minSelect  : number
-  maxSelect  : number
-  required   : boolean
-  flagged    : boolean
-  position   : number
-  options    : Omit<ModifierOption, "position">[]
+  id             : string
+  name           : string
+  description    : string | null
+  minSelect      : number
+  maxSelect      : number
+  required       : boolean
+  flagged        : boolean
+  reviewStatus   : ModifierGroup["reviewStatus"]
+  rejectionReason: string | null
+  position       : number
+  options        : Omit<ModifierOption, "position">[]
 }
 
-export interface UpsertModifierGroupRequest {
-  name       : string
-  description: string | null
-  minSelect  : number
-  maxSelect  : number
-  options    : {
+/**
+ * One of the dish's groups as the meal form SAVES it. Groups are written only
+ * with their dish: an `id` edits one of THIS dish's groups in place, no id
+ * creates one (which is what a copy is — content, never another dish's ids).
+ */
+export interface DishGroupPayload {
+  id         ?: string
+  name        : string
+  description : string | null
+  minSelect   : number
+  maxSelect   : number
+  options     : {
     /** Present when editing an existing choice, so its id survives the save
      *  rather than the row being recreated. */
     id             ?: string
@@ -263,8 +270,8 @@ export interface UpsertMenuItemRequest {
   dietaryTagIds : string[]
   outletIds     : string[]
   priceOverrides: Record<string, number | null>
-  /** In the vendor's chosen order, which is the order a customer sees. */
-  modifierGroupIds: string[]
+  /** The dish's OWN option groups, in the order a customer meets them. */
+  modifierGroups: DishGroupPayload[]
 }
 
 export const menuKeys = {
@@ -318,7 +325,8 @@ export function useCreateMenuItem() {
   return useMutation({
     mutationFn: (body: UpsertMenuItemRequest) =>
       clientFetch<MenuItem>("/api/menu/items", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess : () => { queryClient.invalidateQueries({ queryKey: menuKeys.items }) },
+    // The save wrote this dish's option groups too.
+    onSuccess : () => invalidateGroups(queryClient),
   })
 }
 
@@ -328,7 +336,7 @@ export function useUpdateMenuItem(itemId: string) {
     mutationFn: (body: UpsertMenuItemRequest) =>
       clientFetch<MenuItem>(`/api/menu/items/${itemId}`, { method: "PUT", body: JSON.stringify(body) }),
     onSuccess : () => {
-      queryClient.invalidateQueries({ queryKey: menuKeys.items })
+      invalidateGroups(queryClient)
       queryClient.invalidateQueries({ queryKey: menuKeys.item(itemId) })
     },
   })
@@ -397,10 +405,9 @@ export function useCreateMenuSection() {
 // ─── Modifier groups ─────────────────────────────────────────────────────────
 
 /*
- * The vendor's library of choice groups. A group is authored once and attached
- * to any number of dishes, so it is fetched as its own list rather than nested
- * under a meal — editing "Sauces" has to fix every dish at once, and a
- * per-dish copy could not.
+ * Every option group the vendor has, each with the dish it belongs to. Read
+ * only: a group is WRITTEN with its dish's save. This list is what "copy an
+ * existing group" starts from and what the Options page shows.
  */
 export function useModifierGroups() {
   return useQuery({
@@ -410,45 +417,10 @@ export function useModifierGroups() {
   })
 }
 
-/** Everything a group touches is invalidated together: the library itself, the
- *  meal list and every open meal, since a shared group's price and its
- *  moderation flag both show up on the dishes using it. */
+/** A group's options show on its dish and on the Options page alike. */
 function invalidateGroups(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: menuKeys.groups })
   queryClient.invalidateQueries({ queryKey: menuKeys.items })
-}
-
-export function useCreateModifierGroup() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: UpsertModifierGroupRequest) =>
-      clientFetch<ModifierGroup>("/api/menu/modifier-groups", {
-        method: "POST", body: JSON.stringify(body),
-      }),
-    onSuccess: () => invalidateGroups(queryClient),
-  })
-}
-
-export function useUpdateModifierGroup(groupId: string) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: UpsertModifierGroupRequest) =>
-      clientFetch<ModifierGroup>(`/api/menu/modifier-groups/${groupId}`, {
-        method: "PUT", body: JSON.stringify(body),
-      }),
-    onSuccess: () => invalidateGroups(queryClient),
-  })
-}
-
-export function useDeleteModifierGroup() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (groupId: string) =>
-      clientFetch<{ detachedFrom: number }>(`/api/menu/modifier-groups/${groupId}`, {
-        method: "DELETE",
-      }),
-    onSuccess: () => invalidateGroups(queryClient),
-  })
 }
 
 /** 86-ing one choice. Its own mutation rather than a group save, because a

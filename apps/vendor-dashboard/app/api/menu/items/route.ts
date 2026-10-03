@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { backendFetch } from "@/lib/api/server"
 import { proxyBackendCall } from "@/lib/api/route-handler"
+import { revalidateMenuItem } from "@/lib/vendor/menu"
 
 export async function GET(req: NextRequest) {
   const qs = req.nextUrl.searchParams.toString()
@@ -9,7 +10,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  return proxyBackendCall(() =>
+  const res = await proxyBackendCall(() =>
     backendFetch("/vendor/v1/menu/items", { method: "POST", body: JSON.stringify(body) }),
   )
+  if (res.ok) revalidateMenuItem()
+  return res
 }

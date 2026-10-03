@@ -11,9 +11,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ ite
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params
   const body = await req.json()
-  return proxyBackendCall(() =>
+  const res = await proxyBackendCall(() =>
     backendFetch(`/vendor/v1/menu/items/${itemId}`, { method: "PUT", body: JSON.stringify(body) }),
   )
+  if (res.ok) revalidateMenuItem(itemId)
+  return res
 }
 
 /** Soft delete. The backend keeps the row and everything it references. */

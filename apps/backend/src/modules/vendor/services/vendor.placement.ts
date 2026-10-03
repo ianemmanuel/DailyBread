@@ -5,6 +5,8 @@ import type {
   OutletPlacement,
   OutletPlacementCapabilities,
   OutletPlacementStatus,
+  OutletGoLiveStatus,
+  VendorOutletZone,
 } from "@repo/types/backend"
 
 /*
@@ -56,6 +58,26 @@ function statusFromFlags(flags: ZoneCapabilityFlags): OutletPlacementStatus {
   if (flags.canPlatformDeliverOnDemand) return "PLATFORM_DELIVERY"
   if (flags.canListOnDemand)            return "SELF_DELIVERY"
   return "REGISTRATION_ONLY"
+}
+
+/**
+ * An outlet's zone as the VENDOR is shown it: the public name and what they
+ * can do there, never the capability `level` or the `operationalStatus` enum
+ * (internal vocabulary — see VendorOutletZone). The capability set is the same
+ * one the placement verdict uses, so the outlet page and the map agree.
+ */
+export function toVendorOutletZone(
+  zone      : OutletGoLiveStatus["zone"],
+  publicName: string | null,
+): VendorOutletZone {
+  const level = zone.level as ZoneLevel | null
+  return {
+    id             : zone.id,
+    name           : publicName,
+    isOperational  : zone.operationalStatus === "ACTIVE",
+    onDemandAllowed: zone.onDemandAllowed,
+    capabilities   : level && level in ZONE_CAPABILITIES ? toVendorCapabilities(ZONE_CAPABILITIES[level]) : NO_CAPABILITIES,
+  }
 }
 
 /**

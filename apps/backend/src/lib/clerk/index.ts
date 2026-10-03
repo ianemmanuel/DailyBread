@@ -7,3 +7,5 @@ export type { ClerkAppType } from "./clerkProjects"
 export { ClerkVendorStateService, ClerkAdminStateService, ClerkCustomerStateService } from "./clerkMetadata"
 
 export { extractBearerToken } from "./extractBearerToken"
+export { describeJwtFailure } from "./describeJwtFailure"
+export type { JwtFailure, JwtFailureReason } from "./describeJwtFailure"

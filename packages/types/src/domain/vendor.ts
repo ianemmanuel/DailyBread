@@ -3,6 +3,7 @@ import { GeoStatus } from "../enums/geography"
 
 import { DocumentStatus, DocumentScope, DocumentTypeStatus } from "../enums/document"
 import type { Country } from "./country"
+import type { OutletPlacementCapabilities } from "./geography"
 
 
 export interface VendorUser {
@@ -436,6 +437,26 @@ export interface OutletGoLiveStatus {
     onDemandAllowed  : boolean
   }
 }
+
+/*
+ * The VENDOR's view of an outlet's zone. The admin shape above carries the
+ * zone's capability `level` and its `operationalStatus` — internal vocabulary
+ * that maps out the capability ladder and why an area is paused — which the
+ * vendor is never sent (the same rule the coverage map and the customer's
+ * Serviceability follow). What the vendor needs is what they can DO there,
+ * in their words, which is exactly the placement verdict's capability set.
+ */
+export interface VendorOutletZone {
+  id             : string | null
+  /** The zone's PUBLIC name — never the operational one. */
+  name           : string | null
+  /** False while ordering is paused in the area, for any internal reason. */
+  isOperational  : boolean
+  onDemandAllowed: boolean
+  capabilities   : OutletPlacementCapabilities
+}
+
+export type VendorOutletGoLiveStatus = Omit<OutletGoLiveStatus, "zone"> & { zone: VendorOutletZone }
 
 //* Admin-facing profile row — the cross-vendor moderation queue at
 //* /vendors/profiles needs the owning vendor's name/country alongside the

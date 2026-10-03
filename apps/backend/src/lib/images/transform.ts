@@ -263,6 +263,15 @@ export interface BoundedImageSpec {
  */
 export const DISH_PHOTO_SPEC: BoundedImageSpec = { maxEdge: 1600, minEdge: 600, quality: 82 }
 
+/*
+ * A menu's image/logo. Shown far smaller than a dish photo (a card, a header
+ * badge), so 1024px covers it at 2x with headroom; the floor is lower than a
+ * dish's because logos are often drawn small — 256px still renders crisply
+ * at the sizes a logo is used. Same bounded fit: a wide wordmark keeps its
+ * shape rather than being cropped square.
+ */
+export const MENU_LOGO_SPEC: BoundedImageSpec = { maxEdge: 1024, minEdge: 256, quality: 85 }
+
 /** Fits within `maxEdge` × `maxEdge` preserving aspect, re-encoded as WebP.
  *  Metadata is dropped (sharp keeps none unless asked), rotation is applied
  *  first, and WebP for the same master-not-delivery reason as toSquareWebp. */

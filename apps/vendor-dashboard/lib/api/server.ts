@@ -75,6 +75,20 @@ export async function backendFetch<T>(
 
   const body = (await res.json().catch(() => null)) as ApiEnvelope<T> | null
 
+  if (res.status === 401) {
+    /*
+     * Diagnostic only. The backend answers every refused token with a bare
+     * "Unauthorized", so without this the dev log cannot say whether the token
+     * we SENT was already past its expiry (Clerk's middleware accepts a few
+     * seconds of skew; the backend's verifier may not). Logs the error code and
+     * the token's age relative to `exp` — never the token or any identity claim.
+     */
+    console.warn(
+      `[backendFetch] 401 ${body?.code ?? "UNKNOWN"} on ${rest.method ?? "GET"} ${path.split("?")[0]}` +
+        describeTokenExpiry(token),
+    )
+  }
+
   if (!res.ok || body?.status === "error") {
     throw new BackendApiError(
       res.status,
@@ -85,4 +99,17 @@ export async function backendFetch<T>(
   }
 
   return body?.data as T
+}
+
+/** " (token exp 2.4s ago)" / " (token exp in 41.0s)" — read from the payload's
+ *  `exp` only, by this server's clock. Empty if it cannot be read. */
+function describeTokenExpiry(token: string): string {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { exp?: unknown }
+    if (typeof payload.exp !== "number") return ""
+    const delta = (Date.now() - payload.exp * 1000) / 1000
+    return delta >= 0 ? ` (token exp ${delta.toFixed(1)}s ago)` : ` (token exp in ${(-delta).toFixed(1)}s)`
+  } catch {
+    return ""
+  }
 }

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express"
 
-import { verifyClerkJwt } from "@/lib/clerk"
+import { verifyClerkJwt, describeJwtFailure } from "@/lib/clerk"
 import { extractBearerToken } from "@/lib/clerk/extractBearerToken"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
@@ -44,7 +44,8 @@ export async function clerkAuthMiddleware(
     req.auth = auth
     next()
   } catch (err) {
-    authLog.debug({ err }, "Token verification failed")
+    // Classified, never the token or its claims — see describeJwtFailure.
+    authLog.warn({ path: req.originalUrl.split("?")[0], ...describeJwtFailure(err) }, "Token verification failed")
     next(new ApiError(HttpStatus.UNAUTHORIZED, "Unauthorized", "INVALID_TOKEN"))
   }
 }

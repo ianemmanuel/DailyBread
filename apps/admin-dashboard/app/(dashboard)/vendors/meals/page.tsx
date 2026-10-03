@@ -58,6 +58,7 @@ const ADMIN_BADGE: Record<string, string> = {
 const FLAG_LABEL: Record<string, string> = {
   INAPPROPRIATE_NAME       : "Name",
   INAPPROPRIATE_DESCRIPTION: "Description",
+  INAPPROPRIATE_PORTION    : "Portion size",
   INAPPROPRIATE_MODIFIER   : "Options",
 }
 
@@ -66,6 +67,7 @@ const FLAG_LABEL: Record<string, string> = {
 const FLAG_REASON_OPTIONS = [
   { value: "INAPPROPRIATE_NAME",        label: "Name" },
   { value: "INAPPROPRIATE_DESCRIPTION", label: "Description" },
+  { value: "INAPPROPRIATE_PORTION",     label: "Portion size" },
   { value: "INAPPROPRIATE_MODIFIER",    label: "Options" },
 ]
 

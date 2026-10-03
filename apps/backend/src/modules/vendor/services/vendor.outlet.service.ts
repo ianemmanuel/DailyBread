@@ -7,15 +7,16 @@ import { auditService } from "@/services/audit"
 import { SYSTEM_USER_ID } from "@/constants/system"
 import { OUTLET_PROXIMITY_DEGREES, MAX_TEMP_CLOSURE_DAYS } from "@/constants/vendor"
 import { getModerationProvider } from "@/lib/moderation"
-import { resolveCapabilitiesForPoint, resolveCapabilitiesForOutlet } from "./vendor.geography.service"
+import { resolveCapabilitiesForPoint, resolveCapabilitiesForOutlet, getZonePublicName } from "./vendor.geography.service"
 import type { ResolvedZoneCapabilities } from "@repo/geo/types"
 import { getOutletDocumentRequirements } from "./vendor.document.service"
 import { getOutletCriticalDocuments } from "./vendor.outletDocument.service"
 import { selectEnforcedCriticalRequired } from "./vendor.outletClearance"
 import { validateOperatingHours } from "./vendor.operatingHours"
+import { toVendorOutletZone } from "./vendor.placement"
 import type {
   CreateOutletRequest, UpdateOutletRequest,
-  OutletGoLiveStatus, OutletGoLiveBlocker,
+  OutletGoLiveStatus, OutletGoLiveBlocker, VendorOutletGoLiveStatus,
   OutletMealPlanReadiness, OutletMealPlanBlocker,
 } from "@repo/types/backend"
 
@@ -173,8 +174,11 @@ async function runFlagChecks(
 
 async function assertVendorOwnsOutlet(outletId: string, vendorId: string) {
   const outlet = await prisma.outlet.findUnique({ where: { id: outletId } })
-  if (!outlet || outlet.deletedAt)  throw new ApiError(404, "Outlet not found", "NOT_FOUND")
-  if (outlet.vendorId !== vendorId) throw new ApiError(403, "Unauthorized", "FORBIDDEN")
+  // Someone else's outlet is indistinguishable from none (principle 6): one
+  // condition, one response, so the id space cannot be probed.
+  if (!outlet || outlet.deletedAt || outlet.vendorId !== vendorId) {
+    throw new ApiError(404, "Outlet not found", "NOT_FOUND")
+  }
   return outlet
 }
 
@@ -369,7 +373,8 @@ export async function getOutlet(vendorId: string, outletId: string) {
     where  : { id: outletId },
     include: {
       operatingHours: { orderBy: { dayOfWeek: "asc" } },
-      zone          : { select: { id: true, name: true, level: true, operationalStatus: true, status: true } },
+      // publicName, not the operational name — see getZonePublicName.
+      zone          : { select: { id: true, publicName: true } },
       /*
        * Cuisines are DERIVED from the vendor's profile plus the dishes this
        * outlet actually sells. The old `cuisines` include read OutletCuisine,
@@ -394,8 +399,10 @@ export async function getOutlet(vendorId: string, outletId: string) {
     },
   })
 
-  if (!outlet || outlet.deletedAt) throw new ApiError(404, "Outlet not found", "NOT_FOUND")
-  if (outlet.vendorId !== vendorId) throw new ApiError(403, "Unauthorized", "FORBIDDEN")
+  // Another vendor's outlet answers exactly like a missing one (principle 6).
+  if (!outlet || outlet.deletedAt || outlet.vendorId !== vendorId) {
+    throw new ApiError(404, "Outlet not found", "NOT_FOUND")
+  }
 
   const [city, goLiveStatus, mealPlanReadiness] = await Promise.all([
     prisma.city.findUnique({
@@ -408,13 +415,26 @@ export async function getOutlet(vendorId: string, outletId: string) {
 
   // The two raw relations exist only to feed the derivation; they are stripped
   // so the response keeps the flat `cuisines` shape the page already renders.
-  const { vendor, meals, ...rest } = outlet
+  const { vendor, meals, zone, ...rest } = outlet
   const cuisines = resolveOutletCuisines({
     profileCuisines: flattenCuisineLinks(vendor?.vendorProfile?.cuisines),
     dishCuisines   : meals.flatMap((meal) => flattenCuisineLinks(meal.menuItem.cuisines)),
   })
 
-  return { ...rest, cuisines, city, goLiveStatus, mealPlanReadiness }
+  // getOutletGoLiveStatus is shared with admin and keeps the operational name,
+  // the capability level and the operational status; the vendor's copy
+  // carries the public name and capabilities in the vendor's own words.
+  const vendorGoLiveStatus: VendorOutletGoLiveStatus = {
+    ...goLiveStatus,
+    zone: toVendorOutletZone(goLiveStatus.zone, await getZonePublicName(goLiveStatus.zone.id)),
+  }
+
+  return {
+    ...rest,
+    // Which area, by its public name — nothing about how it is configured.
+    zone: zone ? { id: zone.id, name: zone.publicName } : null,
+    cuisines, city, goLiveStatus: vendorGoLiveStatus, mealPlanReadiness,
+  }
 }
 
 //* Meal-plan eligibility — the single chokepoint a future meal-plan-creation

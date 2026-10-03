@@ -547,82 +547,186 @@ async function main() {
       check("an image a saved dish still uses cannot be discarded", d.status === 409 && d.json.code === "IMAGE_IN_USE", d.json)
     }
 
-    // ── modifier groups ──
-    console.log("\n  ── 1b. modifier groups\n")
+    // ── option groups — each dish owns its own ──
+    console.log("\n  ── 1b. option groups (owned by one dish)\n")
     {
       const G = "/api/vendor/v1/menu/modifier-groups"
-      const groupBody = (over: Json = {}): Json => ({
-        name: `${MARKER} Size`, description: "Pick one", minSelect: 1, maxSelect: 1,
+      const I = "/api/vendor/v1/menu/items"
+      const size = (over: Json = {}): Json => ({
+        name: "Size", description: "Pick one", minSelect: 1, maxSelect: 1,
         options: [{ name: "Small", priceDeltaMinor: 0 }, { name: "Large", priceDeltaMinor: 500 }],
         ...over,
       })
-      const created = await call("POST", G, groupBody({ reviewStatus: "MANUALLY_APPROVED", vendorId: vendorB.id }))
-      const group = created.json.data as Json
-      check("create returns 201", created.status === 201, created.json)
-      check("…key set", keys(group) === "createdAt,description,flagReasons,id,maxSelect,minSelect,name,options,rejectionReason,required,reviewStatus,updatedAt,usedByCount", keys(group))
+      const groupsOf = (res: { json: Json }) => (res.json.data?.modifierGroups ?? []) as Json[]
+
+      // Created THROUGH the dish's own save — the only way a group is written.
+      const saved = await call("PUT", `${I}/${plateId}`, body({
+        modifierGroups: [size({ reviewStatus: "MANUALLY_APPROVED", flagReasons: [], vendorId: vendorB.id })],
+      }))
+      const group = groupsOf(saved)[0]!
+      check("a dish save creates its group", saved.status === 200 && group?.name === "Size", saved.json)
+      check("…attached-group key set",
+        keys(group) === "description,flagged,id,maxSelect,minSelect,name,options,position,rejectionReason,required,reviewStatus", keys(group))
       check("…required is derived from minSelect", group.required === true)
       check("…options keep their authored order", (group.options as Json[]).map((o) => o.name).join(",") === "Small,Large")
       check("…moderation fields in the body are ignored", group.reviewStatus === "AUTO_APPROVED")
       check("…owned by the caller", (await prisma.modifierGroup.findUnique({ where: { id: group.id } }))?.vendorId === vendorA.id)
-
-      const bad = async (label: string, over: Json, status: number, code: string) => {
-        const r = await call("POST", G, groupBody({ name: `${MARKER} Bad`, ...over }))
-        check(label, r.status === status && r.json.code === code, { status: r.status, code: r.json.code })
-      }
-      await bad("a nameless group is refused", { name: "" }, 400, "MISSING_FIELDS")
-      await bad("min above max is refused", { minSelect: 2, maxSelect: 1 }, 400, "INVALID_RULE")
-      await bad("a decimal price delta is refused", { options: [{ name: "Odd", priceDeltaMinor: 2.5 }] }, 400, "INVALID_PRICE")
-      await bad("a duplicate group name is refused", { name: `${MARKER} Size` }, 409, "DUPLICATE_GROUP_NAME")
-
-      const [small, large] = group.options as Json[]
-      const reordered = await call("PUT", `${G}/${group.id}`, groupBody({
-        options: [{ id: large!.id, name: "Large", priceDeltaMinor: 600 }, { id: small!.id, name: "Small", priceDeltaMinor: 0 }],
-      }))
-      const ro = reordered.json.data?.options as Json[] | undefined
-      check("update reorders options and keeps their ids",
-        reordered.status === 200 && ro?.[0]?.id === large!.id && ro?.[1]?.id === small!.id && ro?.[0]?.priceDeltaMinor === 600, ro)
-      check("GET one returns it", (await call("GET", `${G}/${group.id}`)).json.data?.id === group.id)
-      check("GET list includes it", ((await call("GET", G)).json.data as Json[]).some((g) => g.id === group.id))
-
-      const attached = await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body({ modifierGroupIds: [group.id] }))
-      const link = (attached.json.data?.modifierGroups as Json[] | undefined)?.[0]
-      check("attaching to a dish shows the group on it", link?.id === group.id, attached.json.data?.modifierGroups)
-      check("…attached-group key set", keys(link) === "description,flagged,id,maxSelect,minSelect,name,options,position,required", keys(link))
-      check("…and usedByCount counts the dish", (await call("GET", `${G}/${group.id}`)).json.data?.usedByCount === 1)
-      check("…the customer storefront shows it too",
+      check("…the customer storefront shows it",
         menuOf(await storefrontOrNull(o1.id)).find((i) => i.id === plateId)?.modifierGroups[0]?.id === group.id)
 
-      const zero = await call("POST", G, groupBody({
-        name: `${MARKER} Discounting`, options: [{ name: "Tiny", priceDeltaMinor: -20000 }],
-      }))
-      const zeroOut = await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body({ modifierGroupIds: [zero.json.data.id] }))
-      check("a group that could take the dish to zero is refused on attach", zeroOut.status === 400 && zeroOut.json.code === "OPTIONS_ZERO_OUT_DISH", zeroOut.json)
+      const bad = async (label: string, groups: Json[], status: number, code: string) => {
+        const r = await call("PUT", `${I}/${plateId}`, body({ modifierGroups: groups }))
+        check(label, r.status === status && r.json.code === code, { status: r.status, code: r.json.code })
+      }
+      await bad("a nameless group is refused", [size({ name: "" })], 400, "MISSING_FIELDS")
+      await bad("min above max is refused", [size({ minSelect: 2, maxSelect: 1 })], 400, "INVALID_RULE")
+      await bad("a decimal price delta is refused", [size({ options: [{ name: "Odd", priceDeltaMinor: 2.5 }] })], 400, "INVALID_PRICE")
+      await bad("two groups with one name on ONE dish are refused", [size({ id: group.id }), size({ name: "size" })], 400, "DUPLICATE_GROUP_NAME")
+      await bad("a discounting option that could take the dish to zero is refused",
+        [size({ id: group.id }), { name: "Half", minSelect: 0, maxSelect: 1, options: [{ name: "Tiny", priceDeltaMinor: -20000 }] }],
+        400, "OPTIONS_ZERO_OUT_DISH")
 
-      const offSmall = await call("PATCH", `/api/vendor/v1/menu/modifier-options/${small!.id}/availability`, { isAvailable: false })
+      // The retired library field and endpoints say so instead of being ignored.
+      const legacy = await call("PUT", `${I}/${plateId}`, body({ modifierGroupIds: [group.id] }))
+      check("the old modifierGroupIds field is refused, not silently dropped",
+        legacy.status === 400 && legacy.json.code === "UNSUPPORTED_FIELD", legacy.json)
+      for (const [method, path] of [["POST", G], ["PUT", `${G}/${group.id}`], ["DELETE", `${G}/${group.id}`]] as const) {
+        const r = await call(method, path, size())
+        check(`${method} ${path.replace(group.id as string, ":id")} answers 410 — groups are saved with their meal`,
+          r.status === 410 && r.json.code === "GROUPS_BELONG_TO_MEALS", { status: r.status, code: r.json.code })
+      }
+
+      // A save that does not mention the groups leaves them alone.
+      const untouched = await call("PUT", `${I}/${plateId}`, body({ description: "A plate, again" }))
+      check("a save without modifierGroups keeps the dish's groups", groupsOf(untouched)[0]?.id === group.id, groupsOf(untouched))
+
+      const [small, large] = group.options as Json[]
+      const reordered = await call("PUT", `${I}/${plateId}`, body({ modifierGroups: [size({
+        id: group.id,
+        options: [{ id: large!.id, name: "Large", priceDeltaMinor: 600 }, { id: small!.id, name: "Small", priceDeltaMinor: 0 }],
+      })] }))
+      const ro = groupsOf(reordered)[0]?.options as Json[] | undefined
+      check("editing in place keeps the group id and option ids, and applies order and price",
+        groupsOf(reordered)[0]?.id === group.id && ro?.[0]?.id === large!.id && ro?.[1]?.id === small!.id && ro?.[0]?.priceDeltaMinor === 600, ro)
+
+      // The (groupId, name) unique used to break both of these.
+      const swapped = await call("PUT", `${I}/${plateId}`, body({ modifierGroups: [size({
+        id: group.id,
+        options: [{ id: large!.id, name: "Small", priceDeltaMinor: 0 }, { id: small!.id, name: "Large", priceDeltaMinor: 600 }],
+      })] }))
+      check("swapping two option names saves", swapped.status === 200, swapped.json)
+      await call("PUT", `${I}/${plateId}`, body({ modifierGroups: [size({
+        id: group.id, options: [{ id: large!.id, name: "Small", priceDeltaMinor: 0 }],
+      })] }))
+      const readded = await call("PUT", `${I}/${plateId}`, body({ modifierGroups: [size({
+        id: group.id,
+        options: [{ id: large!.id, name: "Small", priceDeltaMinor: 0 }, { name: "Large", priceDeltaMinor: 700 }],
+      })] }))
+      const back = (groupsOf(readded)[0]?.options as Json[] | undefined)?.find((o) => o.name === "Large")
+      check("re-adding a removed option saves, and brings back the same option id",
+        readded.status === 200 && back?.id === small!.id && back?.priceDeltaMinor === 700, readded.json)
+      // The fixture from here: Small +0, Large +700.
+      const plateGroup = groupsOf(readded)[0]!
+      const plateSmall = (plateGroup.options as Json[]).find((o) => o.name === "Small")!
+      const plateLarge = (plateGroup.options as Json[]).find((o) => o.name === "Large")!
+
+      check("GET one returns it with its dish", (await call("GET", `${G}/${group.id}`)).json.data?.dish?.id === plateId)
+      check("GET list includes it", ((await call("GET", G)).json.data as Json[]).some((g) => g.id === group.id))
+
+      // ── INDEPENDENCE: a copy is its own group, and edits never cross ──
+      const copyDish = await call("POST", I, {
+        name: `${MARKER} Copy Dish`, basePriceMinor: 8000, outletIds: [o1.id],
+        // What the dashboard's "copy" sends: the content, never the ids.
+        modifierGroups: [size({ options: [{ name: "Small", priceDeltaMinor: 0 }, { name: "Large", priceDeltaMinor: 250 }] })],
+      })
+      const copyId = copyDish.json.data?.id as string
+      const copyGroup = groupsOf(copyDish)[0]!
+      check("a copied group is a NEW group on the other dish",
+        copyDish.status === 201 && copyGroup.id !== plateGroup.id && copyGroup.name === "Size", copyDish.json)
+
+      const before = JSON.stringify(groupsOf(await call("GET", `${I}/${plateId}`)))
+      const copyBody = (groups: Json[], over: Json = {}): Json => ({
+        name: `${MARKER} Copy Dish`, basePriceMinor: 8000, outletIds: [o1.id], modifierGroups: groups, ...over,
+      })
+      await call("PUT", `${I}/${copyId}`, copyBody([size({
+        id: copyGroup.id, name: "Portion", description: "Changed on the copy only",
+        options: [{ id: (copyGroup.options as Json[])[1]!.id, name: "Large", priceDeltaMinor: 300 },
+                  { id: (copyGroup.options as Json[])[0]!.id, name: "Small", priceDeltaMinor: 0 }],
+      })]))
+      check("editing the copy leaves the original dish's group exactly as it was",
+        JSON.stringify(groupsOf(await call("GET", `${I}/${plateId}`))) === before)
+
+      const firstGroupOn = async (dishId: string) =>
+        menuOf(await storefrontOrNull(o1.id)).find((i) => i.id === dishId)?.modifierGroups[0]
+      check("…and customers see each dish's own options",
+        (await firstGroupOn(plateId))?.name === "Size" && (await firstGroupOn(copyId))?.name === "Portion")
+
+      // The cart prices each dish from ITS options, never from the client.
+      const priced = async (dishId: string, optionIds: string[]) =>
+        priceCustomerCart({ outletId: o1.id, lines: [{ menuItemId: dishId, quantity: 1, selectedOptionIds: optionIds }] })
+      const plateWithLarge = await priced(plateId, [plateLarge.id as string])
+      const plateWithSmall = await priced(plateId, [plateSmall.id as string])
+      check("the cart prices the plate's Large at the plate's own +700",
+        plateWithLarge.lines[0]!.totalMinor - plateWithSmall.lines[0]!.totalMinor === 700,
+        [plateWithLarge.lines[0], plateWithSmall.lines[0]])
+      const crossed = await priced(copyId, [plateLarge.id as string, (copyGroup.options as Json[])[0]!.id as string])
+      check("…and refuses the plate's option on the copy dish",
+        crossed.problems.some((p) => p.code === "OPTION_NOT_ON_ITEM") && !crossed.canCheckout, crossed.problems)
+
+      // The isolation guarantee, attacked directly.
+      const hijack = await call("PUT", `${I}/${copyId}`, copyBody([size({ id: plateGroup.id, name: "Hijacked" })]))
+      check("another dish's group id is refused (404 GROUP_NOT_FOUND)", hijack.status === 404 && hijack.json.code === "GROUP_NOT_FOUND", hijack.json)
+      const optHijack = await call("PUT", `${I}/${copyId}`, copyBody([size({
+        id: copyGroup.id, name: "Portion", options: [{ id: plateLarge.id, name: "Stolen", priceDeltaMinor: 1 }],
+      })]))
+      check("another group's option id is refused (404 OPTION_NOT_FOUND)", optHijack.status === 404 && optHijack.json.code === "OPTION_NOT_FOUND", optHijack.json)
+      check("…and the plate's group is untouched by either attempt",
+        JSON.stringify(groupsOf(await call("GET", `${I}/${plateId}`))) === before)
+
+      // A price cut alone is checked against the groups already on the dish.
+      await call("PUT", `${I}/${copyId}`, copyBody([
+        { name: "Half", minSelect: 0, maxSelect: 1, options: [{ name: "Half portion", priceDeltaMinor: -5000 }] },
+      ]))
+      const cut = await call("PUT", `${I}/${copyId}`, { name: `${MARKER} Copy Dish`, basePriceMinor: 4000, outletIds: [o1.id] })
+      check("cutting the price under an existing discounting option is refused even when groups are not resent",
+        cut.status === 400 && cut.json.code === "OPTIONS_ZERO_OUT_DISH", cut.json)
+      check("…and replacing the copy's groups soft-deleted the old one",
+        (await prisma.modifierGroup.findUnique({ where: { id: copyGroup.id } }))?.deletedAt != null)
+
+      const offSmall = await call("PATCH", `/api/vendor/v1/menu/modifier-options/${plateSmall.id}/availability`, { isAvailable: false })
       check("an option can be 86'd", offSmall.status === 200 && offSmall.json.data?.isAvailable === false, offSmall.json)
-      const offLarge = await call("PATCH", `/api/vendor/v1/menu/modifier-options/${large!.id}/availability`, { isAvailable: false })
+      const offLarge = await call("PATCH", `/api/vendor/v1/menu/modifier-options/${plateLarge.id}/availability`, { isAvailable: false })
       check("…but not the last one a required group has", offLarge.status === 409 && offLarge.json.code === "REQUIRED_GROUP_UNSATISFIABLE", offLarge.json)
-      const nonBool = await call("PATCH", `/api/vendor/v1/menu/modifier-options/${small!.id}/availability`, { isAvailable: 1 })
+      const nonBool = await call("PATCH", `/api/vendor/v1/menu/modifier-options/${plateSmall.id}/availability`, { isAvailable: 1 })
       check("…and a non-boolean is refused", nonBool.status === 400 && nonBool.json.code === "MISSING_FIELDS", nonBool.json)
-      await call("PATCH", `/api/vendor/v1/menu/modifier-options/${small!.id}/availability`, { isAvailable: true })
+      await call("PATCH", `/api/vendor/v1/menu/modifier-options/${plateSmall.id}/availability`, { isAvailable: true })
 
       asVendor(vendorB.userId)
-      check("vendor B cannot read A's group", (await call("GET", `${G}/${group.id}`)).status === 404)
-      check("…or update it", (await call("PUT", `${G}/${group.id}`, groupBody())).status === 404)
-      check("…or 86 one of its options", (await call("PATCH", `/api/vendor/v1/menu/modifier-options/${small!.id}/availability`, { isAvailable: false })).status === 404)
-      check("…or delete it", (await call("DELETE", `${G}/${group.id}`)).status === 404)
-      const steal = await call("PUT", `/api/vendor/v1/menu/items/${bDishId}`, {
-        name: `${MARKER} B Dish`, basePriceMinor: 500, outletIds: [oB.id], modifierGroupIds: [group.id],
+      check("vendor B cannot read A's group", (await call("GET", `${G}/${plateGroup.id}`)).status === 404)
+      check("…or 86 one of its options", (await call("PATCH", `/api/vendor/v1/menu/modifier-options/${plateSmall.id}/availability`, { isAvailable: false })).status === 404)
+      const steal = await call("PUT", `${I}/${bDishId}`, {
+        name: `${MARKER} B Dish`, basePriceMinor: 500, outletIds: [oB.id], modifierGroups: [size({ id: plateGroup.id })],
       })
-      check("…or attach it to its own dish", steal.status === 404 && steal.json.code === "GROUP_NOT_FOUND", steal.json)
-      check("…and B's group list does not include it", !((await call("GET", G)).json.data as Json[]).some((g) => g.id === group.id))
+      check("…or put it on its own dish", steal.status === 404 && steal.json.code === "GROUP_NOT_FOUND", steal.json)
+      check("…and B's group list does not include it", !((await call("GET", G)).json.data as Json[]).some((g) => g.id === plateGroup.id))
       asVendor(vendorA.userId)
 
-      const del = await call("DELETE", `${G}/${group.id}`)
-      check("delete detaches it from every dish", del.status === 200 && del.json.data?.deleted === true && del.json.data?.detachedFrom === 1, del.json)
-      check("…the dish no longer offers it", ((await call("GET", `/api/vendor/v1/menu/items/${plateId}`)).json.data?.modifierGroups as Json[]).length === 0)
-      check("…and it is gone from reads", (await call("GET", `${G}/${group.id}`)).status === 404)
-      await call("DELETE", `${G}/${zero.json.data.id}`)
+      const cleared = await call("PUT", `${I}/${plateId}`, body({ modifierGroups: [] }))
+      check("an empty list removes the dish's groups", cleared.status === 200 && groupsOf(cleared).length === 0, groupsOf(cleared))
+      check("…and the removed group is gone from reads", (await call("GET", `${G}/${plateGroup.id}`)).status === 404)
+      await call("DELETE", `${I}/${copyId}`)
+    }
+
+    // ── portion size is customer-visible text, so it is screened ──
+    {
+      const P = `/api/vendor/v1/menu/items/${plateId}`
+      const flagged = (await call("PUT", P, body({ portionSize: "Shit portion" }))).json.data as Json
+      check("an inappropriate portion size flags the dish for review (INAPPROPRIATE_PORTION)",
+        flagged?.reviewStatus === "FLAGGED" && (flagged.flagReasons as string[]).includes("INAPPROPRIATE_PORTION"), flagged?.flagReasons)
+      const clean = (await call("PUT", P, body({ portionSize: "Serves 2" }))).json.data as Json
+      check("…and rewording it re-screens the dish clean, storing the text as typed",
+        clean?.reviewStatus === "AUTO_APPROVED" && clean.portionSize === "Serves 2" && !(clean.flagReasons as string[]).length, clean?.flagReasons)
+      await call("PUT", P, body())
     }
 
     // ── images ──
@@ -1020,19 +1124,20 @@ async function main() {
       /* A dish carrying every relationship a lifecycle action could damage:
        * three outlets, a local price, a modifier group, a photo and a place
        * in a meal plan. */
-      const grp = (await call("POST", "/api/vendor/v1/menu/modifier-groups", {
-        name: `${MARKER} Sauce`, minSelect: 0, maxSelect: 1, options: [{ name: "Chilli", priceDeltaMinor: 0 }],
-      })).json.data as Json
+      // The dish's own group. Sent without an id on create; every later
+      // full-form save sends it back by id, as the dashboard does.
+      let lcGroups: Json[] = [{ name: "Sauce", minSelect: 0, maxSelect: 1, options: [{ name: "Chilli", priceDeltaMinor: 0 }] }]
       // Created with a staged photo; every later full-form save sends it back
       // by its saved original's key.
       let lcImages = [await stageUpload(vendorA.userId, await photo(900, 900))]
       const lcBody = (over: Json = {}): Json => ({
         name: `${MARKER} Lifecycle`, basePriceMinor: 7000, imageKeys: lcImages,
-        outletIds: [o1.id, o2.id, o3.id], priceOverrides: { [o2.id]: 9000 }, modifierGroupIds: [grp.id],
+        outletIds: [o1.id, o2.id, o3.id], priceOverrides: { [o2.id]: 9000 }, modifierGroups: lcGroups,
         ...over,
       })
       const lc = (await call("POST", I, lcBody())).json.data as Json
       lcImages = (lc.images as Json[]).map((i) => i.storageKey as string)
+      lcGroups = lc.modifierGroups as Json[]
       const mealOf = (outletId: string) => (lc.outlets as Json[]).find((o) => o.outletId === outletId)!.mealId as string
       const plan = await prisma.mealPlan.create({
         data: { outletId: o1.id, name: `${MARKER} LC Plan`, meals: { create: { mealId: mealOf(o1.id) } } },
@@ -1131,7 +1236,7 @@ async function main() {
           && (await call("PATCH", `${I}/${lc.id}/archive`, { isArchived: true })).status === 404
           && (await call("DELETE", `${I}/${lc.id}`)).status === 404
           && (await setAvail(o1.id, false)).status === 404)
-      const reuse = await call("POST", I, lcBody({ imageKeys: [] }))
+      const reuse = await call("POST", I, lcBody({ imageKeys: [], modifierGroups: [] }))
       check("…and its name is free for a new live dish", reuse.status === 201 && reuse.json.data?.id !== lc.id, reuse.json)
       check("…which customers see", menuOf(await storefrontOrNull(o1.id)).some((i) => i.id === reuse.json.data?.id))
       await call("DELETE", `${I}/${reuse.json.data.id}`)
@@ -1148,7 +1253,6 @@ async function main() {
       // Leave o3 out of the pricing section's world.
       await prisma.meal.deleteMany({ where: { outletId: o3.id } })
       await prisma.outlet.delete({ where: { id: o3.id } })
-      await call("DELETE", `/api/vendor/v1/menu/modifier-groups/${grp.id}`)
       clearOperatingCityCache()
     }
 
@@ -1369,20 +1473,17 @@ async function main() {
 
     // ── modifier zero-price check holds at the CHEAPEST outlet price ──
     asVendor(vendorA.userId)
-    const cutGroup = (await call("POST", "/api/vendor/v1/menu/modifier-groups", {
-      name: `${MARKER} Half`, minSelect: 0, maxSelect: 1, options: [{ name: "Half portion", priceDeltaMinor: -5000 }],
-    })).json.data as Json
+    const cutGroup = { name: "Half", minSelect: 0, maxSelect: 1, options: [{ name: "Half portion", priceDeltaMinor: -5000 }] }
     const cheapAtO2 = await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body({
-      priceOverrides: { [o2.id]: 3000 }, modifierGroupIds: [cutGroup.id],
+      priceOverrides: { [o2.id]: 3000 }, modifierGroups: [cutGroup],
     }))
     check("a group harmless on the 10000 base is refused when an outlet sells the dish at 3000",
       cheapAtO2.status === 400 && cheapAtO2.json.code === "OPTIONS_ZERO_OUT_DISH", cheapAtO2.json)
     const fineEverywhere = await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body({
-      priceOverrides: { [o2.id]: 12000 }, modifierGroupIds: [cutGroup.id],
+      priceOverrides: { [o2.id]: 12000 }, modifierGroups: [cutGroup],
     }))
     check("…and accepted when every outlet's price can carry it", fineEverywhere.status === 200, fineEverywhere.json)
-    await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body())
-    await call("DELETE", `/api/vendor/v1/menu/modifier-groups/${cutGroup.id}`)
+    await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body({ modifierGroups: [] }))
 
     // ── currency with no Currency link ──
     await prisma.country.update({ where: { id: countryB.id }, data: { currencyCode: null, currency: "ZZX" } })

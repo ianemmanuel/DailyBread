@@ -16,7 +16,13 @@ export default async function DashboardLayout({
   const session = await getVendorSession()
 
   return (
-    <VendorNavProvider sellingReady={isSellingReady(session)}>
+    <VendorNavProvider
+      sellingReady={isSellingReady(session)}
+      identity={{
+        businessName: session?.vendorAccount?.legalBusinessName ?? null,
+        email       : session?.vendorUser.email ?? null,
+      }}
+    >
       <div className="min-h-screen bg-background">
         <Sidebar />
 
