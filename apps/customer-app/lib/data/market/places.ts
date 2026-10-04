@@ -77,7 +77,14 @@ export async function getMarketPlaces(scope: MarketScope, query: PlacesQuery = {
     const params = filterParams(query, false)
     const result = await backendFetch<CityDiscoveryResult>(
       `/api/customer/v1/discovery/cities/${encodeURIComponent(scope.citySlug)}/outlets${params.size ? `?${params}` : ""}`,
-      { anonymous: true, revalidate: 60, tags: ["city-inventory"] },
+      /* Cached per market — EXCEPT a free-text search. Arbitrary text makes
+       * every request a fresh cache key, so caching it would fill the data
+       * cache with one-off entries AND charge every visitor's search to this
+       * server's shared cache-fill budget at the backend's rate limiter. A
+       * search is per-request, so it is charged to the visitor making it. */
+      query.search?.trim()
+        ? { anonymous: true }
+        : { anonymous: true, revalidate: 60, tags: ["city-inventory"] },
     )
     return {
       kind: "ok", basis: "city", outlets: result.outlets, total: result.total,

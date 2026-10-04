@@ -1,4 +1,5 @@
 export { verifyClerkJwt } from "./verifyClerkJwt"
+export { verifyRequestToken } from "./verifyRequestToken"
 export type { VerifiedClerkToken } from "./verifyClerkJwt"
 
 export { getClerkProjects } from "./clerkProjects"

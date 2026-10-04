@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { canonicalIssuer } from "./env"
+import { canonicalIssuer, isBareOrigin } from "./env"
 
 /*
  * A trailing slash on an identity provider's issuer is not cosmetic: issuers
@@ -43,5 +43,19 @@ describe("canonicalIssuer", () => {
 
   it("is idempotent", () => {
     expect(canonicalIssuer(canonicalIssuer(`${CANONICAL}/`))).toBe(CANONICAL)
+  })
+})
+
+describe("isBareOrigin (CLERK_AUTHORIZED_PARTIES entries)", () => {
+  it("accepts exactly what a browser sends as Origin — and so what Clerk puts in azp", () => {
+    for (const ok of ["https://dailybread.app", "https://vendors.dailybread.app", "http://localhost:3003"]) {
+      expect(isBareOrigin(ok)).toBe(true)
+    }
+  })
+  it("refuses anything that could never equal an azp, so a typo cannot lock everyone out silently", () => {
+    for (const bad of ["dailybread.app", "https://dailybread.app/app", "https://dailybread.app?x=1",
+                       "HTTPS://DailyBread.app", "https://dailybread.app:443", "ftp://dailybread.app", "*"]) {
+      expect(isBareOrigin(bad)).toBe(false)
+    }
   })
 })

@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { Menu } from 'lucide-react'
-import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -12,10 +11,10 @@ import {
 } from '@/components/ui/sheet'
 import { SidebarNav } from './SidebarNav'
 import { SidebarIdentity } from './SidebarIdentity'
+import { BrandMark } from '@/components/dashboard/brand/BrandMark'
 
 export function MobileSidebarSheet() {
-  // Controlled, so choosing a link closes the drawer instead of leaving it
-  // covering the page that just opened.
+  // Controlled, so choosing a link can close the drawer.
   const [open, setOpen] = useState(false)
 
   return (
@@ -35,28 +34,21 @@ export function MobileSidebarSheet() {
       <SheetContent
         side="left"
         className="flex w-72 flex-col gap-0 border-r border-border/60 bg-sidebar p-0"
+        // Any link — a nav item or the brand — closes the drawer instead of
+        // leaving it covering the page that just opened.
+        onClickCapture={(e) => { if ((e.target as HTMLElement).closest('a')) setOpen(false) }}
       >
         {/* Visually hidden title for accessibility */}
         <SheetTitle className="sr-only">Navigation menu</SheetTitle>
 
-        {/* Logo header */}
-        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border/60 px-5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary shadow-[0_2px_10px_var(--shadow-primary)]">
-            <svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-              <path d="M10 2C6.5 2 4 5 4 8c0 2 1 3.5 2 4.5V15h8v-2.5C15 11.5 16 10 16 8c0-3-2.5-6-6-6z" fill="white" fillOpacity="0.95"/>
-              <path d="M7 15h6v1.5a1 1 0 01-1 1H8a1 1 0 01-1-1V15z" fill="white" fillOpacity="0.65"/>
-            </svg>
-          </div>
-          <Link href="/dashboard" className="font-display text-lg font-bold tracking-tight text-foreground">
-            Daily<span className="text-primary">Bread</span>
-          </Link>
+        {/* Brand header */}
+        <div className="flex h-16 shrink-0 items-center border-b border-border/60 px-5">
+          <BrandMark />
         </div>
 
-        {/* Navigation */}
-        <div
-          className="flex-1 overflow-hidden"
-          onClickCapture={(e) => { if ((e.target as HTMLElement).closest('a')) setOpen(false) }}
-        >
+        {/* Navigation — the sheet always shows the full labelled list; the
+            collapsed icon rail is a desktop-only state. */}
+        <div className="min-h-0 flex-1">
           <SidebarNav />
         </div>
 

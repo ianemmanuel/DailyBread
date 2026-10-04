@@ -4,6 +4,9 @@ import cors from "cors"
 import cookieParser from "cookie-parser"
 import { corsOptions } from "@/config/cors"
 import { rateLimiters } from "@/config/rateLimit"
+import { parseTrustProxy } from "@/config/rateLimitKey"
+import { identifyCaller } from "@/middleware/rateLimit/identifyCaller"
+import { env } from "@/env"
 import { errorHandler } from "@/middleware/error/error.middleware"
 import { requestLogger } from "@/middleware/logger/requestLogger"
 import clerkWebhookRouter from "@/modules/integrations/clerk/webhooks"
@@ -12,6 +15,11 @@ import { healthRouter } from "@/routes/health"
 import router from "@/routes"
 
 export const app : express.Application = express()
+
+//* Which upstream proxies may set req.ip (TRUST_PROXY). Off unless configured:
+//* trusting X-Forwarded-For from anyone would let a caller choose its own
+//* rate-limit key. See config/rateLimitKey.ts.
+app.set("trust proxy", parseTrustProxy(env.TRUST_PROXY))
 
 //* Observability
 app.use(requestLogger)
@@ -42,8 +50,14 @@ app.use(
 app.use(express.json({ limit: "1mb" }))
 app.use(express.urlencoded({ extended: true, limit: "1mb" }))
 
-//* API
-app.use(rateLimiters.global)
+//* API — order is the policy (config/rateLimit.ts):
+//*   identifyCaller  verify the Clerk token, if any, so limits key on a
+//*                   VERIFIED user (never refuses — auth chains still do)
+//*   general         every request, once
+//*   expensive       uploads / exports / image processing, once more
+app.use(identifyCaller)
+app.use(rateLimiters.general)
+app.use(rateLimiters.expensive)
 app.use("/api", router)
 
 //* Errors — must be last

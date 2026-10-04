@@ -538,6 +538,9 @@ async function main() {
 
     check("feed row keys", keys(rowNear) === "cuisines,currency,delivery,description,dietaryTags,image,isAvailable,mealId,menuItemId,name,offer,outlet,outletId,priceMinor,unavailableReason,wasPriceMinor", keys(rowNear))
     check("feed outlet keys", keys(rowNear?.outlet) === "displayName,logoUrl,name,outletId", keys(rowNear?.outlet))
+    // The detail adds the storefront's own public neighbourhood and nothing
+    // else — no address line, no coordinates, no zone.
+    check("detail outlet keys", keys(detail?.outlet) === "displayName,logoUrl,name,neighborhood,outletId", keys(detail?.outlet))
     check("image keys", keys(img) === "blurDataUrl,height,url,width", keys(img))
     check("located delivery keys", keys(nearPlate?.delivery) === "deliveryFeeMinor,distanceMeters,eta", keys(nearPlate?.delivery))
     check("city envelope keys", keys(all) === "availableCuisines,city,meals,page,pageSize,total", keys(all))

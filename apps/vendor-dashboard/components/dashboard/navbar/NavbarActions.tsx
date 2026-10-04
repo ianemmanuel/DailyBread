@@ -1,43 +1,30 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Plus, CalendarDays } from 'lucide-react'
 
+/*
+ * The two quick actions. Real links (not router.push on a button), so they
+ * prefetch, open in a new tab and announce as links. "Add meal" opens the
+ * create form it names; "Add plan" still leads to Meal plans, whose creation
+ * flow is not built yet.
+ */
 export function NavbarActions() {
-  const router = useRouter()
-
   return (
     <div className="hidden items-center gap-2 md:flex">
-      <Button
-        size="sm"
-        onClick={() => router.push('/meals')}
-        className="
-          h-9 rounded-xl bg-primary text-primary-foreground
-          transition-all duration-200
-          hover:scale-[1.04] hover:opacity-90 hover:shadow-md
-          active:scale-[0.98]
-          cursor-pointer
-        "
-      >
-        <Plus className="mr-1 h-4 w-4" />
-        Add Meal
+      <Button asChild size="sm" className="h-9 rounded-xl">
+        <Link href="/meals/create">
+          <Plus aria-hidden className="size-4" />
+          Add meal
+        </Link>
       </Button>
 
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => router.push('/meal-plans')}
-        className="
-          h-9 rounded-xl
-          transition-all duration-200
-          hover:scale-[1.04] hover:shadow-md
-          active:scale-[0.98]
-          cursor-pointer
-        "
-      >
-        <CalendarDays className="mr-1 h-4 w-4" />
-        Add Plan
+      <Button asChild size="sm" variant="outline" className="h-9 rounded-xl">
+        <Link href="/meal-plans">
+          <CalendarDays aria-hidden className="size-4" />
+          Add plan
+        </Link>
       </Button>
     </div>
   )

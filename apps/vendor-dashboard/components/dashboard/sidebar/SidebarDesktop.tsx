@@ -2,38 +2,48 @@
 
 import { SidebarNav } from './SidebarNav'
 import { SidebarIdentity } from './SidebarIdentity'
-import Link from 'next/link'
+import { SIDEBAR_WIDTH, useSidebarState } from './SidebarState'
+import { BrandMark } from '@/components/dashboard/brand/BrandMark'
+import { cn } from '@/lib/utils'
 
+/*
+ * The desktop sidebar (lg and up): full width with group titles, or an icon
+ * rail. The toggle lives in the navbar, at the same spot in both states, so
+ * the control never moves out from under the pointer. Width comes from
+ * SIDEBAR_WIDTH, the same table the content column offsets by.
+ */
 export function SidebarDesktop() {
-  return (
-    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-64 flex-col border-r border-border/60 bg-sidebar lg:flex">
+  const { collapsed } = useSidebarState()
 
-      {/* Ambient glow behind logo area */}
+  return (
+    <aside
+      id="vendor-sidebar"
+      aria-label="Sidebar"
+      data-collapsed={collapsed}
+      className={cn(
+        'fixed left-0 top-0 z-40 hidden h-screen flex-col border-r border-border/60 bg-sidebar lg:flex',
+        'transition-[width] duration-200 ease-out motion-reduce:transition-none',
+        collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded,
+      )}
+    >
+      {/* Ambient glow behind the brand */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-40 glow-left opacity-60" />
 
-      {/* Logo */}
-      <div className="relative flex h-16 shrink-0 items-center gap-3 border-b border-border/60 px-5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary shadow-[0_2px_10px_var(--shadow-primary)]">
-          <svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <path d="M10 2C6.5 2 4 5 4 8c0 2 1 3.5 2 4.5V15h8v-2.5C15 11.5 16 10 16 8c0-3-2.5-6-6-6z" fill="currentColor" className="text-primary-foreground" fillOpacity="0.95"/>
-            <path d="M7 15h6v1.5a1 1 0 01-1 1H8a1 1 0 01-1-1V15z" fill="currentColor" className="text-primary-foreground" fillOpacity="0.65"/>
-          </svg>
-        </div>
-        <Link href="/dashboard" className="font-display text-lg font-bold tracking-tight text-foreground">
-          Daily<span className="text-primary">Bread</span>
-        </Link>
+      <div className={cn(
+        'relative flex h-16 shrink-0 items-center border-b border-border/60',
+        collapsed ? 'justify-center px-2' : 'px-5',
+      )}>
+        <BrandMark compact={collapsed} />
       </div>
 
-      {/* Navigation */}
-      <div className="relative flex-1 overflow-hidden">
-        <SidebarNav />
+      <div className="relative min-h-0 flex-1">
+        <SidebarNav collapsed={collapsed} />
       </div>
 
       {/* Who is signed in — from the session, never a placeholder */}
-      <div className="relative shrink-0 border-t border-border/60 p-3">
-        <SidebarIdentity />
+      <div className={cn('relative shrink-0 border-t border-border/60', collapsed ? 'p-2.5' : 'p-3')}>
+        <SidebarIdentity compact={collapsed} />
       </div>
-
     </aside>
   )
 }

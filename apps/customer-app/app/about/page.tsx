@@ -3,6 +3,7 @@ import Link from "next/link"
 import { ArrowRight, CalendarDays } from "lucide-react"
 
 import { HowItWorks } from "@/components/home/HowItWorks"
+import { HOW_IT_WORKS_PAGE } from "@/constants/home/how-it-works-content"
 import { Markets } from "@/components/home/Markets"
 import { Button } from "@/components/ui/button"
 
@@ -45,7 +46,7 @@ export default function AboutPage() {
         </p>
       </header>
 
-      <HowItWorks />
+      <HowItWorks more={HOW_IT_WORKS_PAGE} />
 
       <section aria-labelledby="about-plans-title" className="band">
         <div className="surface flex flex-col gap-5 p-6 sm:p-8">

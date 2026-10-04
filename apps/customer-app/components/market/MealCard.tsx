@@ -4,6 +4,9 @@ import { Bike, Clock, Soup } from "lucide-react"
 import type { DiscoveryMeal } from "@repo/types/customer-app"
 
 import { formatDeliveryFee, formatEta, formatMoneyCompact } from "@/lib/format/money"
+import { outletIdentity } from "@/lib/format/outlet"
+import { LinkPending } from "@/components/meal/LinkPending"
+import { OutletMark } from "@/components/outlet/OutletMark"
 
 /*
  * One dish, from one place — a `Meal` (the dish AT that outlet), addressed by
@@ -17,15 +20,23 @@ import { formatDeliveryFee, formatEta, formatMoneyCompact } from "@/lib/format/m
  * and the card drops the line rather than guessing. A meal whose kitchen is
  * shut right now stays in the feed (ranked after open ones by the backend) and
  * is dimmed and labelled — sold-out dishes never reach a feed at all.
+ *
+ * ONE DISH AT SEVERAL OUTLETS IS SEVERAL LISTINGS, not duplicates: each has
+ * its own price, offer, hours and reach. So the OUTLET is the card's second
+ * line, in foreground weight with its mark, and the business is a byline —
+ * the old muted caption printed the vendor's name, which is identical across
+ * its outlets and made the cards indistinguishable. Nothing is ever merged
+ * by name or photo.
  */
 export function MealCard({ meal, priority = false }: { meal: DiscoveryMeal; priority?: boolean }) {
   const eta = meal.delivery ? formatEta(meal.delivery.eta) : null
   const closed = !meal.isAvailable
+  const identity = outletIdentity(meal.outlet)
 
   return (
     <Link
       href={`/meals/${meal.mealId}`}
-      className={`group surface-interactive block cursor-pointer overflow-hidden ${closed ? "opacity-70" : ""}`}
+      className={`group surface-interactive relative block cursor-pointer overflow-hidden ${closed ? "opacity-70" : ""}`}
     >
       <div className="photo-frame photo-zoom aspect-[4/3] w-full">
         {meal.image ? (
@@ -70,7 +81,15 @@ export function MealCard({ meal, priority = false }: { meal: DiscoveryMeal; prio
             )}
           </span>
         </div>
-        <p className="clamp-1 text-sm text-muted-foreground">{meal.outlet.displayName}</p>
+        <div className="flex items-center gap-2 pt-0.5">
+          <OutletMark logoUrl={meal.outlet.logoUrl} size="sm" />
+          <p className="min-w-0 text-sm leading-tight">
+            <span className="clamp-1 font-medium text-foreground">{identity.name}</span>
+            {identity.vendor && (
+              <span className="clamp-1 text-xs text-muted-foreground">by {identity.vendor}</span>
+            )}
+          </p>
+        </div>
         {meal.delivery && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5 text-xs text-muted-foreground">
             {eta && <span className="flex items-center gap-1"><Clock aria-hidden className="size-3.5" />{eta}</span>}
@@ -81,6 +100,7 @@ export function MealCard({ meal, priority = false }: { meal: DiscoveryMeal; prio
           </div>
         )}
       </div>
+      <LinkPending />
     </Link>
   )
 }

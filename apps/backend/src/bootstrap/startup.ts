@@ -25,6 +25,7 @@ export async function bootstrap(): Promise<Server> {
 
   startupLog.info("Starting DailyBread backend...")
   startupLog.info(`✓ Environment validated (${startedAt - processStartedAt} ms)`)
+  warnAboutRateLimitConfig()
 
   const prismaStart = Date.now()
   await initPrisma()
@@ -42,4 +43,18 @@ export async function bootstrap(): Promise<Server> {
   startupLog.info(`Startup completed in ${Date.now() - startedAt} ms`)
 
   return server
+}
+
+/*
+ * Rate-limit attribution fails OPEN-but-unfair rather than loudly: without
+ * the secret nothing breaks, every anonymous storefront visitor of one
+ * customer-app server just shares one budget. Said once at boot, never the
+ * value. (CLERK_AUTHORIZED_PARTIES, a security control, is refused at
+ * startup instead — see env.ts.)
+ */
+function warnAboutRateLimitConfig() {
+  if (env.NODE_ENV !== "production") return
+  if (!env.INTERNAL_PROXY_SECRET) {
+    startupLog.warn("INTERNAL_PROXY_SECRET is unset — anonymous storefront traffic is rate-limited per app server, not per visitor")
+  }
 }

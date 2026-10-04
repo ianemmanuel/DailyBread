@@ -29,7 +29,7 @@ Nothing a user uploaded is ever served byte for byte. `lib/storage/publicMedia.s
 is the only writer to the public bucket and `publicUrl()` is the only place a key
 becomes a URL.
 
-Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**803 tests**) and in `apps/vendor-dashboard` (**59 tests**; jsdom tests opt in per file with `// @vitest-environment jsdom`), and the smoke scripts in `apps/backend/scripts/smoke/` (`pnpm dlx tsx --env-file=.env scripts/smoke/<name>.ts`). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
+Verify: `pnpm check-types` (5/5), `npx vitest run` in `apps/backend` (**841 tests**) and in `apps/vendor-dashboard` (**68 tests**; jsdom tests opt in per file with `// @vitest-environment jsdom`), and the smoke scripts in `apps/backend/scripts/smoke/` (`pnpm dlx tsx --env-file=.env scripts/smoke/<name>.ts`). Migrations: `npx prisma migrate deploy` (`migrate dev` is non-interactive here; generate destructive ones with `migrate diff --from-config-datasource --to-schema`).
 
 ---
 
@@ -532,6 +532,23 @@ everything into Tailwind through its `@theme` block. The three apps are
 deliberately *not* meant to look alike — only to share the same brand ramp and
 the same token vocabulary.
 
+**Brand: the app's NAME is the logo for now** (explicit direction) — customer
+app and vendor dashboard so far; the ERP keeps its own mark.
+| file | what |
+|---|---|
+| `public/brand/dailybread-wordmark.webp` (both apps) | "Daily" #121417 + "Bread" #ac5107, 463×96 |
+| `customer-app/public/brand/dailybread-wordmark-dark.webp` | #fafafb + #febe90, for `.dark` |
+| `vendor-dashboard/public/brand/dailybread-monogram.webp` | the "DB" tile, collapsed sidebar only |
+| `app/favicon.ico` (both apps) | "DB" — white D, #fd9a4c B on #0a0b0d — 16/32/48 px |
+Rendered once from Playfair Display 700 at tracking -0.03em (the old live
+`<Logo />`): glyphs → SVG paths with opentype.js, then `sharp` → WebP / PNG,
+the PNGs packed into the ICO. Not a build step — regenerate the same way if
+the colours or type change. The customer `Logo` swaps light/dark by CSS
+(`dark:hidden` / `dark:block`, default lazy loading so the hidden file is never
+fetched); the vendor `BrandMark` is the single place that app draws it (sidebar,
+mobile sheet, phone navbar, footer). Both use `unoptimized` — the files are
+already small WebPs at ~3× display height.
+
 **shadcn components are per-app, never shared.** Every Next app owns
 `components/ui/*.tsx` and its own `cn()` in `lib/utils.ts`, installs its own
 Radix/cmdk/recharts dependencies, and has its own `components.json` (admin is
@@ -720,6 +737,10 @@ of them.
   class #4, a truncated list that reads as a complete one.
 - Link-based pagination on SSR list pages (no JS needed). **Rebuild the whole query string** — a bare `?page=2` drops active filters.
 - Mapbox is ~1.8 MB: always `next/dynamic` with `ssr: false`.
+- **Customer: the OUTLET leads, the business is a byline.** Every outlet payload carries `name` (the outlet's own, unique per vendor) and `displayName` (the vendor's storefront name). `lib/format/outlet.ts` is the one rule — outlet name primary, "by <vendor>" only when it adds something — used by `OutletCard`, `MealCard`, the meal page, `StoreHero` and both pages' titles. Printing `displayName` alone made two outlets of one vendor (correctly two listings, different prices and reach) look like duplicates. Never merge listings by name or photo.
+- **Meal page price summary** (`MealOptions` + `lib/meal/summary.ts`): the section is always headed "Options" (a vendor's group name is that group's `<legend>`, as written); beside it a summary of meal price (the outlet's, `wasPriceMinor ?? priceMinor`), choices, preview subtotal, and an explicit Included / Not included list. The server's offer price is shown only while the choices add nothing; otherwise the offer is named and excluded. A missing or hidden meal is a REAL 404 (verified with curl for a missing id and an archived dish): `/meals/[mealId]` has NO `loading.tsx` on purpose — a loading boundary streams first and pins the status at 200. Links into it show `LinkPending` (useLinkStatus) instead. Do not add a loading.tsx back.
+- **Vendor shell.** The navbar is `sticky` INSIDE the content column (`SidebarInset`), never a full-width fixed bar — that one covered the sidebar's brand header and needed a magic `pt-20` on `<main>`. The column uses `overflow-x-clip`, not `hidden`, which would make it a scroll container and break every `sticky` inside it. The desktop sidebar collapses to an icon rail; the preference is the `db-vendor-sidebar-collapsed` COOKIE read by the layout (bug class #12), widths come from one table (`SIDEBAR_WIDTH`) so sidebar and offset move together, and the Tooltip wrappers render in both states so collapsing never changes tree shape. Collapsed mode suspends group disclosure (nothing inert) and keeps every label as `sr-only` text. `BrandMark` is the ONE place the brand is drawn — the real logo replaces its body. The bell is a plain link to `/dashboard/notifications` (an honest placeholder): no dropdown, no badge, no polling — the old dropdown rendered invented orders and payouts.
+- **Client components and `Intl`:** `formatMoney` uses the runtime's default locale, so server and browser can format the same figure differently. A client component must receive any price it renders on first paint PRE-FORMATTED from the server, and format client-side only after an interaction (`MealOptions` does both).
 
 **customer-app only** (public, anonymous-first, performance-critical):
 
@@ -861,7 +882,7 @@ durable preference to answer "where does tonight's order go".
 
 **Menu** — `MenuItem` (vendor-level catalog: the dish) → `Meal` (one dish at one outlet, carrying only what varies by location: `priceMinorOverride`, `isAvailable`). `MenuSection` is vendor-owned and ordered by authored `position`. `ModifierGroup`/`ModifierOption` are **one primitive** for variants and addons — the selection rule is the only difference.
 
-**Option selection, as enforced today (server-side, `validateSelection` in `lib/pricing/line.ts`, run by the stateless `POST /customer/v1/cart/price`):** a group with `minSelect` 0 is optional and zero choices is valid — the line is priced at the meal's own price with no delta; **nothing is ever pre-selected** (there is no default-option concept, and "Included" was removed from the customer UI because it read as one). A group with `minSelect ≥ 1` and too few choices makes that line a `REQUIRED_CHOICE_MISSING` problem: it is excluded from the totals and `canCheckout` is false. More than `maxSelect` is `TOO_MANY_CHOICES`; a sold-out or foreign option is `OPTION_UNAVAILABLE` / `OPTION_NOT_ON_ITEM`. Deltas are added to the outlet's list price and the line floors at 0. The customer APP has no selection or cart UI yet (recover from `30facf5` with orders) — it only DISPLAYS the rule.
+**Option selection, as enforced today (server-side, `validateSelection` in `lib/pricing/line.ts`, run by the stateless `POST /customer/v1/cart/price`):** a group with `minSelect` 0 is optional and zero choices is valid — the line is priced at the meal's own price with no delta; **nothing is ever pre-selected** (there is no default-option concept, and "Included" was removed from the customer UI because it read as one). A group with `minSelect ≥ 1` and too few choices makes that line a `REQUIRED_CHOICE_MISSING` problem: it is excluded from the totals and `canCheckout` is false. More than `maxSelect` is `TOO_MANY_CHOICES`; a sold-out or foreign option is `OPTION_UNAVAILABLE` / `OPTION_NOT_ON_ITEM`. Deltas are added to the outlet's list price and the line floors at 0. The customer APP has no cart UI yet (recover from `30facf5` with orders). The meal page has an option PREVIEW (`lib/meal/selection.ts`, checked by `scripts/check-meal-selection.ts`): it mirrors the rule above to tell someone early, and its figure is the outlet's LIST price (`wasPriceMinor ?? priceMinor`) plus the deltas as sent — **no offer and no tax applied, and never floored** (a negative sum shows no figure). A percentage offer applies to the dish WITH its options under the server's rounding; copying that client-side would drift. It does not call `POST /cart/price` per click on purpose: anonymous SSR traffic reaches the backend from the Next server's one IP, which shares one rate-limit bucket (see *Customer*).
 
 **`portionSize` is descriptive free text** (≤ 60 chars, optional, on the dish, same at every outlet): how much one order is ("Serves 2", "500 g"), shown to customers beside the price on the storefront card and meal page. It changes no price, stock or option rule. A choice of sizes is a ModifierGroup, never this. It is customer-visible, so it is **screened** like the name and description (`INAPPROPRIATE_PORTION`); a change to it re-screens the dish.
 
@@ -879,7 +900,32 @@ durable preference to answer "where does tonight's order go".
 
 **Discounts** — vendor-owned, merchant-funded. Two types (`PERCENTAGE_OFF_ITEMS`, `AMOUNT_OFF_ORDER`). State derived. Targeting is **explicit flags**, never inferred from an empty list. **Offers never stack** — the customer gets the single best one. Caps are recorded but **not enforced** (nothing increments them: no orders).
 
-**Customer** — mostly public. Two auth chains: `customerAuthChain` (required — account, addresses) and `attachCustomerContext` (optional, never rejects — browsing, storefront, cart). A verified token with no row yet returns **503 `CUSTOMER_ACCOUNT_PENDING`**, not 401. Discovery = customer's point in a serviceable zone **AND** outlet cleared to sell **AND** within the outlet's radius, same city. `customer.visibility.ts` is the one definition of what a customer may see (FLAGGED content is hidden; `isAvailable: false` is shown greyed-out, not hidden). The cart is **stateless**: the client holds ids and quantities, the server prices from scratch every call.
+**Customer** — mostly public.
+
+**RATE LIMITING keys on a VERIFIED identity first, an address second** (`config/rateLimit.ts`, `config/rateLimitKey.ts`). Our Next apps call the API server-side, so the TCP peer is always a Next server; keyed on `req.ip` alone, each app's users shared ONE budget, and the old identity branch never fired because the limiters ran before any auth.
+
+| order (bootstrap/app.ts) | does |
+|---|---|
+| `identifyCaller` | verifies the bearer token if present (verifyClerkJwt: RS256, exp/nbf, issuer, azp) and sets `req.rateLimitPrincipal`; NEVER refuses — auth chains still do. Memoised per request (`verifyRequestToken`), so the chain does not verify twice |
+| `general` | every request once: verified user `user:<app>:<sub>` 600 · anonymous by IP 300 · trusted server's cache fills 3000 |
+| `expensive` | ALSO once, only on presigns, CSV exports and image-processing writes (`isExpensiveRoute`): 60 |
+
+> Each limiter is its own instance, mounted ONCE. Module routers mount none: `customer.dashboard` used to be the global instance mounted again (150, not 300).
+> Vendor and ERP need no forwarding — every backend call they make carries the user's token (checked). Only the customer app's ANONYMOUS calls need an address: `INTERNAL_PROXY_SECRET` (backend) = `BACKEND_INTERNAL_KEY` (customer app) in `x-db-internal-key` lets that server name the visitor in `x-db-client-ip` (one IP, IPv6 → /56); without it the header is ignored. Anonymous cached calls send the secret only (Next's fetch cache keys on headers); signed-in calls send neither; free-text search is per-request. `CLIENT_IP_HEADER` names the header the customer app's EDGE sets. `TRUST_PROXY`: hop count 1–3 or IP/CIDR/named-range list for a proxy in front of the API; `true`, larger counts and junk are refused at boot.
+> **Why a secret and not `trust proxy` for the Next servers:** address-based trust needs the Next servers' egress addresses, which nothing in this repo pins (serverless egress is not stable). On a private network with fixed addresses, `TRUST_PROXY=<their subnet>` plus the customer app setting `X-Forwarded-For` would replace the secret.
+> **Clerk:** the manual-verification path is deliberate — `@clerk/express`'s clerkMiddleware is per-instance and we trust four instances. `CLERK_AUTHORIZED_PARTIES` is REQUIRED in production (startup refuses without it, and refuses any entry that is not a bare origin): every browser origin a session can be minted on — customer app, vendor dashboard, ERP, plus any www/custom/preview domain. Courier has no web frontend. A token with no `azp` passes (Clerk's rule); Backend-API-minted tokens carry none — verified with real dev tokens. The JWKS clients are rate-limited because tokens are verified before the limiter.
+> **Verified with REAL Clerk tokens** (dev instances, Backend-API sessions, revoked after): each instance's token authenticates on its own route and is charged once to `user:<app>:<sub>` (600); a customer token on a vendor route is 401 and still charged to that user; a broken signature is charged as anonymous (300).
+>
+> **Before production traffic** — all are unset in dev:
+> | owner | setting | must match |
+> |---|---|---|
+> | backend | `CLERK_AUTHORIZED_PARTIES` | the frontends' exact origins (startup fails without it) |
+> | backend | `INTERNAL_PROXY_SECRET` (≥32 chars) | customer app `BACKEND_INTERNAL_KEY` |
+> | customer app | `CLIENT_IP_HEADER` | the header its edge SETS and overwrites (`x-real-ip`, `cf-connecting-ip`) |
+> | backend | `TRUST_PROXY` | only if a proxy/LB fronts the API |
+> Without the secret pair, every anonymous visitor of ONE customer-app server shares 300 / 15 min (both sides warn at startup in production). Vendor and ERP need nothing.
+> **In-memory stores stay correct only while ONE backend process serves the API.** The moment there are two (a second container, autoscaling, PM2/cluster mode), each counts separately — limits silently multiply by the process count and reset on restart — and a shared store (Redis) becomes necessary.
+> **An edge-only alternative** (Cloudflare / nginx `limit_req` / Vercel firewall per IP in front of the customer app, with the API reachable ONLY from the app servers) could replace the forwarding, giving those servers one large budget at the API. It is not simpler here: no such edge is configured in this repo, and it would need the API to be private. Revisit if one is adopted. Two auth chains: `customerAuthChain` (required — account, addresses) and `attachCustomerContext` (optional, never rejects — browsing, storefront, cart). A verified token with no row yet returns **503 `CUSTOMER_ACCOUNT_PENDING`**, not 401. Discovery = customer's point in a serviceable zone **AND** outlet cleared to sell **AND** within the outlet's radius, same city. `customer.visibility.ts` is the one definition of what a customer may see (FLAGGED content is hidden; `isAvailable: false` is shown greyed-out, not hidden). The cart is **stateless**: the client holds ids and quantities, the server prices from scratch every call.
 
 ---
 
@@ -1523,15 +1569,25 @@ other's job.
 > `success` on the light page is ~3.3:1 and fails AA as small text. Browsing is
 > neutral, "can't deliver here" is `warning`.
 
-**`/` HAS A WAY BACK, AND STAYS GLOBAL.** `ContinueToCity` (under the hero) is a
-compact photographic strip — "Continue to Nairobi" — shown only once
-`/api/markets/home` names a home market (default city, else this device's last
-market). A client leaf: `/` stays `○`, a first-time visitor sees nothing (no
-empty slot), and it shares one memoised request with the navbar chip
-(`lib/market/home-client.ts`). City pictures come from `cityImage()` in
-`lib/data/city-image.ts` — a single vetted placeholder today (Pexels 29069329,
-empty alt because it is generic); per-city WebP from the public bucket replaces
-that function body and nothing else.
+**`/` HAS A WAY BACK, AND STAYS GLOBAL.** The hero's actions are
+`HeroCityActions` (explicit direction): a first visit sees [Choose your city];
+once `/api/markets/home` names a home market (default city, else this device's
+last market) it becomes [★ Continue to Nairobi][Explore other cities]. A client
+leaf rendering the first-visit row on the server, so `/` stays `○`; plain links
+only, so the post-mount swap shifts no Radix ids. It shares one memoised
+request with the navbar chip (`lib/market/home-client.ts`). The old photographic
+`ContinueToCity` strip was removed, and with it the city picture
+`/api/markets/home` returned (`lib/data/city-image.ts` is gone) — the response
+is name + slug; add an image back when per-city imagery exists. "How DailyBread works" is NOT a hero button: the
+`HowItWorks` section carries a one-line intro and links to **`/how-it-works`**
+(`HOW_IT_WORKS_PAGE`), the full explanation — static, and saying only what the
+app does today (no checkout/payment claims until they exist).
+
+**A place's LOGO is drawn by `OutletMark` everywhere it identifies the place**
+(place cards, meal cards, the meal page). The place card used to show only the
+cover photo while meal cards showed the logo — same vendor-profile images, two
+different pictures, so one restaurant looked like two. The cover stays the
+card's photograph; the mark sits beside the name.
 
 **THEY ARE "PLACES", NOT KITCHENS, RESTAURANTS OR OUTLETS.** The label a
 customer reads for a sellable vendor location is **Places**, and the route is
@@ -1766,7 +1822,8 @@ list would pass every other check.
 4. **The cart, with orders and not before** — recover `components/cart/*`, `lib/cart/*`, `app/api/cart/price` and `components/storefront/ItemSheet.tsx` from `30facf5` and put `MenuItemCard` back to `"use client"`. It was deliberately left out of the storefront recovery: a working "Add to cart" is a promise of a checkout that does not exist. The backend's `POST /cart/price` is already built and stateless.
 5. **The meal-plan market read the sample layer still stands in for** — city-wide and point-scoped, resolved through the outlet like places and meals. Replace the body of `lib/data/market/meal-plans.ts`, move `MarketMealPlan` into `@repo/types`, delete `lib/data/market/sample/`. Needs the `MealPlanMeal` day column first. (Meals: done in Phase 8.)
 6. **Delivery verdict on storefront and meal detail** (deferred from Phase 8 by explicit direction). The backend half is DONE — `GET /outlets/:id` returns `city` and accepts `addressId`/a point, answering `delivery.deliversHere`. What remains is the frontend: read this market's cookie choice for `store.city.slug` (or `meal.city.slug`) and ask again. `GET /meals/:id` takes no location, so meal detail would use the storefront verdict for its outlet. Until then neither page claims delivery.
-7. **Cap on "your cities"** (planned): evict the oldest non-default `ConsumerMarket` row in `selectMarket`.
+7. **Outlet logos** (decided against for now). `Outlet.avatar` / `coverBanner` / `images` are DORMANT foundation columns: nothing writes them, no pipeline backs them, and their format is unknown — do not reuse them. The bounded shape when wanted: an `OUTLET_LOGO_PROFILE` on the existing `ImageProfile` pipeline (public WebP, like `MENU_LOGO_PROFILE`), nullable `Outlet.logo*` columns, the outlet editor's uploader, and `logoUrl = outlet logo ?? vendor logo` in the customer presenters — the contract already has `logoUrl`, so no response shape changes. Drop the dormant columns in the same migration.
+8. **Cap on "your cities"** (planned): evict the oldest non-default `ConsumerMarket` row in `selectMarket`.
 
 ---
 

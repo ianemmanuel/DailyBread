@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express"
 
-import { verifyClerkJwt, describeJwtFailure } from "@/lib/clerk"
+import { verifyRequestToken, describeJwtFailure } from "@/lib/clerk"
 import { extractBearerToken } from "@/lib/clerk/extractBearerToken"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
@@ -39,7 +39,7 @@ export async function clerkAuthMiddleware(
   }
 
   try {
-    const auth = await verifyClerkJwt(token)
+    const auth = await verifyRequestToken(req, token)
 
     req.auth = auth
     next()

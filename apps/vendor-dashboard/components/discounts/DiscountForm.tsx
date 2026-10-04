@@ -378,7 +378,8 @@ export function DiscountForm({ discount }: Props) {
         </div>
 
         <div className="space-y-4">
-          <div className="lg:sticky lg:top-4">
+          {/* Clears the sticky navbar (h-16). */}
+          <div className="lg:sticky lg:top-20">
             <NetPreview
               sampleMinor={sampleMinor}
               discountMinor={previewOff}

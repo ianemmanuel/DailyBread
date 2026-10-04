@@ -1,5 +1,6 @@
 import "dotenv/config"
 import { z } from "zod"
+import { parseTrustProxy } from "./config/rateLimitKey"
 
 /**
  * An identity provider's ISSUER, canonicalised at the edge.
@@ -19,6 +20,17 @@ import { z } from "zod"
  * Only TRAILING slashes go — a provider that issues from a path
  * (`…/realms/dailybread`) keeps it.
  */
+/** True for "https://host" / "http://host:3003" — exactly what a browser
+ *  puts in an Origin header, and so in a Clerk token's `azp`. */
+export function isBareOrigin(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (url.protocol === "https:" || url.protocol === "http:") && url.origin === value
+  } catch {
+    return false
+  }
+}
+
 export function canonicalIssuer(value: string): string {
   return value.trim().replace(/\/+$/, "")
 }
@@ -203,6 +215,49 @@ const envSchema = z.object({
    */
   CUSTOMER_APP_URL: z.string().url().optional(),
   STOREFRONT_REVALIDATE_SECRET: z.string().min(32).optional(),
+
+  /*
+   * Rate-limit attribution (config/rateLimitKey.ts). Our Next.js apps call
+   * this API SERVER-SIDE, so the TCP peer is the Next server, not the
+   * visitor. A request carrying this secret in `x-db-internal-key` may name
+   * the client it acts for in `x-db-client-ip`; without the secret that
+   * header is ignored. Set the SAME value as `BACKEND_INTERNAL_KEY` in the
+   * customer app — the only app that makes anonymous calls (the vendor
+   * dashboard and the ERP always send a Clerk token, and are keyed by it).
+   * Optional: unset, anonymous requests are keyed by connection address, i.e.
+   * all of one customer-app server's visitors share one budget.
+   */
+  INTERNAL_PROXY_SECRET: z.string().min(32).optional(),
+  /*
+   * Clerk's `azp` check (manual verification checklist): EVERY browser origin
+   * a Clerk session for one of our instances can be minted on — the customer
+   * app, the vendor dashboard and the ERP, plus any custom/www/preview domain
+   * each is served from. `azp` is the Origin of the frontend request that
+   * minted the token; a token with no `azp` (e.g. minted by Clerk's Backend
+   * API, or a native app) passes, as Clerk documents. The courier instance
+   * has no web frontend, so it contributes no origin.
+   *
+   * REQUIRED when NODE_ENV=production (loadEnv). Each entry must be a bare
+   * origin — scheme://host[:port], no path — or startup fails: a stray path
+   * would not match any token's azp and would refuse every signed-in user.
+   */
+  CLERK_AUTHORIZED_PARTIES: z.string().optional().transform((value, ctx) => {
+    const entries = (value ?? "").split(",").map((origin) => origin.trim().replace(/\/+$/, "")).filter(Boolean)
+    for (const entry of entries) {
+      if (!isBareOrigin(entry)) {
+        ctx.addIssue({ code: "custom", message: `"${entry}" is not a bare origin (scheme://host[:port], no path)` })
+      }
+    }
+    return entries
+  }),
+  /*
+   * Express `trust proxy` for a load balancer IN FRONT OF THIS API: a hop
+   * count ("1") or the proxy's addresses/subnets ("10.0.0.0/8,loopback").
+   * Never "true" — that lets any caller pick its own req.ip. Unset = false.
+   */
+  TRUST_PROXY: z.string().optional().refine((value) => {
+    try { parseTrustProxy(value); return true } catch { return false }
+  }, "TRUST_PROXY must be a hop count or a list of proxy addresses, never \"true\""),
 })
 
 function loadEnv() {
@@ -221,6 +276,14 @@ function loadEnv() {
 
   if (parsed.data.NODE_ENV === "production" && !parsed.data.LOGTAIL_SOURCE_TOKEN) {
     console.error("✗ LOGTAIL_SOURCE_TOKEN is required when NODE_ENV=production")
+    process.exit(1)
+  }
+
+  if (parsed.data.NODE_ENV === "production" && parsed.data.CLERK_AUTHORIZED_PARTIES.length === 0) {
+    console.error(
+      "✗ CLERK_AUTHORIZED_PARTIES is required when NODE_ENV=production — the comma-separated origins " +
+      "of the customer app, vendor dashboard and ERP (Clerk's azp check)",
+    )
     process.exit(1)
   }
 

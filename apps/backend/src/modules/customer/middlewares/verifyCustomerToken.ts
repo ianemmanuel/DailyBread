@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import type { AuthenticatedCustomerRequest } from "@repo/types/backend"
 
-import { verifyClerkJwt, describeJwtFailure } from "@/lib/clerk"
+import { verifyRequestToken, describeJwtFailure } from "@/lib/clerk"
 import { extractBearerToken } from "@/lib/clerk/extractBearerToken"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
@@ -26,7 +26,7 @@ export async function verifyCustomerToken(req: Request, _res: Response, next: Ne
   }
 
   try {
-    const verified = await verifyClerkJwt(token)
+    const verified = await verifyRequestToken(req, token)
 
     if (verified.app !== "customer") {
       authLog.warn({ app: verified.app }, "Token from wrong Clerk instance rejected")
@@ -55,7 +55,7 @@ export async function resolveOptionalCustomerToken(req: Request): Promise<string
   if (!token) return null
 
   try {
-    const verified = await verifyClerkJwt(token)
+    const verified = await verifyRequestToken(req, token)
     return verified.app === "customer" ? verified.clerkUserId : null
   } catch {
     return null

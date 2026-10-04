@@ -4,6 +4,7 @@ import { UtensilsCrossed } from "lucide-react"
 import type { CustomerCurrency, StorefrontMenuItem } from "@repo/types/customer-app"
 
 import { formatMoneyCompact } from "@/lib/format/money"
+import { LinkPending } from "@/components/meal/LinkPending"
 
 /*
  * One dish on the menu.
@@ -52,7 +53,7 @@ export function MenuItemCard({
   return (
     <Link
       href={`/meals/${item.mealId}`}
-      className={`surface-interactive flex cursor-pointer items-stretch gap-4 p-4 ${unavailable ? "opacity-60" : ""}`}
+      className={`surface-interactive relative flex cursor-pointer items-stretch gap-4 p-4 ${unavailable ? "opacity-60" : ""}`}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <h3 className="clamp-2 leading-snug font-medium text-foreground">{item.name}</h3>
@@ -109,6 +110,7 @@ export function MenuItemCard({
           </div>
         )}
       </div>
+      <LinkPending />
     </Link>
   )
 }

@@ -2,7 +2,9 @@ import Link from "next/link"
 import Image from "next/image"
 import { Star, Clock, Bike, UtensilsCrossed } from "lucide-react"
 import { formatDeliveryFee, formatEta, formatDistance } from "@/lib/format/money"
+import { outletIdentity } from "@/lib/format/outlet"
 import type { DiscoveryOutlet } from "@repo/types/customer-app"
+import { OutletMark } from "@/components/outlet/OutletMark"
 
 /*
  * One restaurant in the feed.
@@ -33,6 +35,9 @@ export function OutletCard({
 }) {
   const eta = formatEta(outlet.eta)
   const closed = !outlet.isOpenNow
+  /* The card is ONE outlet: its own name leads, the business is attribution,
+     so two locations of one vendor never read as duplicates. */
+  const identity = outletIdentity(outlet)
 
   return (
     <Link
@@ -78,9 +83,16 @@ export function OutletCard({
 
       <div className="space-y-2 p-4">
         <div className="flex items-start justify-between gap-3">
-          <h3 className="clamp-1 font-display text-base font-semibold tracking-tight text-foreground">
-            {outlet.displayName}
-          </h3>
+          {/* The same logo meal cards and the meal page show for this place. */}
+          <OutletMark logoUrl={outlet.logoUrl} size="lg" />
+          <div className="min-w-0 flex-1">
+            <h3 className="clamp-1 font-display text-base font-semibold tracking-tight text-foreground">
+              {identity.name}
+            </h3>
+            {identity.vendor && (
+              <p className="clamp-1 text-sm text-muted-foreground">by {identity.vendor}</p>
+            )}
+          </div>
 
           {/* A rating with no volume behind it is noise, so the count decides
               whether it is shown at all. */}

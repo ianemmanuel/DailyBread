@@ -22,6 +22,13 @@ export interface HowItWorksStep {
 
 export const HOW_IT_WORKS_TITLE = "How it works"
 
+/** The one-line summary above the steps where they are a summary (`/`). */
+export const HOW_IT_WORKS_INTRO =
+  "Good food from kitchens near you, in three steps — and you can look around before you ever sign in."
+
+/** Where the full explanation lives. */
+export const HOW_IT_WORKS_PAGE = { href: "/how-it-works", label: "How DailyBread works" } as const
+
 export const HOW_IT_WORKS_STEPS: readonly HowItWorksStep[] = [
   {
     icon : MapPin,

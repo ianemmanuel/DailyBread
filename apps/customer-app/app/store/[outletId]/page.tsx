@@ -5,6 +5,7 @@ import { StoreHero } from "@/components/storefront/StoreHero"
 import { StoreHours } from "@/components/storefront/StoreHours"
 import { StoreMenu } from "@/components/storefront/StoreMenu"
 import { getStorefront } from "@/lib/data/storefront"
+import { outletLabel } from "@/lib/format/outlet"
 
 /*
  * One storefront — the page every feed card, every places row and every shared
@@ -42,11 +43,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const store = await getStorefront(outletId)
   if (!store) return { title: "Place not found" }
 
+  const label = outletLabel(store)
   return {
-    title      : store.displayName,
-    description: store.tagline ?? store.description ?? `Order from ${store.displayName} on DailyBread.`,
+    title      : label,
+    description: store.tagline ?? store.description ?? `Order from ${label} on DailyBread.`,
     openGraph  : {
-      title      : store.displayName,
+      title      : label,
       description: store.tagline ?? "",
       /* A signed URL, so it expires. Acceptable for a share card and not for
          anything durable — the alternative is a public derivative, which is a

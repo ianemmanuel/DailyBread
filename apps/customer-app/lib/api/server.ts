@@ -1,6 +1,8 @@
 import "server-only"
 import { auth } from "@clerk/nextjs/server"
 
+import { forwardingHeaders } from "./forwarding"
+
 /*
  * Server-only backend client.
  *
@@ -76,11 +78,20 @@ export async function backendFetch<T>(path: string, init?: FetchOptions): Promis
     }
   }
 
+  /* Rate-limit attribution (lib/api/forwarding.ts): a signed-in call is
+   * charged to the verified user by its token; an anonymous one to the
+   * visitor, or to this server's cache-fill budget when cached. */
+  const forwarding = await forwardingHeaders({
+    cached       : revalidate !== undefined || tags !== undefined,
+    authenticated: token !== null,
+  })
+
   const res = await fetch(`${BACKEND_API_URL}${path}`, {
     ...rest,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...forwarding,
       ...rest.headers,
     },
     /*
