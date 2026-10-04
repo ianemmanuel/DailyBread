@@ -602,7 +602,10 @@ export interface MealDetail extends Omit<StorefrontMenuItem, "id" | "mealId"> {
   outletId  : string
   section   : { id: string; name: string } | null
   currency  : CustomerCurrency
-  outlet    : MealOutletRef
+  /** The feed's outlet reference plus the neighbourhood the place gives on
+   *  its own storefront — public there already, and the only location context
+   *  a read with no customer point can honestly offer. */
+  outlet    : MealOutletRef & { neighborhood: string | null }
   city      : MarketCity
 }
 

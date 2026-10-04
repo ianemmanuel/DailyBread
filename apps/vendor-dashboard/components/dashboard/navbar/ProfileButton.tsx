@@ -2,18 +2,20 @@
 
 import { UserButton } from '@clerk/nextjs'
 import { ListOrdered } from 'lucide-react'
-import { useRouter } from 'next/navigation'
 
+/*
+ * Clerk's own account menu, unchanged, plus a shortcut to Orders. The
+ * shortcut is a `UserButton.Link`, which navigates; it used to push
+ * `/dashboard/orders`, a route that does not exist (Orders is `/orders`).
+ */
 export default function ProfileButton() {
-  const router = useRouter()
-
   return (
     <UserButton>
       <UserButton.MenuItems>
-        <UserButton.Action
+        <UserButton.Link
           label="My orders"
           labelIcon={<ListOrdered className="h-4 w-4" />}
-          onClick={() => router.push('/dashboard/orders')}
+          href="/orders"
         />
       </UserButton.MenuItems>
     </UserButton>

@@ -1,4 +1,5 @@
 import "server-only"
+import { cache } from "react"
 import type { MealDetail } from "@repo/types/customer-app"
 
 import { backendFetch, BackendApiError } from "@/lib/api/server"
@@ -20,7 +21,12 @@ import { backendFetch, BackendApiError } from "@/lib/api/server"
  * still per request: the price, the offer applying this minute and open-now
  * are live, and the outlet logo is a short-lived signed URL.
  */
-export async function getMealDetail(mealId: string): Promise<MealDetail | null> {
+/*
+ * `cache()` — generateMetadata and the page both ask for the meal, and a
+ * `no-store` fetch is not something to lean on fetch memoisation for. One
+ * request to the backend per render, guaranteed.
+ */
+export const getMealDetail = cache(async (mealId: string): Promise<MealDetail | null> => {
   try {
     return await backendFetch<MealDetail>(
       `/api/customer/v1/meals/${encodeURIComponent(mealId)}`,
@@ -30,4 +36,4 @@ export async function getMealDetail(mealId: string): Promise<MealDetail | null> 
     if (err instanceof BackendApiError && err.status === 404) return null
     throw err
   }
-}
+})

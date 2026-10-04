@@ -16,6 +16,7 @@ export type JwtFailureReason =
   | "expired"           // signature fine, `exp` in the past
   | "not_yet_valid"     // `nbf` in the future — a clock running SLOW
   | "untrusted_issuer"  // `iss` matches none of the configured Clerk apps
+  | "unauthorized_party" // `azp` is not one of CLERK_AUTHORIZED_PARTIES
   | "malformed"         // not a JWT, or missing iss / sub / kid
   | "bad_signature"     // signature or issuer check failed
   | "signing_key"       // JWKS could not produce the key (rotated, unreachable, rate-limited)
@@ -58,6 +59,7 @@ export function describeJwtFailure(err: unknown, now: Date = new Date()): JwtFai
   // verifyClerkJwt's own pre-checks throw plain Errors; classify by their text.
   const message = error?.message ?? ""
   if (message.startsWith("Untrusted Clerk issuer")) return { reason: "untrusted_issuer", errorName }
+  if (message.startsWith("Unauthorized party"))    return { reason: "unauthorized_party", errorName }
   if (message.startsWith("Invalid JWT"))           return { reason: "malformed", errorName }
 
   return { reason: "unknown", errorName }

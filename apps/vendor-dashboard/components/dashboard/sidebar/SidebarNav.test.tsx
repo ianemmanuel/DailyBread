@@ -17,13 +17,13 @@ import { VendorNavProvider } from "@/components/dashboard/VendorNavContext"
 
 let root: Root
 let host: HTMLDivElement
-function render(sellingReady = true) {
+function render(sellingReady = true, collapsed = false) {
   host = document.createElement("div")
   document.body.appendChild(host)
   root = createRoot(host)
   act(() => root.render(
     <VendorNavProvider sellingReady={sellingReady} identity={{ businessName: null, email: null }}>
-      <SidebarNav />
+      <SidebarNav collapsed={collapsed} />
     </VendorNavProvider>,
   ))
 }
@@ -71,5 +71,40 @@ describe("SidebarNav", () => {
     expect(links).toContain("/setup")
     expect(links).not.toContain("/orders")
     expect(links).toContain("/menus")
+  })
+
+  describe("collapsed (desktop icon rail)", () => {
+    const hrefs = () => [...host.querySelectorAll("a")].map((a) => a.getAttribute("href"))
+
+    it("keeps every destination the expanded sidebar has — none dropped for being unfinished", () => {
+      pathname = "/dashboard"
+      render(true, false)
+      const expanded = hrefs()
+      act(() => root.unmount()); host.remove()
+      render(true, true)
+      expect(hrefs()).toEqual(expanded)
+      for (const placeholder of ["/dashboard", "/orders", "/subscriptions", "/meal-plans", "/menus", "/outlets"]) {
+        expect(hrefs()).toContain(placeholder)
+      }
+    })
+
+    it("every link keeps its label as its accessible name, and nothing is inert", () => {
+      pathname = "/meals"
+      render(true, true)
+      for (const a of host.querySelectorAll("a")) {
+        expect(a.textContent?.trim().length).toBeGreaterThan(0)
+        expect(a.querySelector(".sr-only")).not.toBeNull()
+      }
+      expect(host.querySelectorAll("[inert]")).toHaveLength(0)
+      expect(host.querySelectorAll("button[aria-expanded]")).toHaveLength(0)
+    })
+
+    it("still marks exactly one current link", () => {
+      pathname = "/menus/abc"
+      render(true, true)
+      const current = host.querySelectorAll('[aria-current="page"]')
+      expect(current).toHaveLength(1)
+      expect(current[0]!.getAttribute("href")).toBe("/menus")
+    })
   })
 })

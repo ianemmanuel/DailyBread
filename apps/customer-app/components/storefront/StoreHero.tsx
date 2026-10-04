@@ -3,6 +3,7 @@ import Link from "next/link"
 import { ArrowLeft, Star, Clock, Bike, MapPin, UtensilsCrossed, ShoppingBag } from "lucide-react"
 import { formatDeliveryFee, formatEta, formatDistance, formatMoneyCompact } from "@/lib/format/money"
 import type { Storefront } from "@repo/types/customer-app"
+import { outletIdentity } from "@/lib/format/outlet"
 
 /*
  * The top of a storefront.
@@ -15,6 +16,8 @@ import type { Storefront } from "@repo/types/customer-app"
  * for every image rather than for the ones we happened to test.
  */
 export function StoreHero({ store }: { store: Storefront }) {
+  /* This storefront is ONE outlet; its own name leads (lib/format/outlet). */
+  const identity = outletIdentity(store)
   const eta = formatEta(store.eta)
 
   return (
@@ -84,7 +87,10 @@ export function StoreHero({ store }: { store: Storefront }) {
 
         <div className="mt-4 space-y-3 pb-6">
           <div className="space-y-1">
-            <h1 className="heading-xl text-foreground">{store.displayName}</h1>
+            <h1 className="heading-xl break-words text-foreground">{identity.name}</h1>
+            {identity.vendor && (
+              <p className="text-base font-medium text-muted-foreground">by {identity.vendor}</p>
+            )}
             {store.tagline && (
               <p className="text-sm text-muted-foreground">{store.tagline}</p>
             )}

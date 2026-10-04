@@ -245,7 +245,13 @@ export function ModifierGroupSheet({
                 maxLength={60}
                 autoFocus
               />
-              <p className="text-xs text-muted-foreground">What the customer sees above the choices.</p>
+              {/* The storefront heads every group "Options" and shows this as
+                  the group's own label, exactly as written. */}
+              <p className="text-xs text-muted-foreground">
+                Shown to customers, as you write it, as the label for these choices under
+                &ldquo;Options&rdquo;. It&apos;s your description — DailyBread displays it but
+                doesn&apos;t check that it&apos;s accurate.
+              </p>
             </div>
 
             <div className="space-y-1.5">

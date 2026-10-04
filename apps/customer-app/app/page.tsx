@@ -1,7 +1,5 @@
-import Link from "next/link"
-import { ArrowRight } from "lucide-react"
-import { 
-  Categories, 
+import {
+  Categories,
   CtaBand,
   EditorialBand,
   Hero,
@@ -9,40 +7,22 @@ import {
   Markets,
   MealPlans
 } from "@/components/home"
-import { CityDirectoryLabel } from "@/components/home/CityDirectoryLabel"
-import { ContinueToCity } from "@/components/home/ContinueToCity"
-import { Button } from "@/components/ui/button"
+import { HeroCityActions } from "@/components/home/HeroCityActions"
+import { HOW_IT_WORKS_INTRO, HOW_IT_WORKS_PAGE } from "@/constants/home/how-it-works-content"
 
 //* A global marketing page— the brand, and the way into a market.
 
 export default function HomePage() {
   return (
     <>
-      <Hero
-        actions={
-          <>
-            <Button asChild size="lg" className="h-12 rounded-full px-7 text-base">
-              <Link href="/city">
-                {/* "Choose your city", or — once the customer has one —
-                    "Explore other cities". */}
-                <CityDirectoryLabel />
-                <ArrowRight aria-hidden className="size-4" />
-              </Link>
-            </Button>
-            <Button asChild variant="brand" size="lg" className="h-12 rounded-full px-6 text-base">
-              <Link href="/about">How DailyBread works</Link>
-            </Button>
-          </>
-        }
-      />
-
-      {/* A returning customer's way back into their own city. Client-only and
-          absent for a first visit, so `/` stays static and global. */}
-      <ContinueToCity />
+      {/* The hero's actions are all about WHERE: a returning customer's own
+          city first, the directory beside it. "How it works" is a section of
+          its own below, with a link to the full page. */}
+      <Hero actions={<HeroCityActions />} />
 
       {/* Removes itself when empty. */}
       <Categories />
-      <HowItWorks />
+      <HowItWorks intro={HOW_IT_WORKS_INTRO} more={HOW_IT_WORKS_PAGE} />
       <EditorialBand />
       <MealPlans />
       <Markets />

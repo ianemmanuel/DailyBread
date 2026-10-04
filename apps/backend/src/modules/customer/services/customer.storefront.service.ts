@@ -235,7 +235,7 @@ export async function getMealDetail(mealId: string, now: Date = new Date()): Pro
       menuItem: { select: MENU_ITEM_SELECT },
       outlet  : {
         select: {
-          id: true, vendorId: true, cityId: true, zoneId: true, name: true,
+          id: true, vendorId: true, cityId: true, zoneId: true, name: true, neighborhood: true,
           vendor: {
             select: {
               countryId    : true,
@@ -287,6 +287,7 @@ export async function getMealDetail(mealId: string, now: Date = new Date()): Pro
       name       : outlet.name,
       displayName: outlet.vendor.vendorProfile?.displayName ?? outlet.name,
       logoUrl,
+      neighborhood: outlet.neighborhood,
     },
     city      : { id: city.id, name: city.name, slug: city.slug, timezone: city.timezone },
   }

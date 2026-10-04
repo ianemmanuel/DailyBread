@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import type { AuthenticatedVendorRequest } from "@repo/types/backend"
 
-import { verifyClerkJwt, describeJwtFailure } from "@/lib/clerk"
+import { verifyRequestToken, describeJwtFailure } from "@/lib/clerk"
 import { extractBearerToken } from "@/lib/clerk/extractBearerToken"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
@@ -24,7 +24,7 @@ export async function verifyVendorToken(req: Request, _res: Response, next: Next
   }
 
   try {
-    const verified = await verifyClerkJwt(token)
+    const verified = await verifyRequestToken(req, token)
 
     if (verified.app !== "vendor") {
       authLog.warn({ app: verified.app }, "Token from wrong Clerk instance rejected")

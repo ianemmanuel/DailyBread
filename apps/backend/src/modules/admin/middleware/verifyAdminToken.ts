@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import type { AuthenticatedAdminRequest } from "@repo/types/backend"
 
-import { verifyClerkJwt, describeJwtFailure } from "@/lib/clerk"
+import { verifyRequestToken, describeJwtFailure } from "@/lib/clerk"
 import { ApiError } from "@/errors/ApiError"
 import { HttpStatus } from "@/constants/httpStatus"
 import { logger } from "@/lib/pino/logger"
@@ -25,7 +25,7 @@ export async function verifyAdminToken(req: Request, _res: Response, next: NextF
 
   try {
     const token    = header.replace("Bearer ", "")
-    const verified = await verifyClerkJwt(token)
+    const verified = await verifyRequestToken(req, token)
 
     if (verified.app !== "admin") {
       authLog.warn({ app: verified.app }, "Token from wrong Clerk instance rejected")

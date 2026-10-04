@@ -67,7 +67,7 @@ export function MobileNav() {
         <SheetHeader className="h-nav shrink-0 flex-row items-center justify-between border-b border-border px-4 py-0">
           <SheetTitle asChild>
             <Link href="/" onClick={close} aria-label="DailyBread home">
-              <Logo className="text-xl lg:text-xl" />
+              <Logo className="h-5" />
             </Link>
           </SheetTitle>
           <SheetDescription className="sr-only">

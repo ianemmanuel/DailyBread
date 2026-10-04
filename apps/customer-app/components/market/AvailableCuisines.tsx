@@ -31,10 +31,13 @@ export function AvailableCuisines({
         <li key={cuisine.id} className="shrink-0">
           <Link
             href={`${basePath}?cuisine=${cuisine.id}`}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-sm font-medium text-foreground outline-none transition-colors hover:border-border-strong hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
           >
             {cuisine.name}
-            <span className="text-xs text-muted-foreground">{cuisine.count}</span>
+            <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">
+              {cuisine.count}
+              <span className="sr-only"> {cuisine.count === 1 ? "place" : "places"}</span>
+            </span>
           </Link>
         </li>
       ))}

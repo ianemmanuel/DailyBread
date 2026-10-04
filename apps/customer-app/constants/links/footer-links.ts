@@ -55,6 +55,7 @@ export const FOOTER_GROUPS: readonly FooterGroup[] = [
     title: "Company",
     links: [
       { href: "/about", label: "About DailyBread" },
+      { href: "/how-it-works", label: "How it works" },
     ],
   },
 ] as const

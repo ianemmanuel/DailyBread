@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken"
 import jwksClient, { JwksClient } from "jwks-rsa"
+import { env } from "@/env"
 import { getClerkProjects, ClerkAppType } from "./clerkProjects"
 
 export type VerifiedClerkToken = {
@@ -8,11 +9,32 @@ export type VerifiedClerkToken = {
   issuer: string
 }
 
-/* 
-  JWKS clients are cached for the lifetime of the process.
-  One client per Clerk instance (one per app type).
-  Lazy-initialised on first call — safe because env vars are validated at startup.
-*/
+/*
+ * Clerk session-token verification — Clerk's documented MANUAL path
+ * (https://clerk.com/docs/guides/sessions/manual-jwt-verification), not
+ * `@clerk/express`'s clerkMiddleware(). That middleware is configured for ONE
+ * Clerk instance (one secret/publishable key); this API trusts FOUR separate
+ * instances — customer, vendor, courier, admin — and tells them apart by
+ * issuer, which is what makes a vendor token structurally useless on a
+ * customer route. Clerk's checklist, line by line:
+ *
+ *   signature  — the instance's JWKS public key (by `kid`)       ✔
+ *   algorithm  — RS256, pinned, never inferred from the token     ✔
+ *   exp / nbf  — enforced by jsonwebtoken                         ✔
+ *   azp        — must be one of our origins when configured
+ *                (CLERK_AUTHORIZED_PARTIES); skipped when the
+ *                token carries none, exactly as Clerk documents   ✔
+ *   iss        — exact match against the configured instance     ✔ (ours)
+ *
+ * JWKS clients are cached for the lifetime of the process, one per instance,
+ * and their key fetches are RATE-LIMITED: tokens are verified before the API
+ * rate limiter runs (so it can key on a verified identity), and a forged token
+ * naming a trusted issuer with a random `kid` would otherwise send one JWKS
+ * request to Clerk per incoming request.
+ */
+
+/** The only algorithm Clerk signs session tokens with. */
+export const CLERK_JWT_ALGORITHMS: jwt.Algorithm[] = ["RS256"]
 
 let _clients: Map<string, JwksClient> | null = null
 // Cache projects alongside clients so we don't call getClerkProjects() twice per request.
@@ -40,10 +62,36 @@ function bootstrap(): {
       cache: true,
       cacheMaxEntries: 10,
       cacheMaxAge: 10 * 60 * 1000,
+      // An unknown `kid` misses the cache and fetches; bound how often.
+      rateLimit: true,
+      jwksRequestsPerMinute: 10,
     }))
   }
 
   return { clients: _clients, projects: _projects }
+}
+
+/**
+ * The checks that need only the key — split out so they are unit-tested with
+ * a locally generated key pair, without a JWKS endpoint.
+ */
+export function verifyWithKey(
+  token    : string,
+  publicKey: string,
+  options  : { issuer: string; authorizedParties: readonly string[] },
+): jwt.JwtPayload {
+  const payload = jwt.verify(token, publicKey, {
+    issuer    : options.issuer,
+    algorithms: CLERK_JWT_ALGORITHMS,
+  })
+  if (typeof payload === "string") throw new Error("Invalid JWT structure")
+
+  const azp = payload.azp
+  if (options.authorizedParties.length > 0 && typeof azp === "string" && !options.authorizedParties.includes(azp)) {
+    // describeJwtFailure classifies by this prefix; the origin is not echoed.
+    throw new Error("Unauthorized party")
+  }
+  return payload
 }
 
 export async function verifyClerkJwt(token: string): Promise<VerifiedClerkToken> {
@@ -79,13 +127,13 @@ export async function verifyClerkJwt(token: string): Promise<VerifiedClerkToken>
   }
 
   const key = await client.getSigningKey(kid)
-  const publicKey = key.getPublicKey()
-
-  // Full verification: signature + issuer + expiry
-  jwt.verify(token, publicKey, { issuer: iss })
+  const payload = verifyWithKey(token, key.getPublicKey(), {
+    issuer           : iss,
+    authorizedParties: env.CLERK_AUTHORIZED_PARTIES,
+  })
 
   return {
-    clerkUserId: sub,
+    clerkUserId: payload.sub!,
     issuer: iss,
     app: app as ClerkAppType,
   }

@@ -79,7 +79,7 @@ export const logger = pino(
     // In production, redact sensitive fields that should never appear in logs
     redact: isProduction
       ? {
-          paths  : ["req.headers.authorization", "req.headers.cookie", "*.password", "*.token", "*.secret"],
+          paths  : ["req.headers.authorization", "req.headers.cookie", 'req.headers["x-db-internal-key"]', "*.password", "*.token", "*.secret"],
           censor : "[REDACTED]",
         }
       : undefined,
