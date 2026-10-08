@@ -24,7 +24,7 @@ export const metadata: Metadata = { title: "Offers" }
  * description and the stop button all live on the detail page, because a
  * decision about someone's promotion should not be made from a table row that
  * cannot show what the offer actually covers — the same split
- * /finance/payout-accounts and /vendors/meals already use.
+ * /finance/payout-accounts and /meals/dishes already use.
  *
  * OVERSIGHT, NOT AUTHORING: merchants self-serve, so there is no create here.
  * Country-scoped on the vendor's own country, enforced in the service.

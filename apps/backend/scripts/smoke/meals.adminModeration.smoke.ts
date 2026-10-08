@@ -22,7 +22,7 @@
 import express from "express"
 import type { AddressInfo } from "node:net"
 import { prisma } from "@repo/db"
-import { AdminPermissions } from "@repo/types/enums"
+import { AdminPermissions, MEAL_REASON_ACTIONS } from "@repo/types/enums"
 import type { AdminScopeContext } from "@repo/types/backend"
 import vendorRoutes from "@/modules/vendor/routes"
 import adminV1Router from "@/modules/admin/routes/v1"
@@ -34,6 +34,7 @@ import { clearCurrencyCache } from "@/modules/finance"
 import { hasFlaggedMealsForCountries } from "@/modules/meals"
 
 const MARKER = "zz-smoke-mealmod"
+const SMOKE_REASON = `${MARKER}-reason`
 const TZ     = "Pacific/Kiritimati"
 const POINT  = { latitude: -19.5, longitude: -149.75 }
 const square = (w: number, e: number) => ({
@@ -118,6 +119,7 @@ const asAdmin  = (id: string, permissions: string[], scope: AdminScopeContext) =
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 async function sweep() {
+  await prisma.adminActionReason.deleteMany({ where: { code: { startsWith: MARKER } } })
   const vendors = await prisma.vendorAccount.findMany({
     where : { businessEmail: { startsWith: MARKER } },
     select: { id: true },
@@ -183,6 +185,13 @@ async function auditActions(entityId: string, atLeast: number) {
 async function main() {
   console.log("\n── meal admin moderation smoke ─────────────────────────────\n")
   await sweep()
+  // A throwaway global reason valid for every meal action (Phase 2.1:
+  // consequential actions need one). Swept with the rest.
+  await prisma.adminActionReason.create({ data: {
+    code: SMOKE_REASON, label: "Smoke reason",
+    description: "Smoke-test reason explaining this action to the vendor.",
+    appliesTo: [...MEAL_REASON_ACTIONS],
+  } })
 
   const vendorType = await prisma.vendorType.findFirst({ where: { status: "ACTIVE" }, select: { id: true } })
   const admin      = await prisma.adminUser.findFirst({ select: { id: true } })
@@ -370,7 +379,7 @@ async function main() {
     {
       const a = await call("POST", `${M}/modifier-groups/${group.id}/approve`)
       check("out-of-scope group APPROVE is a 404, never a 403", a.status === 404 && a.json.code === "NOT_FOUND", a.json)
-      const s = await call("POST", `${M}/modifier-groups/${group.id}/send-back`, { reason: "x" })
+      const s = await call("POST", `${M}/modifier-groups/${group.id}/send-back`, { reasonCode: SMOKE_REASON })
       check("out-of-scope group SEND-BACK is a 404", s.status === 404 && s.json.code === "NOT_FOUND", s.json)
       check("…and changed nothing",
         (await prisma.modifierGroup.findUniqueOrThrow({ where: { id: group.id } })).reviewStatus === "FLAGGED")
@@ -398,7 +407,7 @@ async function main() {
       check("group send-back without a reason is refused", noReason.status === 400 && noReason.json.code === "REASON_REQUIRED", noReason.json)
 
       const before = await noteCount("MEAL_OPTIONS_REJECTED")
-      const sb = await call("POST", `${M}/modifier-groups/${group.id}/send-back`, { reason: "Rename the first sauce." })
+      const sb = await call("POST", `${M}/modifier-groups/${group.id}/send-back`, { reasonCode: "OTHER", vendorMessage: "Rename the first sauce." })
       check("group send-back → MANUALLY_REJECTED with the reason",
         sb.status === 200 && sb.json.data?.reviewStatus === "MANUALLY_REJECTED" && sb.json.data?.rejectionReason === "Rename the first sauce.", sb.json)
       const note = await prisma.vendorNotification.findFirst({
@@ -414,7 +423,7 @@ async function main() {
       await invariant("group sent back")
 
       // The OLD way to act on a modifier flag: send the dish back.
-      const dsb = await call("POST", `${M}/${d1}/send-back`, { reason: "Fix the sauce names." })
+      const dsb = await call("POST", `${M}/${d1}/send-back`, { reasonCode: "OTHER", vendorMessage: "Fix the sauce names." })
       check("a dish can still be sent back over its options", dsb.json.data?.reviewStatus === "MANUALLY_REJECTED", dsb.json)
     }
 
@@ -456,7 +465,7 @@ async function main() {
      * flagged: d3 re-queues carrying the modifier reason. The admin then
      * approves the group from elsewhere — that clears the modifier reason, and
      * must NOT clear d3, which an admin sent back and nobody has looked at. */
-    await call("POST", `${M}/${d3}/send-back`, { reason: "Check the sauces." })
+    await call("POST", `${M}/${d3}/send-back`, { reasonCode: SMOKE_REASON })
     asVendor(vendorA.userId)
     await editGroup("Shit sauces")
     check("a dish sent back over its options re-queues when the vendor re-edits, even if still flagged",
@@ -481,7 +490,7 @@ async function main() {
 
       // A send-back about the dish's OWN words is not moved by a group change.
       await prisma.menuItem.update({ where: { id: d2 }, data: { flagReasons: ["INAPPROPRIATE_NAME"], reviewStatus: "FLAGGED" } })
-      await call("POST", `${M}/${d2}/send-back`, { reason: "Rename the dish." })
+      await call("POST", `${M}/${d2}/send-back`, { reasonCode: SMOKE_REASON })
     }
     asVendor(vendorA.userId)
     await editGroup("Hot")
@@ -529,11 +538,11 @@ async function main() {
 
     asAdmin(admin.id, [READ, MOD], SCOPE_A)
     {
-      const sent = await purgesDuring(() => call("POST", `${M}/${d1}/send-back`, { reason: "Recheck." }))
+      const sent = await purgesDuring(() => call("POST", `${M}/${d1}/send-back`, { reasonCode: SMOKE_REASON }))
       check("a dish moderation action purges the cached city feeds", sent.includes("city-inventory"), sent)
       const appr = await purgesDuring(() => call("POST", `${M}/${d1}/approve`))
       check("…approve purges too", appr.includes("city-inventory"), appr)
-      const grp  = await purgesDuring(() => call("POST", `${M}/modifier-groups/${group.id}/send-back`, { reason: "Again." }))
+      const grp  = await purgesDuring(() => call("POST", `${M}/modifier-groups/${group.id}/send-back`, { reasonCode: SMOKE_REASON }))
       check("…and so does a group verdict", grp.includes("city-inventory"), grp)
       await purgesDuring(() => call("POST", `${M}/modifier-groups/${group.id}/approve`))
       const refused = await purgesDuring(() => call("POST", `${M}/modifier-groups/${group.id}/approve`))
@@ -563,7 +572,7 @@ async function main() {
       check("control: the source group passes the word filter", sourceGroup.reviewStatus === "AUTO_APPROVED", sourceGroup)
 
       asAdmin(admin.id, [READ, MOD], SCOPE_A)
-      await call("POST", `${M}/modifier-groups/${sourceGroup.id}/send-back`, { reason: "Rename Smoky — misleading." })
+      await call("POST", `${M}/modifier-groups/${sourceGroup.id}/send-back`, { reasonCode: "OTHER", vendorMessage: "Rename Smoky — misleading." })
 
       asVendor(vendorA.userId)
       const copy = await make("Copy Target", [sauces("Smoky")])
@@ -617,20 +626,20 @@ async function main() {
       const S = `${M}/${d3}/status`
       const n = { s: await noteCount("MEAL_SUSPENDED"), b: await noteCount("MEAL_BANNED"), r: await noteCount("MEAL_REINSTATED") }
 
-      const sus = await call("POST", S, { status: "SUSPENDED", reason: "Health complaint", expectedStatus: "ACTIVE" })
+      const sus = await call("POST", S, { status: "SUSPENDED", reasonCode: SMOKE_REASON, internalNote: "Health complaint", expectedStatus: "ACTIVE" })
       check("suspend ACTIVE → SUSPENDED", sus.json.data?.adminStatus === "SUSPENDED" && sus.json.data?.adminSuspendedAt !== null, sus.json)
       check("…vendor notified (MEAL_SUSPENDED), without the internal reason",
         (await noteCount("MEAL_SUSPENDED")) === n.s + 1 &&
         !(await prisma.vendorNotification.findFirst({ where: { vendorId: vendorA.id, type: "MEAL_SUSPENDED" } }))?.message.includes("Health complaint"))
-      const twice = await call("POST", S, { status: "SUSPENDED", reason: "x" })
+      const twice = await call("POST", S, { status: "SUSPENDED", reasonCode: SMOKE_REASON, internalNote: "x" })
       check("suspending twice is refused", twice.status === 400 && twice.json.code === "ALREADY_IN_STATE", twice.json)
 
-      const ban = await call("POST", S, { status: "BANNED", reason: "Repeated" })
+      const ban = await call("POST", S, { status: "BANNED", reasonCode: SMOKE_REASON, internalNote: "Repeated" })
       check("ban SUSPENDED → BANNED, suspension marker cleared",
         ban.json.data?.adminStatus === "BANNED" && ban.json.data?.adminSuspendedAt === null && ban.json.data?.adminBannedAt !== null, ban.json)
       check("…vendor notified (MEAL_BANNED)", (await noteCount("MEAL_BANNED")) === n.b + 1)
 
-      const down = await call("POST", S, { status: "SUSPENDED", reason: "x" })
+      const down = await call("POST", S, { status: "SUSPENDED", reasonCode: SMOKE_REASON, internalNote: "x" })
       check("BANNED → SUSPENDED is refused", down.status === 409 && down.json.code === "INVALID_STATUS_TRANSITION", down.json)
 
       /* An admin who opened the page while it was SUSPENDED clicks "Reinstate"
@@ -643,12 +652,12 @@ async function main() {
       const unban = await call("POST", S, { status: "ACTIVE", expectedStatus: "BANNED" })
       check("unban BANNED → ACTIVE", unban.json.data?.adminStatus === "ACTIVE" && unban.json.data?.adminBannedAt === null, unban.json)
 
-      await call("POST", S, { status: "SUSPENDED", reason: "Again" })
+      await call("POST", S, { status: "SUSPENDED", reasonCode: SMOKE_REASON, internalNote: "Again" })
       const re = await call("POST", S, { status: "ACTIVE", expectedStatus: "SUSPENDED" })
       check("reinstate SUSPENDED → ACTIVE", re.json.data?.adminStatus === "ACTIVE" && re.json.data?.adminSuspendedAt === null, re.json)
       check("…both lifts notify MEAL_REINSTATED", (await noteCount("MEAL_REINSTATED")) === n.r + 2)
 
-      const badExpected = await call("POST", S, { status: "SUSPENDED", reason: "x", expectedStatus: "NOPE" })
+      const badExpected = await call("POST", S, { status: "SUSPENDED", reasonCode: SMOKE_REASON, internalNote: "x", expectedStatus: "NOPE" })
       check("an unknown expectedStatus is refused", badExpected.status === 400 && badExpected.json.code === "INVALID_STATUS", badExpected.json)
 
       check("refused transitions notified nobody",
@@ -708,7 +717,7 @@ async function main() {
     {
       const g = await call("GET", `${M}/${bDish}`)
       check("a soft-deleted vendor's dish does not open by id", g.status === 404 && g.json.code === "NOT_FOUND", g.json)
-      const s = await call("POST", `${M}/${bDish}/status`, { status: "SUSPENDED", reason: "x" })
+      const s = await call("POST", `${M}/${bDish}/status`, { status: "SUSPENDED", reasonCode: SMOKE_REASON, internalNote: "x" })
       check("…nor accept a moderation write", s.status === 404, s.json)
       const l = await call("GET", `${M}?search=${MARKER}&pageSize=100`)
       check("…agreeing with the list, which excludes it",

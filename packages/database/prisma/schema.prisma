@@ -38,14 +38,17 @@ model AdminUser {
   unavailableUntil    DateTime?
   unavailableReason   String?
 
-  role          AdminRole?            @relation(fields: [roleId], references: [id])
-  invitedBy     AdminUser?            @relation("AdminInvitedBy", fields: [invitedById], references: [id])
-  invitees      AdminUser[]           @relation("AdminInvitedBy")
-  scopes        AdminUserScope[]
-  permissions   AdminUserPermission[] @relation("UserPermissions")
-  granted       AdminUserPermission[] @relation("PermissionGrantedBy")
-  auditLogs     AuditLog[]
-  notifications AdminNotification[]
+  role                    AdminRole?            @relation(fields: [roleId], references: [id])
+  invitedBy               AdminUser?            @relation("AdminInvitedBy", fields: [invitedById], references: [id])
+  invitees                AdminUser[]           @relation("AdminInvitedBy")
+  scopes                  AdminUserScope[]
+  mealEscalationsCreated  MealEscalation[]      @relation("MealEscalationCreatedBy")
+  mealEscalationsAssigned MealEscalation[]      @relation("MealEscalationAssignedTo")
+  mealEscalationsResolved MealEscalation[]      @relation("MealEscalationResolvedBy")
+  permissions             AdminUserPermission[] @relation("UserPermissions")
+  granted                 AdminUserPermission[] @relation("PermissionGrantedBy")
+  auditLogs               AuditLog[]
+  notifications           AdminNotification[]
 
   @@index([externalAuthId])
   @@index([roleId])
@@ -189,6 +192,11 @@ model AdminUserPermission {
 ///   customer_care   → CITY or COUNTRY (city preferred)
 ///   courier_ops     → CITY only
 ///   operations_admin→ GLOBAL only (temporary — every market shares the same launch process for now)
+//* ONE row per admin — GLOBAL, exactly one country, or exactly one city.
+//* Enforced in the database by migration 20261006090000_admin_single_scope
+//* (a unique index on adminUserId, written partial so Prisma's drift check
+//* leaves it alone, plus a shape CHECK). A CITY row's countryId is its city's
+//* country, set from the city; readers derive it from the city, never trust it.
 model AdminUserScope {
   id          String         @id @default(uuid())
   adminUserId String
@@ -394,14 +402,14 @@ model City {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  country        Country              @relation(fields: [countryId], references: [id])
-  documentTypes  DocumentTypeConfig[]
-  zones          Zone[]
-  marketSignals  MarketSignal[]
-  serviceAreas   ServiceArea[]
-  deliveryZones  DeliveryZone[]
-  adminScopes    AdminUserScope[]
-  heroPromotions HeroPromotion[]
+  country         Country              @relation(fields: [countryId], references: [id])
+  documentTypes   DocumentTypeConfig[]
+  zones           Zone[]
+  marketSignals   MarketSignal[]
+  serviceAreas    ServiceArea[]
+  deliveryZones   DeliveryZone[]
+  adminScopes     AdminUserScope[]
+  heroPromotions  HeroPromotion[]
   consumerMarkets ConsumerMarket[]
 
   @@unique([countryId, name])
@@ -2243,7 +2251,7 @@ model MenuSection {
 //* The dish itself — the vendor's catalog entry, and the thing a variant, an
 //* addon or a discount will eventually hang off.
 model MenuItem {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   vendorId       String
   sectionId      String?
   name           String
@@ -2400,18 +2408,28 @@ model Meal {
   //* (withdrawn everywhere) and from adminStatus (a platform action).
   isAvailable        Boolean @default(true)
 
+  //* The platform's verdict on THIS listing only (the dish's own adminStatus
+  //* covers every outlet). Written by the ERP: ACTIVE ⇄ SUSPENDED; a ban is
+  //* dish-wide and never set here. Reason lives in the audit log.
   adminStatus      MealStatus @default(ACTIVE)
   adminSuspendedAt DateTime?
   adminBannedAt    DateTime?
+  //* ERP marketplace visibility, ORTHOGONAL to adminStatus: a quiet,
+  //* reversible delisting (no reason required, vendor not notified) — not a
+  //* sanction. Non-null = hidden. Who and why are in the audit log. Never
+  //* touched by any vendor write, so neither re-saving the dish nor toggling
+  //* isAvailable can lift it.
+  adminHiddenAt    DateTime?
   deletedAt        DateTime?
   vendorUpdatedAt  DateTime?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  outlet    Outlet         @relation(fields: [outletId], references: [id], onDelete: Cascade)
-  menuItem  MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
-  mealPlans MealPlanMeal[]
-  menus     MenuMeal[]
+  outlet      Outlet           @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  menuItem    MenuItem         @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  mealPlans   MealPlanMeal[]
+  menus       MenuMeal[]
+  escalations MealEscalation[]
 
   @@unique([outletId, menuItemId])
   //* The target of MenuMeal's composite FK: a menu row names its OUTLET, and
@@ -2422,6 +2440,54 @@ model Meal {
   @@index([adminStatus])
   @@index([deletedAt])
   @@index([createdAt])
+}
+
+//* ─── MEAL ESCALATIONS ──────────────────────────────────────────────────────
+//*
+//* A CITY admin may only act with a PREDEFINED reason. When none fits, they
+//* escalate the listing to ONE eligible COUNTRY admin of their own country
+//* (meals:moderate, active, scoped to exactly that country) — who may use
+//* "Other". Deliberately minimal (Phase 2.1): a durable record and
+//* PENDING → RESOLVED. No queue, no notifications, no SLA, no reassignment;
+//* those belong to the Phase 3 review system.
+//*
+//* city/country are SNAPSHOTS of the listing's outlet at the time, so the
+//* record keeps its meaning if the outlet later moves; scoping reads use them.
+model MealEscalation {
+  id              String               @id @default(uuid())
+  mealId          String
+  menuItemId      String
+  outletId        String
+  cityId          String
+  countryId       String
+  //* The action the city admin wanted to take, if they knew (a
+  //* MealReasonAction key). Null = "please look at this".
+  requestedAction String?
+  //* Why — the city admin's own words. Internal; never shown to a vendor.
+  note            String
+  status          MealEscalationStatus @default(PENDING)
+  createdById     String
+  assignedToId    String
+  resolvedById    String?
+  resolvedAt      DateTime?
+  resolutionNote  String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  meal       Meal       @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  createdBy  AdminUser  @relation("MealEscalationCreatedBy", fields: [createdById], references: [id])
+  assignedTo AdminUser  @relation("MealEscalationAssignedTo", fields: [assignedToId], references: [id])
+  resolvedBy AdminUser? @relation("MealEscalationResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([countryId, status])
+  @@index([cityId, status])
+  @@index([assignedToId, status])
+  @@index([mealId])
+}
+
+enum MealEscalationStatus {
+  PENDING
+  RESOLVED
 }
 
 //* ─── MENUS ─────────────────────────────────────────────────────────────────
@@ -2855,7 +2921,7 @@ model ConsumerAddress {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  consumer ConsumerAccount @relation(fields: [consumerAccountId], references: [id], onDelete: Cascade)
+  consumer          ConsumerAccount  @relation(fields: [consumerAccountId], references: [id], onDelete: Cascade)
   /// The markets that use this address as their default. Deleting the address
   /// clears those pointers (SetNull) rather than failing.
   defaultForMarkets ConsumerMarket[]

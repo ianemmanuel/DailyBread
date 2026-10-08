@@ -28,7 +28,12 @@ interface Props {
 }
 
 /**
- * ScopeSelector — lets the actor assign geographic scopes to an admin user.
+ * ScopeSelector — assigns an admin's ONE geographic scope.
+ *
+ * An admin has exactly one scope: global, one country, or one city (the
+ * backend refuses anything else — SINGLE_SCOPE_REQUIRED). The value stays an
+ * array for the request contract, but it is never longer than one: there is
+ * no "Add another", because two scopes used to be read as the union of both.
  *
  * Rules:
  *   - Super admin (isGlobalActor): can assign GLOBAL, COUNTRY, or CITY
@@ -68,7 +73,7 @@ export function ScopeSelector({ isGlobalActor, actorCountries, value, onChange, 
     const defaultScope: ScopeEntry = isGlobalActor
       ? { scopeType: "GLOBAL" }
       : { scopeType: "COUNTRY", countryId: actorCountries[0] ?? "" }
-    onChange([...value, defaultScope])
+    onChange([defaultScope])
   }
 
   function removeScope(index: number) {
@@ -85,14 +90,14 @@ export function ScopeSelector({ isGlobalActor, actorCountries, value, onChange, 
         <>
           <Label>Geographic Scope</Label>
           <p className="text-xs text-muted-foreground">
-            Defines which countries or cities this user can manage.
-            {!isGlobalActor && " You can only assign scopes within your own countries."}
+            One scope per admin: global, one country, or one city.
+            {!isGlobalActor && " You can only assign a scope within your own country."}
           </p>
         </>
       )}
 
       <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-      {value.map((scope, index) => (
+      {value.slice(0, 1).map((scope, index) => (
         <div
           key={index}
           className="flex flex-col gap-1.5 rounded-lg border border-border/60 p-2.5 sm:flex-row sm:items-start"
@@ -168,16 +173,18 @@ export function ScopeSelector({ isGlobalActor, actorCountries, value, onChange, 
       ))}
       </div>
 
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={addScope}
-        className="gap-1.5"
-      >
-        <Plus className="h-3.5 w-3.5" />
-        Add scope
-      </Button>
+      {value.length === 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addScope}
+          className="gap-1.5"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Set scope
+        </Button>
+      )}
     </div>
   )
 }

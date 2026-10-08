@@ -183,7 +183,7 @@ export default async function AdminDiscountDetailPage({
             <ul className="space-y-1.5 text-sm">
               {offer.items.map((i) => (
                 <li key={i.id} className="flex items-baseline justify-between gap-3">
-                  <Link href={`/vendors/meals/${i.id}`} className="cursor-pointer text-foreground hover:text-primary hover:underline">
+                  <Link href={`/meals/dishes/${i.id}`} className="cursor-pointer text-foreground hover:text-primary hover:underline">
                     {i.name}
                   </Link>
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">

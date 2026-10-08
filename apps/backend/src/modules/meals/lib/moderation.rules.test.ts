@@ -8,7 +8,9 @@ import {
   assertDishApprovable,
   mealStatusTransition,
   REASON_REQUIRED_ACTIONS,
+  dishReadScopeWhere, dishInReadScope, canActDishWide, assertDishWideAuthority,
 } from "./moderation.rules"
+import type { AdminScopeContext } from "@repo/types/backend"
 
 const blocked    = { blocked: true,  groupRescreened: false }
 const cleared    = { blocked: false, groupRescreened: false }
@@ -158,5 +160,45 @@ describe("mealStatusTransition", () => {
 
   it("requires a reason only for taking a meal off the marketplace", () => {
     expect([...REASON_REQUIRED_ACTIONS].sort()).toEqual(["ban", "suspend"])
+  })
+})
+
+// ─── Dish-wide authority ──────────────────────────────────────────────────────
+
+
+describe("dish scope — reading follows where the dish is sold; acting needs country tier", () => {
+  const GLOBAL : AdminScopeContext = { isGlobal: true,  countryIds: [], cityIds: [], tier: "GLOBAL" }
+  const KENYA  : AdminScopeContext = { isGlobal: false, countryIds: ["ke"], cityIds: [], tier: "COUNTRY" }
+  const NAIROBI: AdminScopeContext = { isGlobal: false, countryIds: ["ke"], cityIds: ["nbo"], tier: "CITY" }
+  const soldIn = (...cities: string[]) => ({ countryId: "ke", outletCityIds: cities })
+
+  it("a city admin reads a dish only when it is sold in their city", () => {
+    expect(dishInReadScope(NAIROBI, soldIn("nbo", "mba"))).toBe(true)
+    expect(dishInReadScope(NAIROBI, soldIn("mba"))).toBe(false)
+    expect(dishInReadScope(NAIROBI, soldIn())).toBe(false)
+  })
+  it("a country admin reads every dish of their country's vendors; others none", () => {
+    expect(dishInReadScope(KENYA, soldIn("mba"))).toBe(true)
+    expect(dishInReadScope(KENYA, soldIn())).toBe(true)
+    expect(dishInReadScope(KENYA, { countryId: "ug", outletCityIds: ["kla"] })).toBe(false)
+    expect(dishInReadScope(GLOBAL, { countryId: "ug", outletCityIds: [] })).toBe(true)
+  })
+  it("the SQL clause narrows a city admin through the dish's outlets", () => {
+    expect(dishReadScopeWhere(GLOBAL)).toEqual({})
+    expect(dishReadScopeWhere(KENYA)).toEqual({ vendor: { countryId: { in: ["ke"] } } })
+    expect(dishReadScopeWhere(NAIROBI)).toEqual({
+      vendor     : { countryId: { in: ["ke"] } },
+      outletMeals: { some: { outlet: { cityId: { in: ["nbo"] } } } },
+    })
+  })
+  it("only GLOBAL and COUNTRY tiers act dish-wide; a city admin is refused with 403", () => {
+    expect(canActDishWide(GLOBAL)).toBe(true)
+    expect(canActDishWide(KENYA)).toBe(true)
+    expect(canActDishWide(NAIROBI)).toBe(false)
+    try { assertDishWideAuthority(NAIROBI); expect.unreachable() } catch (e) {
+      expect(e).toBeInstanceOf(ApiError)
+      expect((e as ApiError).statusCode).toBe(403)
+      expect((e as ApiError).code).toBe("DISH_WIDE_ACTION_NEEDS_COUNTRY_SCOPE")
+    }
   })
 })

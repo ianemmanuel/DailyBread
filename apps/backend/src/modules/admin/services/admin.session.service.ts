@@ -30,6 +30,7 @@ export function buildAdminSession(
       isGlobal  : adminScope.isGlobal,
       countryIds: adminScope.countryIds,
       cityIds   : adminScope.cityIds,
+      tier      : adminScope.tier,
       // Raw scope rows so the frontend can render country/city names
       // and build the scope picker.
       scopes: adminUser.scopes.map((s) => ({

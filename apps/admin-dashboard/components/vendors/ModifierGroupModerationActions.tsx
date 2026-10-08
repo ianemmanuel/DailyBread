@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, ThumbsUp, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter,
 } from "@/components/ui/alert-dialog"
 import type { AdminModifierGroup } from "@/types"
+import { MealReasonActions } from "@repo/types/enums"
+import { ReasonPicker, EMPTY_REASON, reasonBody, reasonReady, type ReasonValue } from "@/components/meals/ReasonPicker"
 
 /*
  * The verdict on ONE option group, shown inside its card on the meal page.
@@ -24,13 +24,15 @@ import type { AdminModifierGroup } from "@/types"
  */
 
 interface Props {
-  group: AdminModifierGroup
+  group    : AdminModifierGroup
+  /** The dish's country — which reasons (global + country) are offered. */
+  countryId: string
 }
 
-export function ModifierGroupModerationActions({ group }: Props) {
+export function ModifierGroupModerationActions({ group, countryId }: Props) {
   const router = useRouter()
   const [open, setOpen]       = useState(false)
-  const [reason, setReason]   = useState("")
+  const [reason, setReason]   = useState<ReasonValue>(EMPTY_REASON)
   const [pending, setPending] = useState(false)
 
   const base     = `/api/vendors/meals/modifier-groups/${group.id}`
@@ -70,7 +72,7 @@ export function ModifierGroupModerationActions({ group }: Props) {
         variant="outline"
         className="gap-1.5 rounded-full"
         disabled={pending || sentBack}
-        onClick={() => { setReason(""); setOpen(true) }}
+        onClick={() => { setReason(EMPTY_REASON); setOpen(true) }}
       >
         <Undo2 className="h-3.5 w-3.5" />
         {sentBack ? "Awaiting the vendor" : "Send back"}
@@ -78,23 +80,15 @@ export function ModifierGroupModerationActions({ group }: Props) {
       <span className="text-xs text-muted-foreground">Applies to {dishes}.</span>
 
       <AlertDialog open={open} onOpenChange={(o) => !pending && setOpen(o)}>
-        <AlertDialogContent className="rounded-2xl">
+        <AlertDialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Send “{group.name}” back for revision</AlertDialogTitle>
             <AlertDialogDescription>
-              Holds {dishes} off the menu until the vendor rewrites these options. They are notified with
-              exactly the message below; once they edit the group, each meal returns to review on its own.
+              Holds {dishes} off the menu until the vendor rewrites these options. They are told the
+              reason&apos;s standard explanation; once they edit the group, each meal returns to review on its own.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="space-y-1.5">
-            <Label className="text-xs">What the vendor needs to change *</Label>
-            <Textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              className="min-h-24 text-sm"
-              placeholder="Which option, what is wrong with it, and what would be acceptable…"
-            />
-          </div>
+          <ReasonPicker action={MealReasonActions.GROUP_SEND_BACK} countryId={countryId} value={reason} onChange={setReason} />
           <AlertDialogFooter>
             <Button type="button" variant="outline" className="rounded-full" onClick={() => setOpen(false)} disabled={pending}>
               Cancel
@@ -102,8 +96,8 @@ export function ModifierGroupModerationActions({ group }: Props) {
             <Button
               type="button"
               className="gap-1.5 rounded-full"
-              disabled={pending || !reason.trim()}
-              onClick={() => run("send-back", { reason: reason.trim() }, "Options sent back to the vendor")}
+              disabled={pending || !reasonReady(reason)}
+              onClick={() => run("send-back", reasonBody(reason), "Options sent back to the vendor")}
             >
               {pending && <Loader2 className="h-4 w-4 animate-spin" />}
               Send back

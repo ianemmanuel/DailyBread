@@ -32,7 +32,9 @@ export async function loadAdminUser(req: Request, _res: Response, next: NextFunc
       permissions: {
         include: { permission: true },
       },
-      scopes: true,
+      // The city's OWN country is what a CITY scope's country is
+      // (buildScopeContext); the stored countryId is never trusted for it.
+      scopes: { include: { city: { select: { countryId: true } } } },
     },
   })
 

@@ -39,9 +39,18 @@ export const SELLABLE_MENU_ITEM_WHERE = {
   },
 } satisfies Prisma.MenuItemWhereInput
 
-/** One dish AT one outlet. The outlet-level row plus its catalog entry. */
+/**
+ * One dish AT one outlet. The outlet-level row plus its catalog entry.
+ *
+ * Two ERP controls live on this row, and both gate visibility here: the
+ * listing's own adminStatus (a suspension at this outlet) and adminHiddenAt (a
+ * quiet delisting). Neither is the vendor's isAvailable, which stays a
+ * presentation flag (see above) — the vendor's switch and the platform's
+ * verdict are separate columns so neither can overwrite the other.
+ */
 export const SELLABLE_MEAL_WHERE = {
-  deletedAt  : null,
-  adminStatus: MealStatus.ACTIVE,
-  menuItem   : SELLABLE_MENU_ITEM_WHERE,
+  deletedAt    : null,
+  adminStatus  : MealStatus.ACTIVE,
+  adminHiddenAt: null,
+  menuItem     : SELLABLE_MENU_ITEM_WHERE,
 } satisfies Prisma.MealWhereInput

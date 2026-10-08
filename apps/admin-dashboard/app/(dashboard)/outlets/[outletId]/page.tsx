@@ -103,10 +103,18 @@ export default async function OutletDetailPage({ params }: Props) {
             </Link>
             {canReadMeals && (
               <Link
-                href={`/vendors/meals?outlet=${outlet.id}&outletName=${encodeURIComponent(outlet.name)}&status=all`}
+                href={`/meals/dishes?outlet=${outlet.id}&outletName=${encodeURIComponent(outlet.name)}&status=all`}
                 className="ml-3 text-sm text-primary hover:underline"
               >
                 Meals sold here →
+              </Link>
+            )}
+            {canReadMeals && (
+              <Link
+                href={`/meals/listings?outlet=${outlet.id}&outletName=${encodeURIComponent(outlet.name)}`}
+                className="ml-3 text-sm text-primary hover:underline"
+              >
+                Listings here →
               </Link>
             )}
             <div className="mt-2 flex flex-wrap items-center gap-2">

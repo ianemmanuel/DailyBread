@@ -1,4 +1,5 @@
-import { ProfileReviewStatus, MealStatus } from "@repo/db"
+import { ProfileReviewStatus, MealStatus, type Prisma } from "@repo/db"
+import type { AdminScopeContext } from "@repo/types/backend"
 import { ApiError } from "@/middleware/error"
 import { CUSTOMER_VISIBLE_REVIEW_STATUSES } from "@/lib/moderation/customerVisibility"
 
@@ -205,3 +206,63 @@ export const MENU_ITEM_FLAG_REASONS = [
   "INAPPROPRIATE_PORTION",
   MODIFIER_CONTENT_FLAG,
 ] as const
+
+// ─── Dish-wide authority ──────────────────────────────────────────────────────
+
+/*
+ * A DISH (MenuItem) is the vendor's reusable definition; every action on it —
+ * approve, send back, suspend, ban, and the option-group verdicts that move
+ * it — changes the dish at EVERY outlet that sells it, in every city of the
+ * vendor's country. That blast radius is fixed by the TARGET, not by who acts.
+ *
+ * So the two questions are separate:
+ *
+ *   may this admin SEE the dish?   dishReadScopeWhere / dishInReadScope
+ *     GLOBAL all · COUNTRY by the vendor's country · CITY only dishes sold
+ *     (now or before) at an outlet in one of their cities — enough to
+ *     understand the listings they manage
+ *   may this admin act DISH-WIDE?  canActDishWide
+ *     GLOBAL or COUNTRY tier only. A vendor's outlets all sit in the vendor's
+ *     country, so a country admin's dish-wide action never leaves their
+ *     country; a city admin's would reach cities they do not hold. A city
+ *     admin acts on ONE listing instead (listings.rules).
+ *
+ * The tier, never countryIds, decides: buildScopeContext folds a city
+ * scope's country into countryIds.
+ */
+export function dishReadScopeWhere(scope: AdminScopeContext): Prisma.MenuItemWhereInput {
+  if (scope.isGlobal) return {}
+  if (scope.tier === "CITY") {
+    return {
+      vendor     : { countryId: { in: scope.countryIds } },
+      outletMeals: { some: { outlet: { cityId: { in: scope.cityIds } } } },
+    }
+  }
+  return { vendor: { countryId: { in: scope.countryIds } } }
+}
+
+export function dishInReadScope(
+  scope: AdminScopeContext,
+  dish : { countryId: string; outletCityIds: readonly string[] },
+): boolean {
+  if (scope.isGlobal) return true
+  if (!scope.countryIds.includes(dish.countryId)) return false
+  if (scope.tier === "CITY") return dish.outletCityIds.some((id) => scope.cityIds.includes(id))
+  return true
+}
+
+export function canActDishWide(scope: AdminScopeContext): boolean {
+  return scope.isGlobal || scope.tier !== "CITY"
+}
+
+/** 403, not 404: the admin can SEE this dish (it is sold in their city) —
+ *  what they lack is authority over its other outlets. */
+export function assertDishWideAuthority(scope: AdminScopeContext): void {
+  if (!canActDishWide(scope)) {
+    throw new ApiError(
+      403,
+      "This acts on the dish at every outlet that sells it. A country or global admin decides that; act on a single listing instead.",
+      "DISH_WIDE_ACTION_NEEDS_COUNTRY_SCOPE",
+    )
+  }
+}
