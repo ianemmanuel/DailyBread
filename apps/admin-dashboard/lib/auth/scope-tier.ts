@@ -11,6 +11,10 @@ import type { AdminSessionData } from "@repo/types/admin-app"
 export type ScopeTier = "GLOBAL" | "COUNTRY" | "CITY"
 
 export function getScopeTier(session: AdminSessionData): ScopeTier {
+  // The server's answer (one scope per admin — single-scope.ts on the
+  // backend). A malformed assignment fails closed there as CITY with nothing
+  // in it; re-deriving from the raw rows here could disagree with that.
+  if (session.scope.tier) return session.scope.tier
   const rows = session.scope.scopes ?? []
   if (session.scope.isGlobal || rows.some((s) => s.scopeType === "GLOBAL")) return "GLOBAL"
   if (rows.some((s) => s.scopeType === "COUNTRY")) return "COUNTRY"

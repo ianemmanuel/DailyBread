@@ -12,6 +12,17 @@ import {
   handleSendBackModifierGroup,
   handleListMenusForAdmin,
   handleGetMenuForAdmin,
+  handleListListings,
+  handleGetListing,
+  handleListingControl,
+  handleReasonsForAction,
+  handleReasonLibrary,
+  handleReasonDetail,
+  handleMealsOverview,
+  handleListEscalations,
+  handleEscalationRecipients,
+  handleCreateEscalation,
+  handleResolveEscalation,
 } from "../controllers/meals.admin.controller"
 
 /*
@@ -38,6 +49,24 @@ mealsAdminRouter.get("/export", MEALS_READ, handleExportMenuItemsCsv)
 // "/:itemId" for the same reason as /export.
 mealsAdminRouter.get("/menus",         MEALS_READ, handleListMenusForAdmin)
 mealsAdminRouter.get("/menus/:menuId", MEALS_READ, handleGetMenuForAdmin)
+// Operations — before "/:itemId", or the literal segments parse as ids.
+mealsAdminRouter.get("/overview",          MEALS_READ, handleMealsOverview)
+mealsAdminRouter.get("/reasons/library",   MEALS_READ, handleReasonLibrary)
+mealsAdminRouter.get("/reasons/library/:id", MEALS_READ, handleReasonDetail)
+// Reasons for an action are what an ACTING admin needs, so moderate.
+mealsAdminRouter.get("/reasons",           MEALS_MODERATE, handleReasonsForAction)
+mealsAdminRouter.get("/escalations",       MEALS_READ, handleListEscalations)
+mealsAdminRouter.post("/escalations/:id/resolve", MEALS_MODERATE, handleResolveEscalation)
+
+// Listings — one dish at one outlet, scoped by the OUTLET's city/country. Before
+// "/:itemId" for the same reason as /export.
+mealsAdminRouter.get("/listings",         MEALS_READ, handleListListings)
+mealsAdminRouter.get("/listings/:mealId", MEALS_READ, handleGetListing)
+// Marketplace controls on ONE listing: hide | unhide | suspend | reinstate.
+// Moderate only — meals:read alone can never reach a write.
+mealsAdminRouter.get("/listings/:mealId/escalation-recipients", MEALS_MODERATE, handleEscalationRecipients)
+mealsAdminRouter.post("/listings/:mealId/escalate",              MEALS_MODERATE, handleCreateEscalation)
+mealsAdminRouter.post("/listings/:mealId/:action", MEALS_MODERATE, handleListingControl)
 mealsAdminRouter.get("/:itemId", MEALS_READ, handleGetMenuItem)
 mealsAdminRouter.post("/:itemId/approve",   MEALS_MODERATE, handleApproveMenuItem)
 mealsAdminRouter.post("/:itemId/send-back", MEALS_MODERATE, handleSendBackMenuItem)

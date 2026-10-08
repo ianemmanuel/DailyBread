@@ -54,8 +54,10 @@ export interface AdminMealOutlet {
   outletClearance   : string
   isAvailable       : boolean
   priceMinorOverride: number | null
-  /** Per-outlet platform status. Read-only: nothing in the ERP sets it yet. */
+  /** Per-outlet platform status — set on the listing page (suspend / lift). */
   adminStatus       : MealAdminStatus
+  /** Per-outlet ERP visibility — non-null means hidden at this outlet. */
+  adminHiddenAt     : string | null
 }
 
 /** One choice inside a group, as an admin sees it. */
@@ -96,6 +98,13 @@ export interface AdminModifierGroup {
 }
 
 export interface AdminMealDetail extends Omit<AdminMealRow, "outletCount"> {
+  /** Live listings across ALL outlets — how far a dish-wide action reaches. */
+  outletCount            : number
+  /** Listings outside this admin's cities (a city admin sees only theirs). */
+  outsideScopeOutletCount: number
+  /** Server-computed: may this admin act on the dish at every outlet? False
+   *  for a city-tier admin — they act on a single listing instead. */
+  canActDishWide         : boolean
   portionSize : string | null
   taxCategory : { id: string; name: string } | null
   images      : { storageKey: string; url: string | null }[]

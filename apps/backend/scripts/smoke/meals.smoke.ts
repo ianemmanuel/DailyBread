@@ -36,7 +36,7 @@ import express from "express"
 import sharp from "sharp"
 import type { AddressInfo } from "node:net"
 import { prisma } from "@repo/db"
-import { AdminPermissions } from "@repo/types/enums"
+import { AdminPermissions, MEAL_REASON_ACTIONS } from "@repo/types/enums"
 import type { AdminScopeContext } from "@repo/types/backend"
 
 /* The APPLICATION-level routers, not the menu routers themselves: this smoke
@@ -55,6 +55,7 @@ import { R2Service } from "@/lib/r2/r2.service"
 import { publicMediaStorage } from "@/lib/storage/publicMedia.storage"
 
 const MARKER = "zz-smoke-meals"
+const SMOKE_REASON = `${MARKER}-reason`
 
 /* A square in the empty Pacific, split down the middle: west may trade,
  * east is registration-only. Same construction as the city-browse smoke. */
@@ -143,6 +144,7 @@ function asAdmin(adminId: string, permissions: string[], scope: AdminScopeContex
 const stagedKeys = new Set<string>()
 
 async function sweep() {
+  await prisma.adminActionReason.deleteMany({ where: { code: { startsWith: MARKER } } })
   const vendors = await prisma.vendorAccount.findMany({
     where : { businessEmail: { startsWith: MARKER } },
     select: { id: true, applicationId: true },
@@ -258,6 +260,13 @@ async function stageUpload(
 async function main() {
   console.log("\n── meals smoke ─────────────────────────────────────────────\n")
   await sweep()
+  // A throwaway global reason valid for every meal action (Phase 2.1:
+  // consequential actions need one). Swept with the rest.
+  await prisma.adminActionReason.create({ data: {
+    code: SMOKE_REASON, label: "Smoke reason",
+    description: "Smoke-test reason explaining this action to the vendor.",
+    appliesTo: [...MEAL_REASON_ACTIONS],
+  } })
 
   const vendorType = await prisma.vendorType.findFirst({ where: { status: "ACTIVE" }, select: { id: true } })
   const admin      = await prisma.adminUser.findFirst({ select: { id: true } })
@@ -956,7 +965,7 @@ async function main() {
       check("out-of-scope READ is a 404, never a 403", g.status === 404 && g.json.code === "NOT_FOUND", g.json)
       const a = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/approve`)
       check("out-of-scope APPROVE is a 404", a.status === 404, a.json)
-      const s = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "SUSPENDED", reason: "x" })
+      const s = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "SUSPENDED", reasonCode: SMOKE_REASON, internalNote: "x" })
       check("out-of-scope SUSPEND is a 404", s.status === 404, s.json)
       const l = await call("GET", `/api/admin/v1/vendors/meals?vendor=${vendorA.id}`)
       check("a vendor filter cannot widen scope — zero rows", l.status === 200 && l.json.data?.total === 0, l.json.data?.total)
@@ -978,8 +987,8 @@ async function main() {
 
       const sbNo = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/send-back`, {})
       check("send-back without a reason is refused", sbNo.status === 400 && sbNo.json.code === "REASON_REQUIRED", sbNo.json)
-      const sb = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/send-back`, { reason: "Photo is blurry" })
-      check("send-back → MANUALLY_REJECTED with the reason", sb.json.data?.reviewStatus === "MANUALLY_REJECTED" && sb.json.data?.rejectionReason === "Photo is blurry", sb.json)
+      const sb = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/send-back`, { reasonCode: SMOKE_REASON })
+      check("send-back → MANUALLY_REJECTED with the reason", sb.json.data?.reviewStatus === "MANUALLY_REJECTED" && sb.json.data?.rejectionReason === "Smoke-test reason explaining this action to the vendor.", sb.json)
       check("…hidden from customers", !menuOf(await storefrontOrNull(o1.id)).some((i) => i.id === plateId))
 
       /* Principle 9: the vendor's next TEXT edit re-screens and re-queues it
@@ -991,13 +1000,13 @@ async function main() {
 
       const sNo = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "SUSPENDED" })
       check("suspend without a reason is refused", sNo.status === 400 && sNo.json.code === "REASON_REQUIRED", sNo.json)
-      const sBad = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "DELETED", reason: "x" })
+      const sBad = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "DELETED", reasonCode: SMOKE_REASON, internalNote: "x" })
       check("an unknown status is refused", sBad.status === 400 && sBad.json.code === "INVALID_STATUS", sBad.json)
-      const s = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "SUSPENDED", reason: "Health complaint" })
+      const s = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "SUSPENDED", reasonCode: SMOKE_REASON, internalNote: "Health complaint" })
       check("suspend in scope → SUSPENDED", s.json.data?.adminStatus === "SUSPENDED", s.json)
       check("…hidden from customers", !menuOf(await storefrontOrNull(o1.id)).some((i) => i.id === plateId))
 
-      const ban = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "BANNED", reason: "Repeated" })
+      const ban = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/status`, { status: "BANNED", reasonCode: SMOKE_REASON, internalNote: "Repeated" })
       check("ban → BANNED, suspension marker cleared", ban.json.data?.adminStatus === "BANNED" && ban.json.data?.adminSuspendedAt === null, ban.json.data)
       const vEdit = await call("PUT", `/api/vendor/v1/menu/items/${plateId}`, body())
       check("…the vendor can no longer edit a banned dish", vEdit.status === 403 && vEdit.json.code === "MEAL_BANNED", vEdit.json)

@@ -1,6 +1,7 @@
 import { prisma } from "@repo/db"
 import type { Prisma } from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
+import { outletScopeWhere } from "../lib/listings.rules"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { normalizeOptionalText } from "@/lib/text/optionalText"
@@ -379,16 +380,21 @@ export async function updateMenu(vendorId: string, menuId: string, input: Update
 /*
  * The ERP reads vendor menus under the existing VENDORS_MEALS_READ permission
  * — menus are a view of meals, and a reader of meals already sees everything
- * a menu contains. Scope is the vendor's country, the same rule meal
- * moderation applies; out of scope is a 404. There are deliberately no admin
+ * a menu contains. A menu belongs to ONE outlet, so it is scoped exactly like
+ * a listing (outletScopeWhere): a CITY admin reads their city's menus, not
+ * their country's. Out of scope is a 404. There are deliberately no admin
  * write functions here.
+ *
+ * An AND list, not one `outlet` object: the lifecycle clause and the scope
+ * clause both constrain `outlet` (recurring bug class #2).
  */
 function scopeWhere(scope: AdminScopeContext): Prisma.MenuWhereInput {
+  const scoped = outletScopeWhere(scope)
   return {
-    outlet: {
-      deletedAt: null,
-      vendor: { deletedAt: null, ...(scope.isGlobal ? {} : { countryId: { in: scope.countryIds } }) },
-    },
+    AND: [
+      { outlet: { deletedAt: null, vendor: { deletedAt: null } } },
+      ...(scoped ? [{ outlet: scoped }] : []),
+    ],
   }
 }
 
@@ -396,13 +402,15 @@ export async function listMenusForAdmin(
   scope : AdminScopeContext,
   params: { vendorId?: unknown; outletId?: unknown },
 ) {
+  // Drill-downs are further AND entries — layered INSIDE the scope, never
+  // instead of it (a vendorId used to arrive as its own `AND` key and would
+  // have replaced the scope's).
   const where: Prisma.MenuWhereInput = {
-    ...scopeWhere(scope),
-    // Drill-downs layered INSIDE the scope, never instead of it.
-    ...(typeof params.outletId === "string" && params.outletId ? { outletId: params.outletId } : {}),
-    ...(typeof params.vendorId === "string" && params.vendorId
-      ? { AND: [{ outlet: { vendorId: params.vendorId } }] }
-      : {}),
+    AND: [
+      scopeWhere(scope),
+      ...(typeof params.outletId === "string" && params.outletId ? [{ outletId: params.outletId }] : []),
+      ...(typeof params.vendorId === "string" && params.vendorId ? [{ outlet: { vendorId: params.vendorId } }] : []),
+    ],
   }
   const menus = await prisma.menu.findMany({
     where, orderBy: [{ outlet: { name: "asc" } }, { name: "asc" }], select: MENU_SELECT, take: 200,

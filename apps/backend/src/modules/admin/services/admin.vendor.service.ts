@@ -1,3 +1,4 @@
+import { resolveActionReason } from "../lib/reasons/resolve-action-reason"
 import {
   prisma,
   VendorApplicationStatus,
@@ -129,25 +130,8 @@ async function assertEligibleReviewTarget(
   }
 }
 
-/*
- * Country-specific reason wins over global — same optional-narrower-
- * scope resolution as DocumentTypeConfig. findFirst, not findUnique —
- * same nullable-compound-unique typing workaround used throughout this
- * session's other new config lookups.
- */
-async function resolveActionReason(code: string, countryId: string) {
-  const specific = await prisma.adminActionReason.findFirst({
-    where: { code, countryId, isActive: true },
-  })
-  if (specific) return specific
-
-  const global = await prisma.adminActionReason.findFirst({
-    where: { code, countryId: null, isActive: true },
-  })
-  if (global) return global
-
-  throw new ApiError(404, "Unknown or inactive reason code", "INVALID_REASON_CODE")
-}
+// resolveActionReason now lives in admin/lib/reasons — one resolver for every
+// reason-backed action (applications here, meals in the meals module).
 
 /*
  * Type-narrowing guard, not a new business rule: an application can

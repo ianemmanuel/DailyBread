@@ -1,4 +1,5 @@
 import {
+  ListChecks,
   Megaphone,
   LayoutDashboard,
   ShoppingBag,
@@ -92,11 +93,26 @@ export const navSections: NavSection[] = [
       // redirect there, so old links keep working.
       { label: "Compliance",   href: "/vendors/compliance",   icon: ShieldAlert,     requiredPermission: AdminPermissions.VENDORS_COMPLIANCE_READ },
       { label: "Appeals",      href: "/vendors/appeals",      icon: Scale,       requiredPermission: AdminPermissions.VENDORS_APPEALS_READ },
-      { label: "Meals",        href: "/vendors/meals",    icon: UtensilsCrossed, requiredPermission: AdminPermissions.VENDORS_MEALS_READ },
       { label: "Offers",       href: "/vendors/discounts",  icon: BadgePercent, requiredPermission: AdminPermissions.FINANCE_DISCOUNTS_READ },
       { label: "Profiles",     href: "/vendors/profiles",     icon: UserCheck,   requiredPermission: AdminPermissions.VENDORS_PROFILES_READ },
       // Revenue moved to its own "Finance" section below (CLAUDE.md) —
       // no entry here any more; /vendors/revenue still redirects there.
+    ],
+  },
+  {
+    /*
+     * Promoted out of Vendors (Phase 2.1). Meals are a marketplace domain of
+     * their own: a DISH is the vendor's reusable definition, a LISTING is one
+     * dish sold at one outlet, and both are governed here — not a vendor
+     * sub-list. Deliberately small; "Action Reasons" is the operations corner (the
+     * controlled reason library every consequential action draws on).
+     */
+    title: "Meals",
+    items: [
+      { label: "Overview", href: "/meals",          icon: LayoutDashboard, requiredPermission: AdminPermissions.VENDORS_MEALS_READ },
+      { label: "Listings", href: "/meals/listings", icon: Store,           requiredPermission: AdminPermissions.VENDORS_MEALS_READ },
+      { label: "Dishes",   href: "/meals/dishes",   icon: UtensilsCrossed, requiredPermission: AdminPermissions.VENDORS_MEALS_READ },
+      { label: "Action Reasons", href: "/meals/reasons",  icon: ListChecks,      requiredPermission: AdminPermissions.VENDORS_MEALS_READ },
     ],
   },
   {

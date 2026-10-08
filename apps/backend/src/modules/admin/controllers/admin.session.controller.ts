@@ -37,7 +37,9 @@ export const getAdminSession: RequestHandler = async (req, res, next) => {
           : Promise.resolve(undefined),
         // MODERATE, like profiles: the dot means "something here needs your
         // decision", which only someone who can decide should be nudged about.
-        adminPermissions.includes(AdminPermissions.VENDORS_MEALS_MODERATE)
+        // Not for a CITY-tier admin: a flagged dish is decided dish-wide
+        // (canActDishWide), which is a country or global admin's call.
+        adminPermissions.includes(AdminPermissions.VENDORS_MEALS_MODERATE) && adminScope.tier !== "CITY"
           ? hasFlaggedMealsForCountries(adminScope.countryIds)
           : Promise.resolve(undefined),
       ])

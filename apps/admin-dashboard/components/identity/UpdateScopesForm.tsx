@@ -34,7 +34,11 @@ export function UpdateScopesForm({ userId, currentScopes, isGlobalActor, actorCo
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const initialScopes: ScopeEntry[] = currentScopes.map((s) => ({
+  // One scope per admin. A record from before that rule may still hold
+  // several: the editor starts from the first, and says so, because saving
+  // replaces them all with exactly the one shown.
+  const legacyMultiScope = currentScopes.length > 1
+  const initialScopes: ScopeEntry[] = currentScopes.slice(0, 1).map((s) => ({
     scopeType: s.scopeType,
     countryId: s.countryId ?? undefined,
     cityId   : s.cityId ?? undefined,
@@ -49,7 +53,7 @@ export function UpdateScopesForm({ userId, currentScopes, isGlobalActor, actorCo
 
   async function submit() {
     setError(null)
-    if (scopes.length === 0) { setError("At least one scope is required."); return }
+    if (scopes.length !== 1) { setError("Set exactly one scope: global, one country, or one city."); return }
     setPending(true)
     try {
       const res = await fetch(`/api/identity/users/${userId}/scopes`, {
@@ -86,7 +90,7 @@ export function UpdateScopesForm({ userId, currentScopes, isGlobalActor, actorCo
             </div>
             <AlertDialogTitle>Edit geographic scope</AlertDialogTitle>
             <AlertDialogDescription>
-              Defines which countries or cities this admin can manage. You can only assign scopes within your own access.
+              Defines where this admin works: global, one country, or one city. You can only assign a scope within your own access.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -97,6 +101,13 @@ export function UpdateScopesForm({ userId, currentScopes, isGlobalActor, actorCo
             onChange={setScopes}
             showHeader={false}
           />
+
+          {legacyMultiScope && (
+            <p className="text-sm text-warning">
+              This admin has {currentScopes.length} scopes from before the one-scope rule and currently has no
+              access until it is fixed. Saving replaces them with the single scope above.
+            </p>
+          )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 

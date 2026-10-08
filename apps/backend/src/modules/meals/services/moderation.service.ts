@@ -1,4 +1,4 @@
-import { prisma, ProfileReviewStatus, MealStatus, VendorNotificationType } from "@repo/db"
+import { prisma, ProfileReviewStatus, MealStatus, VendorNotificationType, type Prisma } from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
 import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
@@ -9,9 +9,13 @@ import { resolveCountryIdInScope } from "@/modules/admin/lib/scope/resolve-count
 import { toCsv } from "@/lib/csv"
 import { getCurrencyForCountry, getCurrenciesForCountries } from "@/modules/finance"
 import { recomputeModifierFlagsForItems } from "./modifierGroup.service"
+import { resolveReasonForAction } from "@/modules/admin/lib/reasons/resolve-action-reason"
+import { restoringNote, reasonAuditMetadata, type ReasonChoiceInput } from "@/modules/admin/lib/reasons/reason-choice"
+import { MealReasonActions } from "@repo/types/enums"
 import {
   groupBlocksDish, assertDishApprovable, mealStatusTransition, REASON_REQUIRED_ACTIONS,
   MENU_ITEM_FLAG_REASONS, type MealStatusAction,
+  dishReadScopeWhere, dishInReadScope, canActDishWide, assertDishWideAuthority,
 } from "../lib/moderation.rules"
 
 /*
@@ -50,12 +54,6 @@ function purgeCityFeeds(): void {
   void revalidateStorefront("city-inventory")
 }
 
-function assertCountryInScope(countryId: string, scope: AdminScopeContext): void {
-  if (!scope.isGlobal && !scope.countryIds.includes(countryId)) {
-    throw new ApiError(404, "Meal not found", "NOT_FOUND")
-  }
-}
-
 export interface MenuItemFilters {
   search?      : string
   countrySlug? : string
@@ -68,39 +66,38 @@ export interface MenuItemFilters {
   flagReason?  : (typeof MENU_ITEM_FLAG_REASONS)[number]
 }
 
-async function buildMenuItemsWhere(params: MenuItemFilters, scope: AdminScopeContext) {
+async function buildMenuItemsWhere(params: MenuItemFilters, scope: AdminScopeContext): Promise<Prisma.MenuItemWhereInput> {
   const countryId = params.countrySlug
     ? await resolveCountryIdInScope(params.countrySlug, scope)
     : undefined
 
-  // The country lives on the vendor, so scope is applied through the relation
-  // and never re-derived. A vendorId filter is layered ON TOP of it, never
-  // instead of it — a vendor from another country still resolves to zero rows.
-  const vendorFilter = {
-    deletedAt: null,
-    ...(scope.isGlobal
-      ? (countryId ? { countryId } : {})
-      : { countryId: { in: scope.countryIds } }),
+  /*
+   * Every narrowing is its own AND entry. The scope (dishReadScopeWhere) and
+   * the outlet drill-down both constrain `outletMeals` for a city admin, and as
+   * keys of one object the second would silently overwrite the first and drop
+   * the scope (recurring bug class #2). A vendor or outlet filter is layered
+   * ON TOP of scope, never instead of it.
+   */
+  const and: Prisma.MenuItemWhereInput[] = [
+    { deletedAt: null, vendor: { deletedAt: null } },
+    dishReadScopeWhere(scope),
+  ]
+  if (countryId)           and.push({ vendor: { countryId } })
+  if (params.vendorId)     and.push({ vendorId: params.vendorId })
+  if (params.outletId)     and.push({ outletMeals: { some: { outletId: params.outletId, deletedAt: null } } })
+  if (params.flagReason)   and.push({ flagReasons: { has: params.flagReason } })
+  if (params.reviewStatus) and.push({ reviewStatus: params.reviewStatus })
+  if (params.adminStatus)  and.push({ adminStatus: params.adminStatus })
+  if (params.search) {
+    and.push({
+      OR: [
+        { name       : { contains: params.search, mode: "insensitive" as const } },
+        { description: { contains: params.search, mode: "insensitive" as const } },
+        { vendor: { legalBusinessName: { contains: params.search, mode: "insensitive" as const } } },
+      ],
+    })
   }
-
-  return {
-    deletedAt: null,
-    vendor   : vendorFilter,
-    ...(params.vendorId ? { vendorId: params.vendorId } : {}),
-    ...(params.outletId ? { outletMeals: { some: { outletId: params.outletId, deletedAt: null } } } : {}),
-    ...(params.flagReason ? { flagReasons: { has: params.flagReason } } : {}),
-    ...(params.reviewStatus ? { reviewStatus: params.reviewStatus } : {}),
-    ...(params.adminStatus ? { adminStatus: params.adminStatus } : {}),
-    ...(params.search
-      ? {
-          OR: [
-            { name       : { contains: params.search, mode: "insensitive" as const } },
-            { description: { contains: params.search, mode: "insensitive" as const } },
-            { vendor: { legalBusinessName: { contains: params.search, mode: "insensitive" as const } } },
-          ],
-        }
-      : {}),
-  }
+  return { AND: and }
 }
 
 const LIST_SELECT = {
@@ -250,13 +247,19 @@ async function getItemWithScope(itemId: string, scope: AdminScopeContext) {
         },
       },
       taxCategory: { select: { id: true, name: true } },
+      // Where it is (or was) sold — a city admin reads a dish only through a
+      // listing in their city (dishInReadScope).
+      outletMeals: { select: { outlet: { select: { cityId: true } } } },
     },
   })
   // The vendor's lifecycle is part of the same scope the list applies
   // (vendor.deletedAt: null) — a dish the list hides must not open by id.
   if (!item || item.deletedAt || item.vendor.deletedAt) throw new ApiError(404, "Meal not found", "NOT_FOUND")
-  assertCountryInScope(item.vendor.countryId, scope)
-  return item
+  const { outletMeals, ...rest } = item
+  if (!dishInReadScope(scope, { countryId: item.vendor.countryId, outletCityIds: outletMeals.map((m) => m.outlet.cityId) })) {
+    throw new ApiError(404, "Meal not found", "NOT_FOUND")
+  }
+  return rest
 }
 
 export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeContext) {
@@ -275,7 +278,7 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
         outletMeals: {
           where : { deletedAt: null },
           select: {
-            id: true, isAvailable: true, priceMinorOverride: true, adminStatus: true,
+            id: true, isAvailable: true, priceMinorOverride: true, adminStatus: true, adminHiddenAt: true,
             outlet: {
               select: {
                 id: true, name: true, addressLine1: true, cityId: true,
@@ -321,7 +324,15 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
     height     : image.height,
     blurDataUrl: image.blurDataUrl,
   }))
-  const cityIds = [...new Set(detail.outletMeals.map((m) => m.outlet.cityId))]
+  /*
+   * A city admin sees the listings in THEIR cities, plus a count of the rest:
+   * enough to know the dish is wider than their area, without a list of rows
+   * that would only 404 if opened.
+   */
+  const visibleOutlets = scope.isGlobal || scope.tier !== "CITY"
+    ? detail.outletMeals
+    : detail.outletMeals.filter((m) => scope.cityIds.includes(m.outlet.cityId))
+  const cityIds = [...new Set(visibleOutlets.map((m) => m.outlet.cityId))]
   const [currency, cities] = await Promise.all([
     getCurrencyForCountry(item.vendor.countryId),
     cityIds.length
@@ -360,7 +371,13 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
         usedByCount: link.group._count.menuItems,
         options    : link.group.options,
       })),
-    outlets     : detail.outletMeals.map((m) => ({
+    /** Live listings across ALL outlets — the blast radius of a dish-wide act. */
+    outletCount           : detail.outletMeals.length,
+    outsideScopeOutletCount: detail.outletMeals.length - visibleOutlets.length,
+    /** Computed by the guard that refuses the write (canActDishWide), so the
+     *  ERP never re-derives authority (principle 1). */
+    canActDishWide        : canActDishWide(scope),
+    outlets     : visibleOutlets.map((m) => ({
       mealId            : m.id,
       outletId          : m.outlet.id,
       outletName        : m.outlet.name,
@@ -372,6 +389,7 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
       isAvailable       : m.isAvailable,
       priceMinorOverride: m.priceMinorOverride,
       adminStatus       : m.adminStatus,
+      adminHiddenAt     : m.adminHiddenAt,
     })),
   }
 }
@@ -380,6 +398,7 @@ export async function getMenuItemForAdmin(itemId: string, scope: AdminScopeConte
 
 export async function approveMenuItem(itemId: string, actorId: string, scope: AdminScopeContext) {
   const item = await getItemWithScope(itemId, scope)
+  assertDishWideAuthority(scope)
   if (item.reviewStatus === ProfileReviewStatus.MANUALLY_APPROVED) {
     throw new ApiError(400, "This meal is already approved", "ALREADY_APPROVED")
   }
@@ -436,14 +455,15 @@ export async function approveMenuItem(itemId: string, actorId: string, scope: Ad
  */
 export async function sendBackMenuItem(
   itemId : string,
-  reason : string,
+  choice : ReasonChoiceInput,
   actorId: string,
   scope  : AdminScopeContext,
 ) {
-  if (!reason?.trim()) {
-    throw new ApiError(400, "Tell the vendor what to change", "REASON_REQUIRED")
-  }
   const item = await getItemWithScope(itemId, scope)
+  assertDishWideAuthority(scope)
+  // The vendor reads the reason's standard explanation (or, for "Other", the
+  // admin's own) — never a free-typed message.
+  const reason = await resolveReasonForAction(choice, MealReasonActions.DISH_SEND_BACK, scope, item.vendor.countryId)
 
   const [updated] = await prisma.$transaction([
     prisma.menuItem.update({
@@ -452,7 +472,7 @@ export async function sendBackMenuItem(
         reviewStatus     : ProfileReviewStatus.MANUALLY_REJECTED,
         reviewedAt       : new Date(),
         reviewedByAdminId: actorId,
-        rejectionReason  : reason.trim(),
+        rejectionReason  : reason.vendorMessage,
       },
     }),
     prisma.vendorNotification.create({
@@ -460,7 +480,7 @@ export async function sendBackMenuItem(
         vendorId: item.vendorId,
         type    : VendorNotificationType.MEAL_REJECTED,
         title   : `${item.name} needs changes before it can sell`,
-        message : reason.trim(),
+        message : reason.vendorMessage,
       },
     }),
   ])
@@ -472,7 +492,7 @@ export async function sendBackMenuItem(
     entityType : "MenuItem",
     entityId   : itemId,
     changes    : { before: { reviewStatus: item.reviewStatus }, after: { reviewStatus: "MANUALLY_REJECTED" } },
-    metadata   : { reason: reason.trim() },
+    metadata   : reasonAuditMetadata(reason),
   })
 
   purgeCityFeeds()
@@ -539,17 +559,26 @@ const STATUS_CHANGED = () =>
 export async function setMenuItemStatus(
   itemId         : string,
   status         : MealStatus,
-  reason         : string | null,
+  choice         : ReasonChoiceInput,
   actorId        : string,
   scope          : AdminScopeContext,
   expectedStatus?: MealStatus,
 ) {
   const item = await getItemWithScope(itemId, scope)
+  assertDishWideAuthority(scope)
   if (expectedStatus && expectedStatus !== item.adminStatus) throw STATUS_CHANGED()
   const action = mealStatusTransition(item.adminStatus, status)
-  if (REASON_REQUIRED_ACTIONS.has(action) && !reason?.trim()) {
-    throw new ApiError(400, "A reason is required", "REASON_REQUIRED")
-  }
+  // Taking a dish off the marketplace needs a controlled reason; lifting a
+  // sanction takes only an optional internal note.
+  const reason = REASON_REQUIRED_ACTIONS.has(action)
+    ? await resolveReasonForAction(
+        choice,
+        action === "ban" ? MealReasonActions.DISH_BAN : MealReasonActions.DISH_SUSPEND,
+        scope,
+        item.vendor.countryId,
+      )
+    : null
+  const note = reason ? null : restoringNote(choice.internalNote)
 
   const now    = new Date()
   const notice = STATUS_NOTICE[action]
@@ -580,7 +609,7 @@ export async function setMenuItemStatus(
     entityType : "MenuItem",
     entityId   : itemId,
     changes    : { before: { adminStatus: item.adminStatus }, after: { adminStatus: status } },
-    ...(reason?.trim() ? { metadata: { reason: reason.trim() } } : {}),
+    ...(reason ? { metadata: reasonAuditMetadata(reason) } : note ? { metadata: { internalNote: note } } : {}),
   })
 
   purgeCityFeeds()
@@ -619,6 +648,9 @@ async function getGroupWithScope(groupId: string, scope: AdminScopeContext) {
   if (!scope.isGlobal && !scope.countryIds.includes(group.vendor.countryId)) {
     throw new ApiError(404, "Option group not found", "NOT_FOUND")
   }
+  // A group's verdict moves its dish at every outlet — dish-wide, like the
+  // dish's own review. Every caller of this loader is a write.
+  assertDishWideAuthority(scope)
   return group
 }
 
@@ -673,15 +705,13 @@ export async function approveModifierGroup(groupId: string, actorId: string, sco
  *  every dish that was held over it returns to the queue on its own. */
 export async function sendBackModifierGroup(
   groupId: string,
-  reason : string,
+  choice : ReasonChoiceInput,
   actorId: string,
   scope  : AdminScopeContext,
 ) {
-  if (!reason?.trim()) {
-    throw new ApiError(400, "Tell the vendor what to change", "REASON_REQUIRED")
-  }
   const group   = await getGroupWithScope(groupId, scope)
   const itemIds = group.menuItems.map((m) => m.menuItemId)
+  const reason  = await resolveReasonForAction(choice, MealReasonActions.GROUP_SEND_BACK, scope, group.vendor.countryId)
 
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.modifierGroup.update({
@@ -690,7 +720,7 @@ export async function sendBackModifierGroup(
         reviewStatus     : ProfileReviewStatus.MANUALLY_REJECTED,
         reviewedAt       : new Date(),
         reviewedByAdminId: actorId,
-        rejectionReason  : reason.trim(),
+        rejectionReason  : reason.vendorMessage,
       },
     })
     await recomputeModifierFlagsForItems(itemIds, tx)
@@ -699,7 +729,7 @@ export async function sendBackModifierGroup(
         vendorId: group.vendorId,
         type    : VendorNotificationType.MEAL_OPTIONS_REJECTED,
         title   : `Your "${group.name}" options need changes`,
-        message : `${reason.trim()}\n\nUntil they're fixed, ${mealsPhrase(itemIds.length)} using them can't sell.`,
+        message : `${reason.vendorMessage}\n\nUntil they're fixed, ${mealsPhrase(itemIds.length)} using them can't sell.`,
       },
     })
     return row
@@ -712,7 +742,7 @@ export async function sendBackModifierGroup(
     entityType : "ModifierGroup",
     entityId   : groupId,
     changes    : { before: { reviewStatus: group.reviewStatus }, after: { reviewStatus: "MANUALLY_REJECTED" } },
-    metadata   : { reason: reason.trim(), menuItemIds: itemIds },
+    metadata   : { ...reasonAuditMetadata(reason), menuItemIds: itemIds },
   })
 
   purgeCityFeeds()

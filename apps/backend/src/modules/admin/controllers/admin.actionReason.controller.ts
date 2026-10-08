@@ -29,31 +29,32 @@ export const handleGetActionReason: RequestHandler = async (req, res, next) => {
 
 export const handleCreateActionReason: RequestHandler = async (req, res, next) => {
   try {
-    const { adminUser } = req as unknown as AdminRequest
+    const { adminUser, adminScope } = req as unknown as AdminRequest
     const { code, label, description, appliesTo, countryId } = req.body as {
       code?: string; label?: string; description?: string; appliesTo?: string[]; countryId?: string
     }
 
-    if (!code?.trim())  throw new ApiError(400, "code is required", "MISSING_FIELDS")
+    // No code check: codes are system-generated (createActionReason); a
+    // supplied one is only valid for a country version, decided there.
     if (!label?.trim()) throw new ApiError(400, "label is required", "MISSING_FIELDS")
     if (!Array.isArray(appliesTo) || appliesTo.length === 0) {
       throw new ApiError(400, "appliesTo must be a non-empty array", "MISSING_FIELDS")
     }
 
-    const data = await createActionReason({ code, label, description, appliesTo, countryId }, adminUser.id)
+    const data = await createActionReason({ code, label, description, appliesTo, countryId }, adminUser.id, adminScope)
     return sendSuccess(res, data, "Action reason created", 201)
   } catch (err) { next(err) }
 }
 
 export const handleUpdateActionReason: RequestHandler = async (req, res, next) => {
   try {
-    const { adminUser } = req as unknown as AdminRequest
+    const { adminUser, adminScope } = req as unknown as AdminRequest
     const { id } = req.params as { id: string }
     const { label, description, appliesTo, isActive } = req.body as {
       label?: string; description?: string; appliesTo?: string[]; isActive?: boolean
     }
 
-    const data = await updateActionReason(id, { label, description, appliesTo, isActive }, adminUser.id)
+    const data = await updateActionReason(id, { label, description, appliesTo, isActive }, adminUser.id, adminScope)
     return sendSuccess(res, data, "Action reason updated")
   } catch (err) { next(err) }
 }

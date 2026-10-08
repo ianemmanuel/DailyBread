@@ -218,6 +218,9 @@ export interface SessionScopeContext {
   isGlobal   : boolean
   countryIds : string[]
   cityIds : string[]
+  /** The SERVER's tier (buildScopeContext). The ERP reads this rather than
+   *  re-deriving one from the raw rows. */
+  tier?   : "GLOBAL" | "COUNTRY" | "CITY"
   scopes? : SessionScope[]
 }
 

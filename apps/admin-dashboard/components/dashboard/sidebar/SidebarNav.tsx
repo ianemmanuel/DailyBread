@@ -89,6 +89,10 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
                   !pathname.startsWith("/vendor-categories/revenue"))
               // "/finance" is both the Finance "Home" link and a prefix of
               // every other Finance nav entry — same pattern as above.
+              // "/meals" is the Meals Overview AND a prefix of Listings,
+              // Dishes and Reasons — exact match only.
+              : href === "/meals"
+                ? pathname === "/meals"
               : href === "/finance"
                 ? pathname === "/finance" ||
                   (pathname.startsWith("/finance/") &&
@@ -114,7 +118,7 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
     "/vendors/compliance": session.hasOpenComplianceIssues,
     "/vendors/appeals"   : session.hasOpenAppealIssues,
     "/vendors/profiles"  : session.hasFlaggedProfiles,
-    "/vendors/meals"     : session.hasFlaggedMeals,
+    "/meals/dishes"     : session.hasFlaggedMeals,
   }
   const showDot = (href: string) => !!dotFlags[href]
 

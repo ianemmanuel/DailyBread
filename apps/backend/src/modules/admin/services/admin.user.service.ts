@@ -4,6 +4,7 @@ import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
 import { ClerkAdminStateService } from "@/lib/clerk"
 import { validateScopeForRole, getDefaultScopeType } from "../lib/scope/scope-rules"
+import { assertSingleScopeShape } from "../lib/scope/single-scope"
 import { SYSTEM_USER_ID } from "@/constants/system"
 import { env } from "@/env"
 import { AdminRoleNames } from "@repo/types/enums"
@@ -100,7 +101,7 @@ export async function createAdminUser(
     await validatePermissionsInRolePool(roleId, permissionKeys)
   }
 
-  const resolvedScopes = resolveScopes(scopes, actorScope, role.name)
+  const resolvedScopes = await resolveSingleScope(scopes, actorScope, role.name)
 
   // Validate scope-role compatibility
   validateScopeForRole(
@@ -435,15 +436,15 @@ export async function updateAdminUserScopes(
   assertNotActingOnSelf(actorId, adminUserId, "change the scope of")
   assertTargetNotSuperAdmin(adminUser.role?.name, "re-scoped")
 
-  const assigningGlobal = scopes.some((s) => s.scopeType === "GLOBAL")
-  if (assigningGlobal && !actorScope.isGlobal) {
-    throw new ApiError(403, "Only globally-scoped admins can assign GLOBAL scope", "SCOPE_FORBIDDEN")
-  }
-
-  // Validate new scopes are compatible with the user's current role
+  // Exactly one scope, its city's country derived from the city — then the
+  // same actor check creation runs. Before this, an update checked only
+  // "GLOBAL needs a global actor", so a country identity admin could re-scope
+  // a user into another country (or a city of another country).
+  const resolvedScopes = await resolveSingleScope(scopes, actorScope, adminUser.role?.name ?? "")
   if (adminUser.role) {
-    validateScopeForRole(adminUser.role.name, scopes.map((s) => s.scopeType))
+    validateScopeForRole(adminUser.role.name, resolvedScopes.map((s) => s.scopeType))
   }
+  assertScopeCanManage(actorScope, resolvedScopes, actorRoleName)
 
   const previousScopes = adminUser.scopes.map((s) => ({
     scopeType: s.scopeType, countryId: s.countryId, cityId: s.cityId,
@@ -452,7 +453,7 @@ export async function updateAdminUserScopes(
   await prisma.$transaction([
     prisma.adminUserScope.deleteMany({ where: { adminUserId } }),
     prisma.adminUserScope.createMany({
-      data: scopes.map((s) => ({
+      data: resolvedScopes.map((s) => ({
         adminUserId,
         scopeType: s.scopeType,
         countryId: s.countryId ?? null,
@@ -468,7 +469,7 @@ export async function updateAdminUserScopes(
     action     : "admin_user.scopes_updated",
     entityType : "AdminUser",
     entityId   : adminUserId,
-    changes    : { before: { scopes: previousScopes }, after: { scopes } },
+    changes    : { before: { scopes: previousScopes }, after: { scopes: resolvedScopes } },
   })
 
   return { success: true }
@@ -655,24 +656,45 @@ export async function listRoles() {
 
 //* Scope helpers
 
-function resolveScopes(
+/*
+ * ONE scope per admin (lib/scope/single-scope.ts). An absent request takes the
+ * role's default, which is still ONE scope: global for a global actor or a
+ * global-default role, otherwise the actor's own single country. A CITY
+ * scope's country is the CITY's country — read here, stored on the row, and
+ * a supplied one that disagrees is refused rather than corrected (the
+ * INVALID_SCOPE rule): trusting it let a Kenya admin assign "CITY Kampala,
+ * country Kenya" and hand out a Ugandan city under a Kenyan check.
+ *
+ * Returns a one-element array so the existing createMany / audit paths keep
+ * their shape.
+ */
+async function resolveSingleScope(
   requested : ScopeEntry[] | undefined,
   actorScope: AdminScopeContext,
   roleName  : string,
-): ScopeEntry[] {
-  if (requested && requested.length > 0) return requested
-
-  // Derive sensible default from role rules
-  const defaultScopeType = getDefaultScopeType(roleName)
-
-  if (defaultScopeType === "GLOBAL" || actorScope.isGlobal) {
-    return [{ scopeType: "GLOBAL" }]
+): Promise<ScopeEntry[]> {
+  let entry: ScopeEntry
+  if (!requested || requested.length === 0) {
+    if (getDefaultScopeType(roleName) === "GLOBAL" || actorScope.isGlobal) {
+      entry = { scopeType: "GLOBAL" }
+    } else if (actorScope.tier === "COUNTRY" && actorScope.countryIds.length === 1) {
+      entry = { scopeType: "COUNTRY", countryId: actorScope.countryIds[0]! }
+    } else {
+      throw new ApiError(400, "Choose a scope for this admin", "SINGLE_SCOPE_REQUIRED")
+    }
+  } else {
+    entry = assertSingleScopeShape(requested)
   }
 
-  return actorScope.countryIds.map((countryId) => ({
-    scopeType: "COUNTRY" as const,
-    countryId,
-  }))
+  if (entry.scopeType === "CITY") {
+    const city = await prisma.city.findUnique({ where: { id: entry.cityId! }, select: { countryId: true } })
+    if (!city) throw new ApiError(404, "City not found", "CITY_NOT_FOUND")
+    if (entry.countryId && entry.countryId !== city.countryId) {
+      throw new ApiError(400, "That city is not in that country", "COUNTRY_MISMATCH")
+    }
+    entry = { scopeType: "CITY", cityId: entry.cityId!, countryId: city.countryId }
+  }
+  return [entry]
 }
 
 /*

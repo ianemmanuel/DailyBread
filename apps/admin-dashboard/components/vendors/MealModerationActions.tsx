@@ -12,6 +12,8 @@ import {
   AlertDialogDescription, AlertDialogFooter,
 } from "@/components/ui/alert-dialog"
 import type { AdminMealDetail } from "@/types"
+import { MealReasonActions } from "@repo/types/enums"
+import { ReasonPicker, EMPTY_REASON, reasonBody, reasonReady, type ReasonValue } from "@/components/meals/ReasonPicker"
 
 /*
  * Two independent axes, never collapsed into one control.
@@ -38,9 +40,14 @@ import type { AdminMealDetail } from "@/types"
 interface Props {
   meal       : AdminMealDetail
   canModerate: boolean
-  /** Seeded into the reason box from the detected flags. */
-  suggestedReason: string
 }
+
+/** The reason-backed dialogs and the action each one justifies. */
+const REASON_ACTION = {
+  "send-back": MealReasonActions.DISH_SEND_BACK,
+  suspend    : MealReasonActions.DISH_SUSPEND,
+  ban        : MealReasonActions.DISH_BAN,
+} as const
 
 type Dialog = null | "send-back" | "suspend" | "ban" | "unban"
 
@@ -53,14 +60,15 @@ async function post(url: string, body?: unknown) {
   return { ok: res.ok, data: await res.json().catch(() => ({})) }
 }
 
-export function MealModerationActions({ meal, canModerate, suggestedReason }: Props) {
+export function MealModerationActions({ meal, canModerate }: Props) {
   const router = useRouter()
   const [dialog, setDialog]   = useState<Dialog>(null)
-  const [reason, setReason]   = useState("")
+  const [reason, setReason]   = useState<ReasonValue>(EMPTY_REASON)
+  const [note, setNote]       = useState("")
   const [pending, setPending] = useState(false)
 
   if (!canModerate) {
-    return <p className="text-sm text-muted-foreground">You can view this meal but not moderate it.</p>
+    return <p className="text-sm text-muted-foreground">You can view this dish but not moderate it.</p>
   }
 
   const base = `/api/vendors/meals/${meal.id}`
@@ -80,9 +88,11 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
   // Server-computed per group. The backend refuses the approve anyway
   // (MODIFIER_GROUP_UNRESOLVED); this only says so before the click.
   const blockingGroups = meal.modifierGroups.filter((g) => g.blocksDish)
-  const status = (to: string, why?: string) => ({
-    status: to, expectedStatus: meal.adminStatus, ...(why ? { reason: why } : {}),
+  const status = (to: string, extra: Record<string, unknown> = {}) => ({
+    status: to, expectedStatus: meal.adminStatus, ...extra,
   })
+  const openDialog = (d: Exclude<Dialog, null>) => { setReason(EMPTY_REASON); setNote(""); setDialog(d) }
+  const needsReason = dialog === "send-back" || dialog === "suspend" || dialog === "ban"
 
   return (
     <div className="space-y-4">
@@ -93,7 +103,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
             type="button"
             className="gap-1.5 rounded-full"
             disabled={pending || approved || blockingGroups.length > 0}
-            onClick={() => run(`${base}/approve`, undefined, "Meal approved")}
+            onClick={() => run(`${base}/approve`, undefined, "Dish approved")}
           >
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ThumbsUp className="h-4 w-4" />}
             {approved ? "Approved" : "Approve"}
@@ -103,7 +113,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
             variant="outline"
             className="gap-1.5 rounded-full"
             disabled={pending || sentBack}
-            onClick={() => { setReason(suggestedReason); setDialog("send-back") }}
+            onClick={() => openDialog("send-back")}
           >
             <Undo2 className="h-4 w-4" />
             {sentBack ? "Awaiting the vendor" : "Send back for revision"}
@@ -131,7 +141,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
               variant="success"
               className="gap-1.5 rounded-full"
               disabled={pending}
-              onClick={() => run(`${base}/status`, status("ACTIVE"), "Meal reinstated")}
+              onClick={() => run(`${base}/status`, status("ACTIVE"), "Dish reinstated")}
             >
               <RotateCcw className="h-4 w-4" />
               Reinstate
@@ -143,7 +153,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
               variant="success"
               className="gap-1.5 rounded-full"
               disabled={pending}
-              onClick={() => { setReason(""); setDialog("unban") }}
+              onClick={() => openDialog("unban")}
             >
               <RotateCcw className="h-4 w-4" />
               Lift ban
@@ -155,7 +165,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
               variant="warning"
               className="gap-1.5 rounded-full"
               disabled={pending}
-              onClick={() => { setReason(""); setDialog("suspend") }}
+              onClick={() => openDialog("suspend")}
             >
               <ShieldAlert className="h-4 w-4" />
               Suspend
@@ -167,7 +177,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
               variant="destructive"
               className="gap-1.5 rounded-full"
               disabled={pending}
-              onClick={() => { setReason(""); setDialog("ban") }}
+              onClick={() => openDialog("ban")}
             >
               <Ban className="h-4 w-4" />
               Ban
@@ -181,7 +191,7 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
       </div>
 
       <AlertDialog open={dialog !== null} onOpenChange={(o) => !pending && !o && setDialog(null)}>
-        <AlertDialogContent className="rounded-2xl">
+        <AlertDialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {dialog === "send-back" && "Send back for revision"}
@@ -192,8 +202,8 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
             <AlertDialogDescription>
               {dialog === "send-back" && (
                 <>
-                  {meal.name} stays off the menu until it is fixed. The vendor is notified with exactly the
-                  message below, so name what is wrong and what would be acceptable.
+                  {meal.name} stays off the menu at every outlet until it is fixed. The vendor is told the
+                  reason&apos;s standard explanation shown below.
                 </>
               )}
               {dialog === "suspend" && (
@@ -217,23 +227,24 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs">
-              {dialog === "send-back"
-                ? "What the vendor needs to change *"
-                : dialog === "unban" ? "Note (optional)" : "Reason *"}
-            </Label>
-            <Textarea
+          {needsReason && dialog ? (
+            <ReasonPicker
+              action={REASON_ACTION[dialog as keyof typeof REASON_ACTION]}
+              countryId={meal.vendor.countryId}
               value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              className="min-h-24 text-sm"
-              placeholder={
-                dialog === "send-back"
-                  ? "Which field, what is wrong with it, and what would be acceptable…"
-                  : "Recorded in the audit trail — not shown to the vendor."
-              }
+              onChange={setReason}
             />
-          </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Internal note (optional)</Label>
+              <Textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                className="min-h-24 text-sm"
+                placeholder="For the audit trail — never shown to the vendor."
+              />
+            </div>
+          )}
 
           <AlertDialogFooter>
             <Button
@@ -254,12 +265,12 @@ export function MealModerationActions({ meal, canModerate, suggestedReason }: Pr
                   : dialog === "unban" ? "success"
                   : "default"
               }
-              disabled={pending || (dialog !== "unban" && !reason.trim())}
+              disabled={pending || (needsReason && !reasonReady(reason))}
               onClick={() => {
-                if (dialog === "send-back") return run(`${base}/send-back`, { reason: reason.trim() }, "Sent back to the vendor")
-                if (dialog === "suspend")   return run(`${base}/status`, status("SUSPENDED", reason.trim()), "Meal suspended")
-                if (dialog === "ban")       return run(`${base}/status`, status("BANNED", reason.trim()), "Meal banned")
-                if (dialog === "unban")     return run(`${base}/status`, status("ACTIVE", reason.trim()), "Ban lifted")
+                if (dialog === "send-back") return run(`${base}/send-back`, reasonBody(reason), "Sent back to the vendor")
+                if (dialog === "suspend")   return run(`${base}/status`, status("SUSPENDED", reasonBody(reason)), "Dish suspended")
+                if (dialog === "ban")       return run(`${base}/status`, status("BANNED", reasonBody(reason)), "Dish banned")
+                if (dialog === "unban")     return run(`${base}/status`, status("ACTIVE", note.trim() ? { internalNote: note.trim() } : {}), "Ban lifted")
               }}
             >
               {pending && <Loader2 className="h-4 w-4 animate-spin" />}

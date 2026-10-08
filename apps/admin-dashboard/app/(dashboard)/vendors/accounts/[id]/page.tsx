@@ -395,7 +395,7 @@ export default async function VendorAccountDetailPage({ params }: Props) {
               </Link>
               {canReadMeals && (
                 <Link
-                  href={`/vendors/meals?vendor=${account.id}&vendorName=${encodeURIComponent(account.legalBusinessName)}&status=all`}
+                  href={`/meals/dishes?vendor=${account.id}&vendorName=${encodeURIComponent(account.legalBusinessName)}&status=all`}
                   className="view-all-link text-xs"
                 >
                   Meals →
