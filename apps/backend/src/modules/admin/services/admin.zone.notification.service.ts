@@ -11,6 +11,7 @@ import {
   buildZoneVendorEmail,
   buildZoneAdminEmail,
 } from "@/lib/email/templates/zone-notice"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 export type { ZoneChangeDescriptor }
 
@@ -108,7 +109,7 @@ export async function notifyZoneChange(
       where: {
         status     : AdminUserStatus.active,
         id         : { not: actorId },
-        permissions: { some: { permission: { key: AdminPermissions.SETTINGS_ZONES_RECEIVE_ALERT, isActive: true } } },
+        ...effectivelyHoldsWhere(AdminPermissions.SETTINGS_ZONES_RECEIVE_ALERT),
         scopes     : {
           some: {
             OR: [

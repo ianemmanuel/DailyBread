@@ -4,6 +4,7 @@ import { logger } from "@/lib/pino/logger"
 import { sendEmail } from "@/lib/email/mailer"
 import { buildProfileFlagEmail } from "@/lib/email/templates/profile-flag-notice"
 import type { ModerationFlag } from "./types"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 const log = logger.child({ module: "profile-flag-notify" })
 
@@ -45,8 +46,7 @@ export async function notifyAdminsProfileFlagged(params: {
   try {
     const recipients = await prisma.adminUser.findMany({
       where: {
-        status     : AdminUserStatus.active,
-        permissions: { some: { permission: { key: AdminPermissions.VENDORS_PROFILES_MODERATE, isActive: true } } },
+        ...effectivelyHoldsWhere(AdminPermissions.VENDORS_PROFILES_MODERATE),
         scopes     : { some: { scopeType: AdminScopeType.COUNTRY, countryId: params.countryId } },
       },
       select: { id: true, email: true },

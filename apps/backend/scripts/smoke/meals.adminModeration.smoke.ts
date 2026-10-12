@@ -245,6 +245,7 @@ async function main() {
 
   const READ = AdminPermissions.VENDORS_MEALS_READ
   const MOD  = AdminPermissions.VENDORS_MEALS_MODERATE
+  const ENF  = AdminPermissions.VENDORS_MEALS_ENFORCE  // the split: sanctions need enforce
   const SCOPE_A: AdminScopeContext = { isGlobal: false, countryIds: [countryA.id], cityIds: [], tier: "COUNTRY" }
   const SCOPE_B: AdminScopeContext = { isGlobal: false, countryIds: [countryB.id], cityIds: [], tier: "COUNTRY" }
   const GLOBAL : AdminScopeContext = { isGlobal: true, countryIds: [], cityIds: [], tier: "GLOBAL" }
@@ -339,7 +340,7 @@ async function main() {
       name: `${MARKER} Plain Plate`, basePriceMinor: 5000, outletIds: [o1.id],
     })
 
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     check("a dish approved by an admin before anything is flagged",
       (await call("POST", `${M}/${d3}/approve`)).json.data?.reviewStatus === "MANUALLY_APPROVED")
 
@@ -375,7 +376,7 @@ async function main() {
       const r = await call("POST", `${M}/modifier-groups/${group.id}/approve`)
       check("read-only cannot moderate a group → 403", r.status === 403 && r.json.code === "FORBIDDEN", r.json)
     }
-    asAdmin(admin.id, [READ, MOD], SCOPE_B)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_B)
     {
       const a = await call("POST", `${M}/modifier-groups/${group.id}/approve`)
       check("out-of-scope group APPROVE is a 404, never a 403", a.status === 404 && a.json.code === "NOT_FOUND", a.json)
@@ -384,7 +385,7 @@ async function main() {
       check("…and changed nothing",
         (await prisma.modifierGroup.findUniqueOrThrow({ where: { id: group.id } })).reviewStatus === "FLAGGED")
     }
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     {
       const r = await call("POST", `${M}/modifier-groups/00000000-0000-0000-0000-000000000000/approve`)
       check("an unknown group is a 404", r.status === 404 && r.json.code === "NOT_FOUND", r.json)
@@ -448,7 +449,7 @@ async function main() {
     await editGroup("Mellow")
     check("a re-queued dish stays in the queue when the vendor edits the group again",
       (await review(d1)).reviewStatus === "FLAGGED")
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     await call("POST", `${M}/modifier-groups/${group.id}/approve`)
     check("…and when an admin approves its group",
       (await review(d1)).reviewStatus === "FLAGGED" && !(await onStorefront(d1)))
@@ -460,7 +461,7 @@ async function main() {
     // Flag it again, then resolve it from the GROUP side.
     asVendor(vendorA.userId)
     await editGroup("Shit sauce")
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     /* d3 is sent back over its options, and the vendor's next edit is STILL
      * flagged: d3 re-queues carrying the modifier reason. The admin then
      * approves the group from elsewhere — that clears the modifier reason, and
@@ -470,7 +471,7 @@ async function main() {
     await editGroup("Shit sauces")
     check("a dish sent back over its options re-queues when the vendor re-edits, even if still flagged",
       (await review(d3)).reviewStatus === "FLAGGED")
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     {
       const before = await noteCount("MEAL_OPTIONS_APPROVED")
       const ap = await call("POST", `${M}/modifier-groups/${group.id}/approve`)
@@ -536,7 +537,7 @@ async function main() {
       await call("DELETE", `/api/vendor/v1/menu/items/${legacy}`)
     }
 
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     {
       const sent = await purgesDuring(() => call("POST", `${M}/${d1}/send-back`, { reasonCode: SMOKE_REASON }))
       check("a dish moderation action purges the cached city feeds", sent.includes("city-inventory"), sent)
@@ -571,7 +572,7 @@ async function main() {
       const sourceGroup = (source.modifierGroups as Json[])[0]!
       check("control: the source group passes the word filter", sourceGroup.reviewStatus === "AUTO_APPROVED", sourceGroup)
 
-      asAdmin(admin.id, [READ, MOD], SCOPE_A)
+      asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
       await call("POST", `${M}/modifier-groups/${sourceGroup.id}/send-back`, { reasonCode: "OTHER", vendorMessage: "Rename Smoky — misleading." })
 
       asVendor(vendorA.userId)
@@ -621,7 +622,7 @@ async function main() {
     // ════════════════════════════════════════════════════════════════════
     console.log("\n  ── 4. operational status: the transition matrix\n")
 
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     {
       const S = `${M}/${d3}/status`
       const n = { s: await noteCount("MEAL_SUSPENDED"), b: await noteCount("MEAL_BANNED"), r: await noteCount("MEAL_REINSTATED") }
@@ -678,7 +679,7 @@ async function main() {
       name: `${MARKER} B Dish`, basePriceMinor: 12345, outletIds: [oB.id],
     })).json.data.id as string
 
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     {
       const d = (await call("GET", `${M}/${d1}`)).json.data as Json
       const o = (d.outlets as Json[])[0]!
@@ -713,7 +714,7 @@ async function main() {
     }
 
     await prisma.vendorAccount.update({ where: { id: vendorB.id }, data: { deletedAt: new Date() } })
-    asAdmin(admin.id, [READ, MOD], GLOBAL)
+    asAdmin(admin.id, [READ, MOD, ENF], GLOBAL)
     {
       const g = await call("GET", `${M}/${bDish}`)
       check("a soft-deleted vendor's dish does not open by id", g.status === 404 && g.json.code === "NOT_FOUND", g.json)

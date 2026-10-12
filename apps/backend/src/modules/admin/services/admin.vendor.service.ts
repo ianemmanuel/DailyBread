@@ -25,6 +25,7 @@ import { getVendorGoLiveStatus } from "@/modules/vendor/services/vendor.profile.
 import { assertVendorDocumentReviewableByActor } from "./admin.vendor.compliance-case.service"
 import { MAX_APPLICATION_PRIORITY_SCAN } from "@/constants/vendor"
 import { toCsv } from "@/lib/csv"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 function assertCountryInScope(countryId: string, scope: AdminScopeContext): void {
   if (!scope.isGlobal && !scope.countryIds.includes(countryId)) {
@@ -106,8 +107,9 @@ async function assertEligibleReviewTarget(
     throw new ApiError(400, "Target reviewer is unavailable", "TARGET_UNAVAILABLE")
   }
 
-  const hasCapability = await prisma.adminUserPermission.findFirst({
-    where : { adminUserId: targetAdminId, permission: { key: requireCapability, isActive: true } },
+  const hasCapability = await prisma.adminUser.findFirst({
+    // EFFECTIVE capability (grant ∩ current pool ∩ active ∩ valid scope), not a raw grant row
+    where : { AND: [{ id: targetAdminId }, effectivelyHoldsWhere(requireCapability)] },
     select: { id: true },
   })
   if (!hasCapability) {
@@ -878,7 +880,7 @@ export async function listEligibleReviewTargets(
       ...(excludeSelf ? { id: { not: actorId } } : {}),
       status            : AdminUserStatus.active,
       reviewAvailability: AdminReviewAvailability.AVAILABLE,
-      permissions       : { some: { permission: { key: capability, isActive: true } } },
+      ...effectivelyHoldsWhere(capability),
       scopes: {
         some: {
           OR: [
@@ -909,7 +911,7 @@ async function assertEscalationReceiverExists(countryId: string): Promise<void> 
     where: {
       status            : AdminUserStatus.active,
       reviewAvailability: AdminReviewAvailability.AVAILABLE,
-      permissions       : { some: { permission: { key: AdminPermissions.VENDORS_APPLICATIONS_RECEIVE_ESCALATION, isActive: true } } },
+      ...effectivelyHoldsWhere(AdminPermissions.VENDORS_APPLICATIONS_RECEIVE_ESCALATION),
       scopes: {
         some: {
           OR: [

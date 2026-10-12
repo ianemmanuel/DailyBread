@@ -4,6 +4,11 @@
  *   1. the database refuses a second scope row and a malformed row
  *   2. assignment (create / update) takes exactly one scope, derives a CITY
  *      scope's country from the city, and checks the actor on UPDATE too
+ *   2b. delegation (RBAC Phase 1): provisioning assigns role + scope and no
+ *      grants; an identity admin cannot grant operational keys; super_admin
+ *      can; a role change and a scope change each clear grants (the scope
+ *      change's audit row commits in the same transaction); refusals write
+ *      nothing
  *   3. the scope the real middleware derives from real rows, applied to the
  *      Meals listing and dish services: CITY in its city only, never
  *      dish-wide; COUNTRY across its country only
@@ -18,7 +23,11 @@ import { prisma, Prisma } from "@repo/db"
 import { MEAL_REASON_ACTIONS } from "@repo/types/enums"
 import type { AdminScopeContext } from "@repo/types/backend"
 import { buildScopeContext } from "@/modules/admin/middleware/buildScopeContext"
-import { createAdminUser, updateAdminUserScopes } from "@/modules/admin/services/admin.user.service"
+import { loadPermissions } from "@/modules/admin/middleware/loadPermissions"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
+import {
+  createAdminUser, updateAdminUserScopes, updateAdminUserPermissions, updateAdminUserRole,
+} from "@/modules/admin/services/admin.user.service"
 import { listListingsForAdmin, applyListingControl } from "@/modules/meals/services/listings.service"
 import { setMenuItemStatus } from "@/modules/meals/services/moderation.service"
 import { listMenusForAdmin, getMenuForAdmin } from "@/modules/meals/services/menus.service"
@@ -88,10 +97,13 @@ async function main() {
     appliesTo: [...MEAL_REASON_ACTIONS],
   } })
 
-  const [vendorOps, vendorType, superAdmin] = await Promise.all([
+  const [vendorOps, identityRole, financeRole, vendorType, superAdmin] = await Promise.all([
     prisma.adminRole.findUniqueOrThrow({ where: { name: "vendor_ops" } }),
+    prisma.adminRole.findUniqueOrThrow({ where: { name: "identity_admin" } }),
+    prisma.adminRole.findUniqueOrThrow({ where: { name: "finance" } }),
     prisma.vendorType.findFirst({ where: { status: "ACTIVE" }, select: { id: true } }),
-    prisma.adminUser.findFirst({ where: { role: { name: "super_admin" } }, select: { id: true } }),
+    // An ACTIVE one: the delegation checks re-read the actor and refuse an inactive account.
+    prisma.adminUser.findFirst({ where: { role: { name: "super_admin" }, status: "active" }, select: { id: true } }),
   ])
   if (!vendorType || !superAdmin) { console.error("  SKIPPED — needs an active vendor type and a super admin"); return }
 
@@ -135,10 +147,20 @@ async function main() {
     // ════════════════════════════════════════════════════════════════════
     console.log("\n  ── 2. assignment takes exactly one scope\n")
 
-    // A COUNTRY-A identity admin, as buildScopeContext would build them.
-    const ACTOR_A: AdminScopeContext = { isGlobal: false, countryIds: [countryA.id], cityIds: [], tier: "COUNTRY" }
+    // A real COUNTRY-A identity admin: the service now reads the actor's role,
+    // grants and scope from the database by id, so the actor must exist.
+    const identityA = await prisma.adminUser.create({
+      data: {
+        email: `${MARKER}-identity-a@example.test`, firstName: "Smoke", lastName: "identity-a", roleId: identityRole.id,
+        status: "active", isActive: true,
+        scopes     : { create: { scopeType: "COUNTRY", country: { connect: { id: countryA.id } } } },
+        permissions: { create: ["admin_users:roles:assign", "admin_users:accounts:create", "admin_users:permissions:manage"].map((key) => ({
+          permission: { connect: { key } }, grantedBy: { connect: { id: superAdmin.id } },
+        })) },
+      },
+    })
     const upd = (scopes: unknown) => refusal(updateAdminUserScopes(
-      { adminUserId: target.id, scopes: scopes as never }, superAdmin.id, ACTOR_A, "identity_admin"))
+      { adminUserId: target.id, scopes: scopes as never }, identityA.id))
 
     check("two scopes are refused", await upd([
       { scopeType: "COUNTRY", countryId: countryA.id }, { scopeType: "CITY", cityId: cityA1.id },
@@ -162,11 +184,67 @@ async function main() {
         firstName: "Smoke", lastName: "Create", email: `${MARKER}-create@example.test`, roleId: vendorOps.id,
         scopes: [{ scopeType: "COUNTRY", countryId: countryA.id }, { scopeType: "CITY", cityId: cityA1.id }],
       } as never,
-      superAdmin.id, ACTOR_A, "identity_admin",
+      identityA.id,
     ))
     check("creating an admin with two scopes is refused, and writes nothing",
       created === "SINGLE_SCOPE_REQUIRED"
       && (await prisma.adminUser.count({ where: { email: `${MARKER}-create@example.test` } })) === 0, created)
+
+    // ════════════════════════════════════════════════════════════════════
+    console.log("\n  ── 2b. delegation (RBAC Phase 1) against real rows\n")
+
+    const provisioned = await createAdminUser(
+      { firstName: "Smoke", lastName: "Hire", email: `${MARKER}-hire@example.test`, roleId: vendorOps.id,
+        scopes: [{ scopeType: "CITY", cityId: cityA1.id }] },
+      identityA.id,
+    )
+    const hireScope  = await prisma.adminUserScope.findMany({ where: { adminUserId: provisioned.id } })
+    const hireGrants = await prisma.adminUserPermission.count({ where: { adminUserId: provisioned.id } })
+    check("a country identity admin provisions a CITY admin in its country: one scope row, no grants",
+      hireScope.length === 1 && hireScope[0]!.cityId === cityA1.id && hireScope[0]!.countryId === countryA.id && hireGrants === 0,
+      { hireScope, hireGrants })
+    check("…but not one in another country",
+      await refusal(createAdminUser({ firstName: "S", lastName: "X", email: `${MARKER}-hire-b@example.test`, roleId: vendorOps.id,
+        scopes: [{ scopeType: "CITY", cityId: cityB1.id }] }, identityA.id)) === "SCOPE_FORBIDDEN")
+    check("…and never with permissions attached",
+      await refusal(createAdminUser({ firstName: "S", lastName: "X", email: `${MARKER}-hire-c@example.test`, roleId: vendorOps.id,
+        permissionKeys: ["vendors:outlets:read"] }, identityA.id)) === "PERMISSIONS_NOT_GRANTABLE_AT_PROVISIONING")
+
+    const grantRefused = await refusal(updateAdminUserPermissions(
+      { adminUserId: provisioned.id, permissionKeys: ["vendors:outlets:read"] }, identityA.id))
+    check("the identity admin cannot grant it an operational permission, and nothing is written",
+      grantRefused === "ROLE_NOT_MANAGEABLE"
+      && (await prisma.adminUserPermission.count({ where: { adminUserId: provisioned.id } })) === 0, grantRefused)
+
+    const versionBefore = (await prisma.adminUser.findUniqueOrThrow({ where: { id: provisioned.id } })).updatedAt
+    await updateAdminUserPermissions({ adminUserId: provisioned.id, permissionKeys: ["vendors:outlets:read"] }, superAdmin.id)
+    const granted = await prisma.adminUserPermission.findMany({ where: { adminUserId: provisioned.id }, include: { permission: true } })
+    const versionAfter = (await prisma.adminUser.findUniqueOrThrow({ where: { id: provisioned.id } })).updatedAt
+    check("super_admin grants a pool key it holds; the optimistic version moved",
+      granted.length === 1 && granted[0]!.permission.key === "vendors:outlets:read" && granted[0]!.grantedById === superAdmin.id
+      && versionAfter.getTime() > versionBefore.getTime(), granted)
+
+    const roleRefused = await refusal(updateAdminUserRole({ adminUserId: provisioned.id, roleId: identityRole.id }, identityA.id))
+    const afterRole = await prisma.adminUser.findUniqueOrThrow({ where: { id: provisioned.id }, include: { permissions: true } })
+    check("an identity role cannot be placed on a CITY admin (scope first), and the grants survive the refusal",
+      roleRefused === "SCOPE_ROLE_MISMATCH" && afterRole.roleId === vendorOps.id && afterRole.permissions.length === 1, roleRefused)
+
+    await updateAdminUserRole({ adminUserId: provisioned.id, roleId: financeRole.id }, identityA.id)
+    const reRoled = await prisma.adminUser.findUniqueOrThrow({ where: { id: provisioned.id }, include: { permissions: true } })
+    check("a permitted role change clears every grant in the same transaction",
+      reRoled.roleId === financeRole.id && reRoled.permissions.length === 0, reRoled.permissions)
+
+    await updateAdminUserPermissions({ adminUserId: provisioned.id, permissionKeys: ["finance:reports:read"] }, superAdmin.id)
+    await updateAdminUserScopes({ adminUserId: provisioned.id, scopes: [{ scopeType: "CITY", cityId: cityA2.id }] }, identityA.id)
+    const moved = await prisma.adminUser.findUniqueOrThrow({ where: { id: provisioned.id }, include: { permissions: true, scopes: true } })
+    const scopeAudit = await prisma.auditLog.findFirst({
+      where: { action: "admin_user.scopes_updated", entityId: provisioned.id }, orderBy: { createdAt: "desc" },
+    })
+    check("a scope change keeps the role, replaces the scope, clears every grant — and its audit row is already committed",
+      moved.roleId === financeRole.id && moved.permissions.length === 0
+      && moved.scopes.length === 1 && moved.scopes[0]!.cityId === cityA2.id
+      && JSON.stringify(scopeAudit?.changes ?? {}).includes("finance:reports:read"),
+      { moved, scopeAudit })
 
     // ════════════════════════════════════════════════════════════════════
     console.log("\n  ── 3. the derived scope, applied to Meals\n")
@@ -270,6 +348,62 @@ async function main() {
     check("the real super admin derives GLOBAL", GLOBAL.isGlobal && GLOBAL.tier === "GLOBAL")
     check("GLOBAL can act anywhere",
       await refusal(applyListingControl(mB1.id, "hide", R, superAdmin.id, GLOBAL)) === "NO_ERROR")
+
+    // ════════════════════════════════════════════════════════════════════
+    console.log("\n  ── 4. effective permissions against real rows (RBAC Phase 2)\n")
+
+    const MOD = "vendors:meals:moderate"
+    const [ccRole, superRole] = await Promise.all([
+      prisma.adminRole.findUniqueOrThrow({ where: { name: "customer_care" } }),
+      prisma.adminRole.findUniqueOrThrow({ where: { name: "super_admin" } }),
+    ])
+    const mkEff = (tag: string, roleId: string | null, opts: { keys?: string[]; status?: "active" | "suspended"; scope?: boolean } = {}) =>
+      prisma.adminUser.create({
+        data: {
+          email: `${MARKER}-eff-${tag}@example.test`, firstName: "Smoke", lastName: `eff-${tag}`, roleId,
+          status: opts.status ?? "active", isActive: (opts.status ?? "active") === "active",
+          ...(opts.scope === false ? {} : { scopes: { create: { scopeType: "COUNTRY", country: { connect: { id: countryA.id } } } } }),
+          permissions: { create: (opts.keys ?? [MOD]).map((key) => ({ permission: { connect: { key } }, grantedBy: { connect: { id: superAdmin.id } } })) },
+        },
+      })
+    const holder       = await mkEff("holder", vendorOps.id)
+    await mkEff("stale",        ccRole.id)                         // grant outside customer_care's pool
+    await mkEff("no-role",      null)                              // grant row, no role
+    await mkEff("pool-only",    vendorOps.id, { keys: [] })        // in the pool, never granted
+    await mkEff("suspended",    vendorOps.id, { status: "suspended" })
+    await mkEff("no-scope",     vendorOps.id, { scope: false })
+    await mkEff("bad-tier",     superRole.id)                      // super_admin must be GLOBAL
+
+    const found = await prisma.adminUser.findMany({
+      where : { AND: [effectivelyHoldsWhere(MOD), { email: { startsWith: `${MARKER}-eff-` } }] },
+      select: { email: true },
+    })
+    check("only the real holder qualifies — stale, role-less, pool-only, suspended, scope-less and wrong-tier admins do not",
+      found.length === 1 && found[0]!.email === holder.email, found.map((f) => f.email))
+
+    // The real request-time pair, on real rows loaded with loadAdminUser's own include.
+    const chainOf = async (tag: string) => {
+      const adminUser = await prisma.adminUser.findUniqueOrThrow({
+        where  : { email: `${MARKER}-eff-${tag}@example.test` },
+        include: {
+          role       : { include: { permissions: { select: { permission: { select: { key: true, isActive: true } } } } } },
+          permissions: { include: { permission: true } },
+          scopes     : { include: { city: { select: { countryId: true } } } },
+        },
+      })
+      const req = { adminUser } as unknown as Request & { adminPermissions: string[]; adminScopeValid: boolean }
+      buildScopeContext(req, {} as Response, () => undefined)
+      loadPermissions(req, {} as Response, () => undefined)
+      return req
+    }
+    const h = await chainOf("holder")
+    check("the request chain gives the holder its effective key", h.adminScopeValid && h.adminPermissions.includes(MOD), h.adminPermissions)
+    const s = await chainOf("stale")
+    check("…and the stale holder nothing, with a valid scope", s.adminScopeValid && s.adminPermissions.length === 0, s.adminPermissions)
+    const n = await chainOf("no-scope")
+    check("…and the scope-less admin nothing, with an INVALID scope", !n.adminScopeValid && n.adminPermissions.length === 0, n)
+    const b = await chainOf("bad-tier")
+    check("…and a super_admin outside GLOBAL nothing", !b.adminScopeValid && b.adminPermissions.length === 0, b.adminPermissions)
   } finally {
     await sweep()
   }

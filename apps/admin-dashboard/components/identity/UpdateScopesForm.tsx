@@ -63,7 +63,9 @@ export function UpdateScopesForm({ userId, currentScopes, isGlobalActor, actorCo
       })
       const data = await res.json()
       if (res.ok) {
-        toast.success("Scope updated")
+        toast.success("Scope updated", {
+          description: "All previous permission grants were cleared — they are granted again for the new scope.",
+        })
         setOpen(false)
         router.refresh()
       } else {
@@ -91,6 +93,8 @@ export function UpdateScopesForm({ userId, currentScopes, isGlobalActor, actorCo
             <AlertDialogTitle>Edit geographic scope</AlertDialogTitle>
             <AlertDialogDescription>
               Defines where this admin works: global, one country, or one city. You can only assign a scope within your own access.
+              Changing the scope clears all of this admin&apos;s permissions — their role is kept, and a senior administrator of
+              their role grants permissions again for the new scope.
             </AlertDialogDescription>
           </AlertDialogHeader>
 

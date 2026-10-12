@@ -18,10 +18,27 @@ import { HttpStatus } from "@/constants/httpStatus"
  * A typo in a constant is a compile error. A typo in a string is a silent bug.
 */
 export function requirePermission(permission: AdminPermissionKey) {
-  return (req: Request, _res: Response, next: NextFunction) => {
-    const { adminPermissions } = req as AdminRequest
+  return requireAnyPermission([permission])
+}
 
-    if (!(adminPermissions ?? []).includes(permission)) {
+/** A gate handler, tagged with the keys it accepts so the route-manifest test
+ *  can read every route's requirement off the real router. */
+export type PermissionGate = ((req: Request, res: Response, next: NextFunction) => void) & {
+  requiredPermissions: readonly AdminPermissionKey[]
+}
+
+/**
+ * Passes if the admin EFFECTIVELY holds ANY of `permissions`. For a route
+ * whose handler then requires the specific key per item — e.g. the reasons
+ * offered for an action, which a moderator or an enforcer may each need — and
+ * which re-checks the exact key in its service. Prefer requirePermission.
+ */
+export function requireAnyPermission(permissions: readonly AdminPermissionKey[]): PermissionGate {
+  const gate = (req: Request, _res: Response, next: NextFunction) => {
+    const { adminPermissions } = req as AdminRequest
+    const held = adminPermissions ?? []
+
+    if (!permissions.some((p) => held.includes(p))) {
       return next(new ApiError(
         HttpStatus.FORBIDDEN,
         "You do not have permission to perform this action",
@@ -31,4 +48,5 @@ export function requirePermission(permission: AdminPermissionKey) {
 
     next()
   }
+  return Object.assign(gate, { requiredPermissions: [...permissions] })
 }

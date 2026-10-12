@@ -25,50 +25,59 @@ import { taxAdminRouter } from "@/modules/tax"
 import { marketingAdminRouter } from "@/modules/marketing"
 import { mealsAdminRouter } from "@/modules/meals"
 
-const v1Router: Router = Router()
+/*
+ * The /admin/v1 mount table — declared as DATA so the route-manifest test
+ * (routes/v1/route-manifest.test.ts) walks exactly what ships. Order matters
+ * and is preserved: the first matching mount wins.
+ */
+export const ADMIN_V1_MOUNTS: ReadonlyArray<readonly [path: string, router: Router]> = [
 
-v1Router.use("/auth", authRouter)
-v1Router.use("/users", usersRouter)
+  ["/auth", authRouter],
+  ["/users", usersRouter],
 /*
  * Meal moderation — owned by the meals module, at the URL it always had. It
  * must be mounted BEFORE the vendors router: /vendors/meals would otherwise be
  * offered to the vendors router first, whose parameterised routes could claim
  * it. Same auth inheritance as tax and marketing below.
  */
-v1Router.use("/vendors/meals", mealsAdminRouter)
-v1Router.use("/vendors", vendorsRouter)
-v1Router.use("/customers", customersRouter)
-v1Router.use("/delivery-zones", deliveryzoneRouter)
-v1Router.use("/service-areas", serviceAreaRouter)
-v1Router.use("/zones", zoneRouter)
-v1Router.use("/market-signals", marketSignalRouter)
-v1Router.use("/cities", citiesRouter)
-v1Router.use("/countries", countriesRouter)
-v1Router.use("/regions", regionsRouter)
-v1Router.use("/vendor-types", vendorTypesRouter)
-v1Router.use("/food-tags", foodTagsRouter)
-v1Router.use("/document-types", documentTypesRouter)
-v1Router.use("/vendor-reviewers", reviewerAvailabilityRouter)
-v1Router.use("/action-reasons", actionReasonsRouter)
-v1Router.use("/audit", auditRouter)
-v1Router.use("/notifications", notificationsRouter)
-v1Router.use("/payment-methods", paymentMethodsRouter)
+  ["/vendors/meals", mealsAdminRouter],
+  ["/vendors", vendorsRouter],
+  ["/customers", customersRouter],
+  ["/delivery-zones", deliveryzoneRouter],
+  ["/service-areas", serviceAreaRouter],
+  ["/zones", zoneRouter],
+  ["/market-signals", marketSignalRouter],
+  ["/cities", citiesRouter],
+  ["/countries", countriesRouter],
+  ["/regions", regionsRouter],
+  ["/vendor-types", vendorTypesRouter],
+  ["/food-tags", foodTagsRouter],
+  ["/document-types", documentTypesRouter],
+  ["/vendor-reviewers", reviewerAvailabilityRouter],
+  ["/action-reasons", actionReasonsRouter],
+  ["/audit", auditRouter],
+  ["/notifications", notificationsRouter],
+  ["/payment-methods", paymentMethodsRouter],
 // Two routers share the /finance mount, deliberately: `financeRouter`
 // (admin.finance.*) holds the pre-existing revenue-reporting lookups
 // (/finance/outlets, /finance/cities); `financeAdminRouter` (the new
 // Finance module) owns platform financial configuration
 // (/finance/providers, /finance/currencies). Non-overlapping paths. They
 // converge into the Finance module in a later phase.
-v1Router.use("/finance", financeRouter)
-v1Router.use("/finance", financeAdminRouter)
+  ["/finance", financeRouter],
+  ["/finance", financeAdminRouter],
 //* Consumption tax — its own module, not nested under finance.
-v1Router.use("/tax", taxAdminRouter)
+  ["/tax", taxAdminRouter],
 /*
  * Storefront merchandising — its own module, mounted here so it inherits the
  * full adminAuthChain (token -> user -> active -> permissions -> scope) that
  * adminRouter applies before `/v1`, exactly like tax and finance.
  */
-v1Router.use("/marketing", marketingAdminRouter)
-v1Router.use("/kpis", kpiRouter)
+  ["/marketing", marketingAdminRouter],
+  ["/kpis", kpiRouter],
+]
+
+const v1Router: Router = Router()
+for (const [path, router] of ADMIN_V1_MOUNTS) v1Router.use(path, router)
 
 export default v1Router

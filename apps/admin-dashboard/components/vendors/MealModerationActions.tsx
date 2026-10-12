@@ -39,7 +39,11 @@ import { ReasonPicker, EMPTY_REASON, reasonBody, reasonReady, type ReasonValue }
 
 interface Props {
   meal       : AdminMealDetail
+  /** Review (approve / send back): vendors:meals:moderate AND the server's canActDishWide. */
   canModerate: boolean
+  /** Sanctions (suspend / reinstate / ban / unban): vendors:meals:enforce AND canActDishWide.
+   *  Display only — the backend's route gate is the authority. */
+  canEnforce : boolean
 }
 
 /** The reason-backed dialogs and the action each one justifies. */
@@ -60,14 +64,14 @@ async function post(url: string, body?: unknown) {
   return { ok: res.ok, data: await res.json().catch(() => ({})) }
 }
 
-export function MealModerationActions({ meal, canModerate }: Props) {
+export function MealModerationActions({ meal, canModerate, canEnforce }: Props) {
   const router = useRouter()
   const [dialog, setDialog]   = useState<Dialog>(null)
   const [reason, setReason]   = useState<ReasonValue>(EMPTY_REASON)
   const [note, setNote]       = useState("")
   const [pending, setPending] = useState(false)
 
-  if (!canModerate) {
+  if (!canModerate && !canEnforce) {
     return <p className="text-sm text-muted-foreground">You can view this dish but not moderate it.</p>
   }
 
@@ -96,6 +100,7 @@ export function MealModerationActions({ meal, canModerate }: Props) {
 
   return (
     <div className="space-y-4">
+      {canModerate && (
       <div>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Content review</p>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -131,8 +136,10 @@ export function MealModerationActions({ meal, canModerate }: Props) {
           </p>
         )}
       </div>
+      )}
 
-      <div className="border-t border-border/70 pt-4">
+      {canEnforce && (
+      <div className={canModerate ? "border-t border-border/70 pt-4" : undefined}>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Marketplace status</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {suspended && (
@@ -189,6 +196,7 @@ export function MealModerationActions({ meal, canModerate }: Props) {
           editing it, and only lifting the ban restores it. The vendor is notified either way.
         </p>
       </div>
+      )}
 
       <AlertDialog open={dialog !== null} onOpenChange={(o) => !pending && !o && setDialog(null)}>
         <AlertDialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl">

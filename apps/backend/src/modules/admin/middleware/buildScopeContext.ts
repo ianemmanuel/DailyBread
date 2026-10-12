@@ -1,41 +1,33 @@
 import { Request, Response, NextFunction } from "express"
 import type { AdminRequest } from "@repo/types/backend"
 import { logger } from "@/lib/pino/logger"
-import { deriveScopeContext, type StoredScopeRow } from "../lib/scope/single-scope"
+import { resolveAdminScope, type PermissionSubject } from "@/lib/permissions/effective"
 
 const scopeLog = logger.child({ module: "admin-scope" })
 
 /*
- * STEP 5 — Build the geographic scope context.
+ * Build the geographic scope context — BEFORE loadPermissions, which needs to
+ * know whether the scope is valid.
  *
- * Reads the admin's ONE scope row (loaded by loadAdminUser, with its city's
- * own country) and computes AdminScopeContext — the object every query uses
- * to apply geographic filtering.
- *
- * The rule is deriveScopeContext (lib/scope/single-scope.ts): exactly one
- * well-formed row, or no scope at all. Rows are never unioned — COUNTRY + CITY
- * used to become a country admin of BOTH countries. A malformed assignment
- * fails CLOSED (sees nothing) and is logged, so it is found and fixed rather
- * than quietly widened.
+ * The rule is resolveAdminScope (lib/permissions/effective.ts): exactly one
+ * well-formed row (lib/scope/single-scope.ts), a role, and a tier that role
+ * allows. Rows are never unioned and an invalid assignment never falls back to
+ * another scope: it fails CLOSED (NO_SCOPE, and no effective permissions) and
+ * is logged, so it is found and fixed rather than quietly widened.
  *
  * No database call — everything needed was loaded in loadAdminUser.
  */
 export function buildScopeContext(req: Request, _res: Response, next: NextFunction) {
   const { adminUser } = req as AdminRequest
-  const rows = (adminUser.scopes ?? []) as unknown as Array<
-    Omit<StoredScopeRow, "cityCountryId"> & { city?: { countryId: string } | null }
-  >
-
-  const { scope, valid } = deriveScopeContext(rows.map((r) => ({
-    scopeType    : r.scopeType,
-    countryId    : r.countryId,
-    cityId       : r.cityId,
-    cityCountryId: r.city?.countryId ?? null,
-  })))
+  const { scope, valid, invalidReason } = resolveAdminScope({
+    role  : (adminUser.role as unknown as PermissionSubject["role"]) ?? null,
+    scopes: (adminUser.scopes ?? []) as unknown as PermissionSubject["scopes"],
+  })
   if (!valid) {
-    scopeLog.warn({ adminUserId: adminUser.id, rows: rows.length }, "Admin has no single well-formed scope — failing closed")
+    scopeLog.warn({ adminUserId: adminUser.id, rows: adminUser.scopes?.length ?? 0, invalidReason }, "Admin has no valid scope — failing closed")
   }
 
-  ;(req as Partial<AdminRequest>).adminScope = scope
+  ;(req as Partial<AdminRequest>).adminScope      = scope
+  ;(req as Partial<AdminRequest>).adminScopeValid = valid
   next()
 }

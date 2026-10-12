@@ -9,13 +9,14 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ReasonForm } from "@/components/meals/ReasonForm"
 import type { MealReasonLibraryRow } from "@/types"
+import type { MealReasonAction } from "@repo/types/enums"
 
 /*
  * The row's three-dot menu: View details, and Edit when the SERVER said this
  * admin may manage the reason (canManage). Edit opens the same sheet the
  * details page uses, controlled from here.
  */
-export function ActionReasonRowMenu({ reason }: { reason: MealReasonLibraryRow }) {
+export function ActionReasonRowMenu({ reason, authorableActions }: { reason: MealReasonLibraryRow; authorableActions: readonly MealReasonAction[] }) {
   const router = useRouter()
   const [editing, setEditing] = useState(false)
   return (
@@ -43,7 +44,7 @@ export function ActionReasonRowMenu({ reason }: { reason: MealReasonLibraryRow }
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {reason.canManage && <ReasonForm mode="edit" reason={reason} open={editing} onOpenChange={setEditing} />}
+      {reason.canManage && <ReasonForm mode="edit" reason={reason} authorableActions={authorableActions} open={editing} onOpenChange={setEditing} />}
     </>
   )
 }

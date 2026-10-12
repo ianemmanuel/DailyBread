@@ -5,6 +5,7 @@ import { ApiError } from "@/middleware/error"
 import { listReasonsForAction } from "@/modules/admin/lib/reasons/resolve-action-reason"
 
 import { canUseOtherReason, assertReasonReach } from "@/modules/admin/lib/reasons/reason-choice"
+import { assertCanUseReasonsFor, authorableReasonActions, permissionForReasonAction } from "@/modules/admin/lib/reasons/reason-actions"
 import { listListingsForAdmin } from "./listings.service"
 import { listMenuItemsForAdmin } from "./moderation.service"
 import { listEscalations } from "./escalations.service"
@@ -29,8 +30,11 @@ function isMealAction(action: unknown): action is (typeof MEAL_REASON_ACTIONS)[n
  * country. `canUseOther` / `canEscalate` are the server's answers — the ERP
  * offers exactly what the backend would accept.
  */
-export async function getReasonsForAction(action: unknown, countryId: unknown, scope: AdminScopeContext) {
+export async function getReasonsForAction(action: unknown, countryId: unknown, scope: AdminScopeContext, permissions: readonly string[]) {
   if (!isMealAction(action)) throw new ApiError(400, "Unknown action", "INVALID_ACTION")
+  // The route admits moderators AND enforcers; the action decides which one
+  // this caller must be (a moderator may not see the reasons for a ban).
+  assertCanUseReasonsFor(permissions, action)
   let country: string | null = typeof countryId === "string" && countryId ? countryId : null
   if (!scope.isGlobal) {
     if (country && !scope.countryIds.includes(country)) throw new ApiError(404, "Country not found", "COUNTRY_NOT_FOUND")
@@ -63,6 +67,11 @@ function libraryVisibility(scope: AdminScopeContext): Prisma.AdminActionReasonWh
 
 async function libraryContext(scope: AdminScopeContext, permissions: AdminPermissionKey[]) {
   const canWrite = permissions.includes(AdminPermissions.SETTINGS_ACTION_REASONS_WRITE)
+  // The meal actions this admin may write reasons for: those whose governing
+  // permission they hold (lib/reasons/reason-actions.ts). Empty without write.
+  const authorableActions = canWrite ? authorableReasonActions(permissions, MEAL_REASON_ACTIONS) : []
+  const governsAll = (actions: readonly string[]) =>
+    actions.every((a) => { const key = permissionForReasonAction(a); return key !== null && permissions.includes(key) })
   const reach = (countryId: string | null) => {
     try { assertReasonReach(scope, countryId); return true } catch { return false }
   }
@@ -70,7 +79,7 @@ async function libraryContext(scope: AdminScopeContext, permissions: AdminPermis
   const ownCountry = ownCountryId
     ? await prisma.country.findUnique({ where: { id: ownCountryId }, select: { id: true, name: true } })
     : null
-  return { canWrite, reach, ownCountry }
+  return { canWrite, reach, ownCountry, authorableActions, governsAll }
 }
 
 type ReasonRowDb = Prisma.AdminActionReasonGetPayload<object>
@@ -108,9 +117,12 @@ async function presentLibraryRows(rows: ReasonRowDb[], scope: AdminScopeContext,
       countryVersions: r.countryId === null
         ? versions.map((v) => ({ id: v.id, countryName: countryName.get(v.countryId!) ?? "Unknown country" }))
         : [],
-      canManage: ctx.canWrite && ctx.reach(r.countryId),
+      // Write, reach, AND authority over every action the reason serves —
+      // including its non-meal uses (a reason shared with customer suspension
+      // is edited only by someone who governs that too).
+      canManage: ctx.canWrite && ctx.reach(r.countryId) && ctx.governsAll(r.appliesTo),
       /** A country admin may add their country's version of a platform reason, once. */
-      canAddCountryVersion: r.countryId === null && !!ctx.ownCountry
+      canAddCountryVersion: r.countryId === null && !!ctx.ownCountry && ctx.governsAll(r.appliesTo)
         && !versions.some((v) => v.countryId === ctx.ownCountry!.id),
     }
   })
@@ -142,8 +154,10 @@ export async function getMealReasonLibrary(
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     /** Where this admin may CREATE a reason: platform-wide, or their own country. */
-    canCreateGlobal : ctx.canWrite && ctx.reach(null),
-    canCreateCountry: ctx.ownCountry,
+    canCreateGlobal : ctx.canWrite && ctx.reach(null) && ctx.authorableActions.length > 0,
+    canCreateCountry: ctx.authorableActions.length > 0 ? ctx.ownCountry : null,
+    /** The meal actions this admin may attach a reason to — the ERP offers exactly these. */
+    authorableActions: ctx.authorableActions,
   }
 }
 
@@ -164,7 +178,8 @@ export async function getMealReasonDetail(id: string, scope: AdminScopeContext, 
     createdAt: row.createdAt,
     /** The platform reason this country version replaces, to compare wording. */
     platform : platform ? { id: platform.id, label: platform.label, vendorMessage: platform.description } : null,
-    canCreateCountry: ctx.ownCountry,
+    canCreateCountry: ctx.authorableActions.length > 0 ? ctx.ownCountry : null,
+    authorableActions: ctx.authorableActions,
   }
 }
 

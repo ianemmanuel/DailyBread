@@ -398,7 +398,7 @@ async function main() {
         ["POST", `/meals/modifier-groups/${NOPE}/approve`],
         ["POST", `/meals/modifier-groups/${NOPE}/send-back`],
       ]
-      asAdmin(admin.id, [AdminPermissions.VENDORS_MEALS_READ, AdminPermissions.VENDORS_MEALS_MODERATE],
+      asAdmin(admin.id, [AdminPermissions.VENDORS_MEALS_READ, AdminPermissions.VENDORS_MEALS_MODERATE, AdminPermissions.VENDORS_MEALS_ENFORCE],
         { isGlobal: false, countryIds: [countryA.id], cityIds: [], tier: "COUNTRY" })
       const adminUnrouted: string[] = []
       for (const [method, path] of ADMIN_URLS) {
@@ -942,6 +942,7 @@ async function main() {
 
     const READ = AdminPermissions.VENDORS_MEALS_READ
     const MOD  = AdminPermissions.VENDORS_MEALS_MODERATE
+  const ENF  = AdminPermissions.VENDORS_MEALS_ENFORCE  // the split: sanctions need enforce
     const SCOPE_A: AdminScopeContext = { isGlobal: false, countryIds: [countryA.id], cityIds: [], tier: "COUNTRY" }
     const SCOPE_B: AdminScopeContext = { isGlobal: false, countryIds: [countryB.id], cityIds: [], tier: "COUNTRY" }
 
@@ -959,7 +960,7 @@ async function main() {
       const g = await call("GET", `/api/admin/v1/vendors/meals/${plateId}`)
       check("read permission in scope can read", g.status === 200 && g.json.data?.id === plateId, g.json)
     }
-    asAdmin(admin.id, [READ, MOD], SCOPE_B)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_B)
     {
       const g = await call("GET", `/api/admin/v1/vendors/meals/${plateId}`)
       check("out-of-scope READ is a 404, never a 403", g.status === 404 && g.json.code === "NOT_FOUND", g.json)
@@ -977,7 +978,7 @@ async function main() {
     const hiddenWhileFlagged = !menuOf(await storefrontOrNull(o1.id)).some((i) => i.id === plateId)
     check("a FLAGGED dish is hidden from customers", hiddenWhileFlagged)
 
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     {
       const a = await call("POST", `/api/admin/v1/vendors/meals/${plateId}/approve`)
       check("approve in scope → MANUALLY_APPROVED", a.status === 200 && a.json.data?.reviewStatus === "MANUALLY_APPROVED", a.json)

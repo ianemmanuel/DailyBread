@@ -1,6 +1,6 @@
 import { Router } from "express"
 import { AdminPermissions } from "@repo/types/enums"
-import { requirePermission } from "@/modules/admin/middleware"
+import { requirePermission, requireAnyPermission } from "@/modules/admin/middleware"
 import {
   handleListMenuItems,
   handleExportMenuItemsCsv,
@@ -14,7 +14,7 @@ import {
   handleGetMenuForAdmin,
   handleListListings,
   handleGetListing,
-  handleListingControl,
+  listingControlHandler,
   handleReasonsForAction,
   handleReasonLibrary,
   handleReasonDetail,
@@ -40,6 +40,9 @@ const mealsAdminRouter: Router = Router()
 
 const MEALS_READ     = requirePermission(AdminPermissions.VENDORS_MEALS_READ)
 const MEALS_MODERATE = requirePermission(AdminPermissions.VENDORS_MEALS_MODERATE)
+// Marketplace SANCTIONS — suspend / reinstate / ban / unban a dish, suspend /
+// reinstate a listing — are a separate trust from the content verdict.
+const MEALS_ENFORCE  = requirePermission(AdminPermissions.VENDORS_MEALS_ENFORCE)
 
 mealsAdminRouter.get("/", MEALS_READ, handleListMenuItems)
 // Before "/:itemId", or the literal segment parses as an id and 404s.
@@ -53,8 +56,10 @@ mealsAdminRouter.get("/menus/:menuId", MEALS_READ, handleGetMenuForAdmin)
 mealsAdminRouter.get("/overview",          MEALS_READ, handleMealsOverview)
 mealsAdminRouter.get("/reasons/library",   MEALS_READ, handleReasonLibrary)
 mealsAdminRouter.get("/reasons/library/:id", MEALS_READ, handleReasonDetail)
-// Reasons for an action are what an ACTING admin needs, so moderate.
-mealsAdminRouter.get("/reasons",           MEALS_MODERATE, handleReasonsForAction)
+// Reasons for an action are what an ACTING admin needs: a moderator (send back,
+// hide) or an enforcer (suspend, ban). The service then requires the key that
+// governs the requested action (lib/reasons/reason-actions.ts).
+mealsAdminRouter.get("/reasons", requireAnyPermission([AdminPermissions.VENDORS_MEALS_MODERATE, AdminPermissions.VENDORS_MEALS_ENFORCE]), handleReasonsForAction)
 mealsAdminRouter.get("/escalations",       MEALS_READ, handleListEscalations)
 mealsAdminRouter.post("/escalations/:id/resolve", MEALS_MODERATE, handleResolveEscalation)
 
@@ -62,15 +67,21 @@ mealsAdminRouter.post("/escalations/:id/resolve", MEALS_MODERATE, handleResolveE
 // "/:itemId" for the same reason as /export.
 mealsAdminRouter.get("/listings",         MEALS_READ, handleListListings)
 mealsAdminRouter.get("/listings/:mealId", MEALS_READ, handleGetListing)
-// Marketplace controls on ONE listing: hide | unhide | suspend | reinstate.
-// Moderate only — meals:read alone can never reach a write.
+// Marketplace controls on ONE listing — one route per action, each with its
+// own gate: hide/unhide are review, suspend/reinstate are enforcement. An
+// unknown action matches no route. meals:read alone never reaches a write.
 mealsAdminRouter.get("/listings/:mealId/escalation-recipients", MEALS_MODERATE, handleEscalationRecipients)
 mealsAdminRouter.post("/listings/:mealId/escalate",              MEALS_MODERATE, handleCreateEscalation)
-mealsAdminRouter.post("/listings/:mealId/:action", MEALS_MODERATE, handleListingControl)
+mealsAdminRouter.post("/listings/:mealId/hide",      MEALS_MODERATE, listingControlHandler("hide"))
+mealsAdminRouter.post("/listings/:mealId/unhide",    MEALS_MODERATE, listingControlHandler("unhide"))
+mealsAdminRouter.post("/listings/:mealId/suspend",   MEALS_ENFORCE,  listingControlHandler("suspend"))
+mealsAdminRouter.post("/listings/:mealId/reinstate", MEALS_ENFORCE,  listingControlHandler("reinstate"))
 mealsAdminRouter.get("/:itemId", MEALS_READ, handleGetMenuItem)
 mealsAdminRouter.post("/:itemId/approve",   MEALS_MODERATE, handleApproveMenuItem)
 mealsAdminRouter.post("/:itemId/send-back", MEALS_MODERATE, handleSendBackMenuItem)
-mealsAdminRouter.post("/:itemId/status",    MEALS_MODERATE, handleSetMenuItemStatus)
+// Suspend, reinstate, ban, unban — every operational status change on a dish
+// is a sanction, so enforcement.
+mealsAdminRouter.post("/:itemId/status",    MEALS_ENFORCE,  handleSetMenuItemStatus)
 
 // Option groups carry their own verdict — one group can sit on many dishes.
 // Same permission as the dish verdict: it is the same act (judging vendor

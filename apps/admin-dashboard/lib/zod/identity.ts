@@ -28,8 +28,9 @@ export const createAdminUserSchema = z.object({
   email          : z.string().email("Please enter a valid work email address"),
   employeeId     : z.string(),
   roleId         : z.string().min(1, "Please select a role"),
-  permissionKeys : z.array(z.string()),   // no .default() — form supplies []
-  scopes         : z.array(z.object({
+  // No permissionKeys: creating an administrator grants nothing (the backend
+  // refuses grants at provisioning — PERMISSIONS_NOT_GRANTABLE_AT_PROVISIONING).
+  scopes        : z.array(z.object({
     scopeType : z.enum(["GLOBAL", "COUNTRY", "CITY"]),
     countryId : z.string().optional(),
     cityId    : z.string().optional(),

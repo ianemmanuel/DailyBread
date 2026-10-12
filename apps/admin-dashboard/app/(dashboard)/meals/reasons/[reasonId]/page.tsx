@@ -65,9 +65,9 @@ export default async function ActionReasonDetailPage({ params }: { params: Promi
           </div>
           <div className="flex flex-wrap gap-2">
             {reason.canAddCountryVersion && reason.canCreateCountry && (
-              <ReasonForm mode="override" base={reason} countryId={reason.canCreateCountry.id} countryName={reason.canCreateCountry.name} />
+              <ReasonForm mode="override" authorableActions={reason.authorableActions} base={reason} countryId={reason.canCreateCountry.id} countryName={reason.canCreateCountry.name} />
             )}
-            {reason.canManage && <ReasonForm mode="edit" reason={reason} />}
+            {reason.canManage && <ReasonForm mode="edit" authorableActions={reason.authorableActions} reason={reason} />}
           </div>
         </div>
       </div>

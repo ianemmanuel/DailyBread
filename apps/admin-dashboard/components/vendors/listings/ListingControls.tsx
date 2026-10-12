@@ -44,6 +44,10 @@ interface Props {
   removed    : boolean
   /** Server-computed: may this admin escalate, and is one already open? */
   canEscalate: boolean
+  /** Review — hide / unhide, escalate: vendors:meals:moderate. Display only; the backend gates each route. */
+  canModerate: boolean
+  /** Sanction — suspend / reinstate: vendors:meals:enforce. Display only. */
+  canEnforce : boolean
   pendingEscalation: { assignedTo: string; createdAt: string } | null
 }
 
@@ -63,7 +67,7 @@ const REASON_ACTION = {
 interface Recipient { id: string; firstName: string; lastName: string }
 
 export function ListingControls(props: Props) {
-  const { mealId, countryId, dishName, outletName, adminStatus, hidden, removed, canEscalate, pendingEscalation } = props
+  const { mealId, countryId, dishName, outletName, adminStatus, hidden, removed, canEscalate, pendingEscalation, canModerate, canEnforce } = props
   const router = useRouter()
   const [dialog, setDialog]   = useState<Action | null>(null)
   const [reason, setReason]   = useState<ReasonValue>(EMPTY_REASON)
@@ -127,6 +131,7 @@ export function ListingControls(props: Props) {
 
   return (
     <div className="space-y-4">
+      {canModerate && (
       <div>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Visibility</p>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -143,8 +148,10 @@ export function ListingControls(props: Props) {
           )}
         </div>
       </div>
+      )}
 
-      <div className="border-t border-border/70 pt-4">
+      {canEnforce && (
+      <div className={canModerate ? "border-t border-border/70 pt-4" : undefined}>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Suspension</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {suspended ? (
@@ -160,8 +167,9 @@ export function ListingControls(props: Props) {
           ) : null}
         </div>
       </div>
+      )}
 
-      {canEscalate && (
+      {canModerate && canEscalate && (
         <div className="border-t border-border/70 pt-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">No reason fits?</p>
           {pendingEscalation ? (

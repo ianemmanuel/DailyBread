@@ -11,6 +11,7 @@ import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
 import { createAdminNotification } from "./admin.notification.service"
 import { payoutReviewState, isPayoutReviewOpen } from "./admin.payoutReview.state"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 const serviceLog = logger.child({ module: "admin-payout-review-service" })
 
@@ -219,9 +220,7 @@ async function assertEscalationReceiverExists(countryId: string): Promise<void> 
     where: {
       status            : AdminUserStatus.active,
       reviewAvailability: AdminReviewAvailability.AVAILABLE,
-      permissions       : {
-        some: { permission: { key: AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION, isActive: true } },
-      },
+      ...effectivelyHoldsWhere(AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION),
       scopes: { some: { scopeType: AdminScopeType.COUNTRY, countryId } },
     },
     select: { id: true },
@@ -239,9 +238,7 @@ export async function notifyPayoutEscalated(accountId: string, countryId: string
   const recipients = await prisma.adminUser.findMany({
     where : {
       status     : AdminUserStatus.active,
-      permissions: {
-        some: { permission: { key: AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION, isActive: true } },
-      },
+      ...effectivelyHoldsWhere(AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION),
       scopes     : { some: { scopeType: AdminScopeType.COUNTRY, countryId } },
     },
     select: { id: true },
@@ -324,7 +321,7 @@ async function assertEligibleTarget(
       id                : targetAdminId,
       status            : AdminUserStatus.active,
       reviewAvailability: AdminReviewAvailability.AVAILABLE,
-      permissions       : { some: { permission: { key: requiredKey, isActive: true } } },
+      ...effectivelyHoldsWhere(requiredKey),
       scopes            : { some: { scopeType: AdminScopeType.COUNTRY, countryId } },
     },
     select: { id: true },
@@ -354,7 +351,7 @@ export async function listEligiblePayoutReviewTargets(
       status            : AdminUserStatus.active,
       reviewAvailability: AdminReviewAvailability.AVAILABLE,
       id                : { not: actorId },
-      permissions       : { some: { permission: { key: requiredKey, isActive: true } } },
+      ...effectivelyHoldsWhere(requiredKey),
       scopes            : { some: { scopeType: AdminScopeType.COUNTRY, countryId: row.vendor.countryId } },
     },
     select : { id: true, firstName: true, lastName: true, email: true },

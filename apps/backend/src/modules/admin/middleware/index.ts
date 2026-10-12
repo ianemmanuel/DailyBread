@@ -9,13 +9,13 @@ export { loadAdminUser }      from "./loadAdminUser"
 export { checkIsActive }      from "./checkIsActive"
 export { loadPermissions }    from "./loadPermissions"
 export { buildScopeContext }  from "./buildScopeContext"
-export { requirePermission }  from "./requirePermission"
+export { requirePermission, requireAnyPermission, type PermissionGate } from "./requirePermission"
 
 /* 
  * The composed admin authentication chain.
  * Apply to any admin router to enforce the full middleware pipeline:
  *
- *   verifyAdminToken → loadAdminUser → checkIsActive → loadPermissions → buildScopeContext
+ *   verifyAdminToken → loadAdminUser → checkIsActive → buildScopeContext → loadPermissions
  *
  * Usage — spread into router.use():
  *
@@ -45,6 +45,6 @@ export const adminAuthChain = [
   verifyAdminToken,
   loadAdminUser,
   checkIsActive,
+  buildScopeContext,   // before loadPermissions: an invalid scope means no effective permissions
   loadPermissions,
-  buildScopeContext,
 ] as const

@@ -220,6 +220,7 @@ async function main() {
 
   const READ = AdminPermissions.VENDORS_MEALS_READ
   const MOD  = AdminPermissions.VENDORS_MEALS_MODERATE
+  const ENF  = AdminPermissions.VENDORS_MEALS_ENFORCE  // the split: sanctions need enforce
   const GLOBAL : AdminScopeContext = { isGlobal: true, countryIds: [], cityIds: [], tier: "GLOBAL" }
   const SCOPE_A: AdminScopeContext = { isGlobal: false, countryIds: [countryA.id], cityIds: [], tier: "COUNTRY" }
   const SCOPE_B: AdminScopeContext = { isGlobal: false, countryIds: [countryB.id], cityIds: [], tier: "COUNTRY" }
@@ -418,14 +419,14 @@ async function main() {
     check("meals:read alone cannot suspend (403)",
       (await call("POST", A(w1, "suspend"), { reasonCode: SMOKE_REASON, internalNote: "x" })).status === 403)
     check("…and nothing changed", (await state(w1)).adminHiddenAt === null && (await state(w1)).adminStatus === "ACTIVE")
-    asAdmin(admin.id, [READ, MOD], SCOPE_B)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_B)
     check("moderate but out of country scope → 404", (await call("POST", A(w1, "hide"), { reasonCode: SMOKE_REASON })).status === 404)
-    asAdmin(admin.id, [READ, MOD], CITY_A1)
+    asAdmin(admin.id, [READ, MOD, ENF], CITY_A1)
     check("city moderator, other city in the same country → 404", (await call("POST", A(w2, "hide"), { reasonCode: SMOKE_REASON })).status === 404)
     check("unknown action → 404", (await call("POST", A(w1, "ban"), { reasonCode: SMOKE_REASON, internalNote: "x" })).status === 404)
 
     // ── hide (city moderator, own city)
-    asAdmin(admin.id, [READ, MOD], CITY_A1)
+    asAdmin(admin.id, [READ, MOD, ENF], CITY_A1)
     let res: Awaited<ReturnType<typeof call>> | null = null
     const hidePurges = await purgesDuring(async () => {
       res = await call("POST", A(w1, "hide"), { reasonCode: SMOKE_REASON, internalNote: "Duplicate of another listing", expectedStatus: "ACTIVE", expectedHidden: false })
@@ -451,7 +452,7 @@ async function main() {
       hideAudit)
     await agree("hidden")
 
-    asAdmin(admin.id, [READ, MOD], CITY_A1)
+    asAdmin(admin.id, [READ, MOD, ENF], CITY_A1)
     const again = await purgesDuring(async () => { res = await call("POST", A(w1, "hide"), { reasonCode: SMOKE_REASON }) })
     check("hiding again is refused by name", res!.status === 400 && res!.json.code === "ALREADY_IN_STATE", res!.json)
     check("a refused action purges nothing", again.length === 0, again)
@@ -469,7 +470,7 @@ async function main() {
     check("toggling availability and re-saving the dish does not lift a hide", (await state(w1)).adminHiddenAt !== null)
 
     // ── suspend (country moderator)
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     const noReason = await call("POST", A(w1, "suspend"), {})
     check("suspend without a reason is refused", noReason.status === 400 && noReason.json.code === "REASON_REQUIRED", noReason.json)
     const legacy = await call("POST", A(w1, "suspend"), { reason: "free text" })
@@ -509,7 +510,7 @@ async function main() {
     check("control=none excludes it", !noneList.ids.includes(w1) && noneList.ids.includes(w2), noneList.ids)
 
     // ── reinstate
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     const reinstatePurges = await purgesDuring(async () => {
       res = await call("POST", A(w1, "reinstate"), { expectedStatus: "SUSPENDED", expectedHidden: false })
     })
@@ -534,7 +535,7 @@ async function main() {
       name: `${MARKER} Crispy Honey Garlic Wings`, description: "Twelve wings, glazed.", basePriceMinor: 70000,
       outletIds: [o1.id],
     })
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     check("a removed listing cannot be hidden", (await call("POST", A(w2, "hide"), { reasonCode: SMOKE_REASON })).json.code === "LISTING_REMOVED")
     // Suspend while live, remove, re-add: the control survives the round trip.
     asVendor(vendorA.userId)
@@ -542,14 +543,14 @@ async function main() {
       name: `${MARKER} Crispy Honey Garlic Wings`, description: "Twelve wings, glazed.", basePriceMinor: 70000,
       outletIds: [o1.id, o2.id], priceOverrides: { [o2.id]: 75000 },
     })
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     await call("POST", A(w2, "suspend"), { reasonCode: SMOKE_REASON, internalNote: "Investigating" })
     asVendor(vendorA.userId)
     await call("PUT", `/api/vendor/v1/menu/items/${wingsId}`, {
       name: `${MARKER} Crispy Honey Garlic Wings`, description: "Twelve wings, glazed.", basePriceMinor: 70000,
       outletIds: [o1.id],
     })
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     res = await call("POST", A(w2, "reinstate"), {})
     check("a suspension can be lifted even while the listing is removed", res.status === 200, res.json)
     await call("POST", A(w2, "suspend"), { reasonCode: SMOKE_REASON, internalNote: "x" }).then((r) =>
@@ -559,7 +560,7 @@ async function main() {
       name: `${MARKER} Crispy Honey Garlic Wings`, description: "Twelve wings, glazed.", basePriceMinor: 70000,
       outletIds: [o1.id, o2.id], priceOverrides: { [o2.id]: 75000 },
     })
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     await call("POST", A(w2, "hide"), { reasonCode: SMOKE_REASON })
     asVendor(vendorA.userId)
     await call("PUT", `/api/vendor/v1/menu/items/${wingsId}`, {
@@ -583,7 +584,7 @@ async function main() {
       && hist.find((h) => h.action === "meal.suspended")?.reason?.label === "Smoke reason", hist)
 
     // ── global moderator, other vendor's listing
-    asAdmin(admin.id, [READ, MOD], GLOBAL)
+    asAdmin(admin.id, [READ, MOD, ENF], GLOBAL)
     check("GLOBAL moderator can act anywhere", (await call("POST", A(rolex, "hide"), { reasonCode: SMOKE_REASON })).status === 200)
     check("…and it touches only that listing", (await state(w1)).adminHiddenAt === null)
     await agree("final")
@@ -599,7 +600,7 @@ async function main() {
     const westId = westRes.json.data.id as string
     const D = "/api/admin/v1/vendors/meals"
 
-    asAdmin(admin.id, [READ, MOD], CITY_A1)
+    asAdmin(admin.id, [READ, MOD, ENF], CITY_A1)
     const cityDishes = await call("GET", `${D}?search=${encodeURIComponent(MARKER)}&pageSize=100`)
     const cityDishIds = ((cityDishes.json.data?.items ?? []) as Json[]).map((i) => i.id as string)
     check("CITY admin's dish list holds dishes sold in their city", cityDishIds.includes(wingsId), cityDishIds)
@@ -634,7 +635,7 @@ async function main() {
     }
     check("…and the dish is unchanged", JSON.stringify(await dishSnapshot()) === JSON.stringify(dishBeforeCity))
 
-    asAdmin(admin.id, [READ, MOD], SCOPE_A)
+    asAdmin(admin.id, [READ, MOD, ENF], SCOPE_A)
     const countryDetail = (await call("GET", `${D}/${wingsId}`)).json.data as Json
     check("COUNTRY admin sees every outlet row and may act dish-wide",
       countryDetail.outlets.length === 2 && countryDetail.outsideScopeOutletCount === 0 && countryDetail.canActDishWide === true)

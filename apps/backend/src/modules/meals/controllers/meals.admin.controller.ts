@@ -237,10 +237,14 @@ export const handleGetListing: RequestHandler = async (req, res, next) => {
 //* — read field by field. hide/suspend need a reason; unhide/reinstate take an
 //* optional internal note. The two expected* fields are the state the admin
 //* was looking at (the ERP always sends them).
-export const handleListingControl: RequestHandler = async (req, res, next) => {
+//* ONE handler per action, bound by its ROUTE: hide/unhide are review
+//* (vendors:meals:moderate), suspend/reinstate are enforcement
+//* (vendors:meals:enforce), so each route carries its own permission gate and
+//* no request parameter can pick a stronger action than the gate admitted.
+export function listingControlHandler(action: ListingControlAction): RequestHandler {
+  return async (req, res, next) => {
   try {
     const { adminUser, adminScope } = req as unknown as AdminRequest
-    const action = req.params.action
     if (!action || !(LISTING_CONTROL_ACTIONS as readonly string[]).includes(action)) {
       throw new ApiError(404, "Unknown action", "NOT_FOUND")
     }
@@ -266,6 +270,7 @@ export const handleListingControl: RequestHandler = async (req, res, next) => {
     )
     return sendSuccess(res, result, "Listing updated")
   } catch (err) { next(err) }
+  }
 }
 
 // ─── Operations: reasons, escalations, overview ──────────────────────────────
@@ -273,8 +278,8 @@ export const handleListingControl: RequestHandler = async (req, res, next) => {
 //* GET /admin/v1/vendors/meals/reasons?action=&countryId=
 export const handleReasonsForAction: RequestHandler = async (req, res, next) => {
   try {
-    const { adminScope } = req as unknown as AdminRequest
-    return sendSuccess(res, await getReasonsForAction(req.query.action, req.query.countryId, adminScope), "Reasons fetched")
+    const { adminScope, adminPermissions } = req as unknown as AdminRequest
+    return sendSuccess(res, await getReasonsForAction(req.query.action, req.query.countryId, adminScope, adminPermissions), "Reasons fetched")
   } catch (err) { next(err) }
 }
 

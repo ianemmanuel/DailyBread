@@ -41,8 +41,10 @@ export default async function AdminMealDetailPage({ params }: Props) {
   const { menuItemId: itemId } = await params
   const session = await getAdminSession()
 
-  if (!session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)) redirect("/vendors")
+  // /overview, not a section this admin may also lack (every signed-in admin reaches it).
+  if (!session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)) redirect("/overview")
   const hasModerate = session.permissions.includes(AdminPermissions.VENDORS_MEALS_MODERATE)
+  const hasEnforce  = session.permissions.includes(AdminPermissions.VENDORS_MEALS_ENFORCE)
 
   let meal: AdminMealDetail
   try {
@@ -60,6 +62,7 @@ export default async function AdminMealDetailPage({ params }: Props) {
   // says whether this admin may do that (canActDishWide) and refuses it
   // otherwise; the page only stops offering what would be refused.
   const canModerate = hasModerate && meal.canActDishWide
+  const canEnforce  = hasEnforce && meal.canActDishWide
   const reach = meal.outletCount === 1 ? "1 outlet" : `${meal.outletCount} outlets`
 
   return (
@@ -320,7 +323,7 @@ export default async function AdminMealDetailPage({ params }: Props) {
               Applies to this dish at every outlet that sells it ({reach}). To act on one outlet only, open its
               listing under “Listings at outlets”.
             </p>
-            {hasModerate && !meal.canActDishWide ? (
+            {(hasModerate || hasEnforce) && !meal.canActDishWide ? (
               <p className="text-sm text-muted-foreground">
                 Dish-wide decisions reach outlets outside your city, so a country or global admin makes them. You
                 can hide or suspend the listings in your city from their own pages.
@@ -329,6 +332,7 @@ export default async function AdminMealDetailPage({ params }: Props) {
               <MealModerationActions
                 meal={meal}
                 canModerate={canModerate}
+                canEnforce={canEnforce}
               />
             )}
           </div>

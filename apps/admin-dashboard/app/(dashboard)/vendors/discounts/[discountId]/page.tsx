@@ -35,6 +35,8 @@ export default async function AdminDiscountDetailPage({
   const session = await getAdminSession()
   if (!session.permissions.includes(AdminPermissions.FINANCE_DISCOUNTS_READ)) redirect("/vendors")
   const canStop = session.permissions.includes(AdminPermissions.FINANCE_DISCOUNTS_DEACTIVATE)
+  // A dish name links to the Meals page only for someone who can open it.
+  const canReadMeals = session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)
 
   const { discountId } = await params
   const offer = await adminFetch<AdminDiscountDetail>(
@@ -183,9 +185,13 @@ export default async function AdminDiscountDetailPage({
             <ul className="space-y-1.5 text-sm">
               {offer.items.map((i) => (
                 <li key={i.id} className="flex items-baseline justify-between gap-3">
-                  <Link href={`/meals/dishes/${i.id}`} className="cursor-pointer text-foreground hover:text-primary hover:underline">
-                    {i.name}
-                  </Link>
+                  {canReadMeals ? (
+                    <Link href={`/meals/dishes/${i.id}`} className="cursor-pointer text-foreground hover:text-primary hover:underline">
+                      {i.name}
+                    </Link>
+                  ) : (
+                    <span className="text-foreground">{i.name}</span>
+                  )}
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                     {money(i.basePriceMinor)}
                   </span>

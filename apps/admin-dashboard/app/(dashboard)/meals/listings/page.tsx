@@ -36,7 +36,7 @@ interface PageProps {
  */
 export default async function MealListingsPage({ searchParams }: PageProps) {
   const session = await getAdminSession()
-  if (!session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)) redirect("/vendors")
+  if (!session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)) redirect("/overview")
 
   const params      = await searchParams
   const page        = params.page ?? "1"

@@ -58,7 +58,8 @@ async function call(method: string, path: string, body?: unknown) {
 }
 const READ = AdminPermissions.VENDORS_MEALS_READ
 const MOD  = AdminPermissions.VENDORS_MEALS_MODERATE
-const as = (id: string, scope: AdminScopeContext, perms: string[] = [READ, MOD]) => {
+const ENF  = AdminPermissions.VENDORS_MEALS_ENFORCE  // the split: sanctions need enforce
+const as = (id: string, scope: AdminScopeContext, perms: string[] = [READ, MOD, ENF]) => {
   adminCtx = { adminUser: { id }, adminPermissions: perms, adminScope: scope }
 }
 
@@ -336,8 +337,10 @@ async function main() {
 
     // Codes are SYSTEM-generated from the name; a label of "ZZ_SMOKE_MR_x"
     // generates code ZZ_SMOKE_MR_x, which keeps every fixture sweepable.
-    const create = (input: Json, actor: string, scope: AdminScopeContext) =>
-      createActionReason({ description: "Vendor explanation.", appliesTo: [A.LISTING_HIDE], ...input } as never, actor, scope)
+    // A meals author: write + every meal action's governing key (RBAC Meals C3).
+    const AUTHOR = [MOD, ENF, AdminPermissions.SETTINGS_ACTION_REASONS_WRITE]
+    const create = (input: Json, actor: string, scope: AdminScopeContext, perms: string[] = AUTHOR) =>
+      createActionReason({ description: "Vendor explanation.", appliesTo: [A.LISTING_HIDE], ...input } as never, actor, scope, perms)
 
     check("a COUNTRY admin cannot create a platform-wide reason",
       await code(create({ label: "ZZ_SMOKE_MR_G1" }, countryAdminA, COUNTRY)) === "REASON_SCOPE_FORBIDDEN")
@@ -347,7 +350,7 @@ async function main() {
     check("…but not for another country",
       await code(create({ label: "ZZ_SMOKE_MR_C2", countryId: countryB.id }, countryAdminA, COUNTRY)) === "REASON_SCOPE_FORBIDDEN")
     check("a COUNTRY admin cannot edit a platform-wide reason",
-      await code(updateActionReason(rAll.id, { isActive: false }, countryAdminA, COUNTRY)) === "REASON_SCOPE_FORBIDDEN")
+      await code(updateActionReason(rAll.id, { isActive: false }, countryAdminA, COUNTRY, AUTHOR)) === "REASON_SCOPE_FORBIDDEN")
     check("a CITY admin cannot author reasons at all",
       await code(create({ label: "ZZ_SMOKE_MR_C3", countryId: countryA.id }, cityAdmin, CITY)) === "REASON_SCOPE_FORBIDDEN")
     check("\"OTHER\" cannot be created as a reason",
@@ -367,7 +370,7 @@ async function main() {
     check("a country VERSION keeps the platform reason's code", version.code === rHideOnly.code && version.countryId === countryA.id)
     check("…once per country", await code(create({ code: rHideOnly.code, label: "again", countryId: countryA.id }, countryAdminA, COUNTRY))
       === "DUPLICATE_REASON")
-    const renamed = await updateActionReason(g2.id, { label: "A completely new name" }, globalAdmin, GLOBAL)
+    const renamed = await updateActionReason(g2.id, { label: "A completely new name" }, globalAdmin, GLOBAL, AUTHOR)
     check("renaming a reason never changes its code", renamed.code === "ZZ_SMOKE_MR_IMAGE_DOES_NOT_REPRESENT" && renamed.label === "A completely new name")
 
     as(countryAdminA, COUNTRY, [READ, MOD, AdminPermissions.SETTINGS_ACTION_REASONS_WRITE])
@@ -404,6 +407,64 @@ async function main() {
 
     const ov = (await call("GET", `${M}/overview`)).json.data as Json
     check("the overview answers in scope", typeof ov?.listings?.current === "number" && ov.canActDishWide === true, ov)
+
+    // ════════════════════════════════════════════════════════════════════
+    console.log("\n  ── 5. review vs enforcement, and reason domains (RBAC Meals)\n")
+
+    const listingBefore = await prisma.meal.findUniqueOrThrow({ where: { id: mA.id }, select: { adminStatus: true, adminHiddenAt: true } })
+    const dishBefore    = await prisma.menuItem.findUniqueOrThrow({ where: { id: dishA.id }, select: { adminStatus: true } })
+    as(countryAdminA, COUNTRY, [READ, MOD])
+    const modSuspend   = await call("POST", L(mA.id, "suspend"), { reasonCode: rAll.code, expectedStatus: listingBefore.adminStatus })
+    const modReinstate = await call("POST", L(mA.id, "reinstate"), {})
+    const modBan       = await call("POST", `${M}/${dishA.id}/status`, { status: "BANNED", reasonCode: rAll.code, expectedStatus: dishBefore.adminStatus })
+    const modSusDish   = await call("POST", `${M}/${dishA.id}/status`, { status: "SUSPENDED", reasonCode: rAll.code, expectedStatus: dishBefore.adminStatus })
+    check("a moderate-only admin is REFUSED every sanction by direct API: listing suspend/reinstate, dish ban/suspend",
+      [modSuspend, modReinstate, modBan, modSusDish].every((r) => r.status === 403 && r.json.code === "FORBIDDEN"),
+      [modSuspend, modReinstate, modBan, modSusDish].map((r) => [r.status, r.json.code]))
+    const listingAfter = await prisma.meal.findUniqueOrThrow({ where: { id: mA.id }, select: { adminStatus: true, adminHiddenAt: true } })
+    const dishAfter    = await prisma.menuItem.findUniqueOrThrow({ where: { id: dishA.id }, select: { adminStatus: true } })
+    check("…and nothing changed", JSON.stringify(listingAfter) === JSON.stringify(listingBefore) && dishAfter.adminStatus === dishBefore.adminStatus)
+    check("…nor may it read the reasons offered for a ban",
+      (await call("GET", `${M}/reasons?action=${A.DISH_BAN}&countryId=${countryA.id}`)).status === 403)
+    check("…while review stays open to it: reasons for hiding, and hide itself reaches the service",
+      (await call("GET", `${M}/reasons?action=${A.LISTING_HIDE}&countryId=${countryA.id}`)).status === 200
+      && (await call("POST", L(mA.id, "hide"), { reasonCode: rHideOnly.code })).status !== 403)
+
+    as(countryAdminA, COUNTRY, [READ, ENF])
+    check("an enforce-only admin may NOT hide (review) — and may read the reasons for a ban",
+      (await call("POST", L(mA.id, "unhide"), {})).status === 403
+      && (await call("GET", `${M}/reasons?action=${A.DISH_BAN}&countryId=${countryA.id}`)).status === 200)
+    as(countryAdminA, COUNTRY, [READ])
+    check("read access alone confers no review or enforcement",
+      [await call("POST", L(mA.id, "hide"), { reasonCode: rHideOnly.code }), await call("POST", L(mA.id, "suspend"), { reasonCode: rAll.code })]
+        .every((r) => r.status === 403))
+
+    const MOD_AUTHOR = [MOD, AdminPermissions.SETTINGS_ACTION_REASONS_WRITE]
+    check("a review-only author cannot write a reason for a BAN",
+      await code(create({ label: "ZZ_SMOKE_MR_D1", appliesTo: [A.DISH_BAN] }, globalAdmin, GLOBAL, MOD_AUTHOR)) === "REASON_ACTION_FORBIDDEN")
+    check("a meals author cannot write a reason for customer suspension",
+      await code(create({ label: "ZZ_SMOKE_MR_D2", appliesTo: ["customer.suspended"] }, globalAdmin, GLOBAL)) === "REASON_ACTION_FORBIDDEN")
+    check("an unknown action name is refused, not stored",
+      await code(create({ label: "ZZ_SMOKE_MR_D3", appliesTo: ["meal.vapourised"] }, globalAdmin, GLOBAL)) === "UNKNOWN_REASON_ACTION")
+    check("…and none of those was written",
+      (await prisma.adminActionReason.count({ where: { code: { in: ["ZZ_SMOKE_MR_D1", "ZZ_SMOKE_MR_D2", "ZZ_SMOKE_MR_D3"] } } })) === 0)
+    const shared = await mkReason("ZZ_SMOKE_MR_SHARED", [A.LISTING_HIDE, "customer.suspended"])
+    check("a reason shared with customer suspension cannot be edited by a meals-only author, and is left untouched",
+      await code(updateActionReason(shared.id, { label: "Reworded" }, globalAdmin, GLOBAL, AUTHOR)) === "REASON_ACTION_FORBIDDEN"
+      && (await prisma.adminActionReason.findUniqueOrThrow({ where: { id: shared.id } })).label === shared.label)
+    check("…nor can a meals author widen a meal reason to customer suspension",
+      await code(updateActionReason(g2.id, { appliesTo: [A.LISTING_HIDE, "customer.suspended"] }, globalAdmin, GLOBAL, AUTHOR)) === "REASON_ACTION_FORBIDDEN")
+    check("a meals author holding enforce writes a ban reason",
+      (await create({ label: "ZZ_SMOKE_MR_D4", appliesTo: [A.DISH_BAN] }, globalAdmin, GLOBAL)).code === "ZZ_SMOKE_MR_D4")
+
+    as(countryAdminA, COUNTRY, [READ, MOD, AdminPermissions.SETTINGS_ACTION_REASONS_WRITE])
+    const modLib = (await call("GET", `${M}/reasons/library?pageSize=50`)).json.data as Json
+    check("the library offers a review-only author the review actions only",
+      JSON.stringify([...(modLib.authorableActions as string[])].sort()) === JSON.stringify([A.DISH_SEND_BACK, A.GROUP_SEND_BACK, A.LISTING_HIDE].sort()),
+      modLib.authorableActions)
+    check("…and marks a reason it does not fully govern as not manageable",
+      (modLib.reasons as Json[]).find((r) => r.id === shared.id)?.canManage === false)
+    as(countryAdminA, COUNTRY)
   } finally {
     server.close()
     await sweep()

@@ -7,6 +7,7 @@ import { hasOpenComplianceIssuesForCountries } from "../services/admin.vendor.co
 import { hasOpenAppealIssuesForCountries } from "../services/admin.vendor.appeal.service"
 import { hasFlaggedProfilesForCountries } from "../services/admin.vendorProfile.service"
 import { hasFlaggedMealsForCountries } from "@/modules/meals"
+import { resolveAdminScope, type PermissionSubject } from "@/lib/permissions/effective"
 
 /**
  * GET /api/admin/v1/auth/session
@@ -22,7 +23,8 @@ import { hasFlaggedMealsForCountries } from "@/modules/meals"
 export const getAdminSession: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser, adminPermissions, adminScope } = req as unknown as AdminRequest
-    const session = buildAdminSession(adminUser, adminPermissions, adminScope)
+    const { valid, invalidReason } = resolveAdminScope(adminUser as unknown as PermissionSubject)
+    const session = buildAdminSession(adminUser, adminPermissions, adminScope, { valid, invalidReason })
 
     if (!adminScope.isGlobal && adminScope.countryIds.length > 0) {
       const [hasCompliance, hasAppeals, hasProfiles, hasMeals] = await Promise.all([

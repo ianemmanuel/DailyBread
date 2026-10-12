@@ -55,7 +55,8 @@ export default async function UserDetailPage({ params }: Props) {
   const canInvite     = session.permissions.includes(AdminPermissions.ADMIN_USERS_INVITATIONS_SEND)
   const canEditPerms  = session.permissions.includes(AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE)
   const canEditRole   = session.permissions.includes(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN)
-  const canEditScope  = session.permissions.includes(AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE)
+  // Scope is assigned with the role (backend: PATCH /users/:id/scopes is gated on roles:assign).
+  const canEditScope  = session.permissions.includes(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN)
   const canSuspend    = session.permissions.includes(AdminPermissions.ADMIN_USERS_ACCOUNTS_SUSPEND)
   const canReinstate  = session.permissions.includes(AdminPermissions.ADMIN_USERS_ACCOUNTS_REINSTATE)
   const canDeactivate = session.permissions.includes(AdminPermissions.ADMIN_USERS_ACCOUNTS_DEACTIVATE)
