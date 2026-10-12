@@ -3,6 +3,7 @@ import type { AdminScopeContext } from "@repo/types/backend"
 import { OTHER_REASON_CODE } from "@repo/types/enums"
 import { ApiError } from "@/errors/ApiError"
 import { assertReasonReach, reasonCodeFromLabel, firstFreeReasonCode } from "../lib/reasons/reason-choice"
+import { assertCanConfigureReasonActions } from "../lib/reasons/reason-actions"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
 
@@ -48,7 +49,11 @@ export async function createActionReason(
   },
   actorId: string,
   scope  : AdminScopeContext,
+  /** The actor's EFFECTIVE permissions: an author governs every action the reason applies to. */
+  permissions: readonly string[],
 ) {
+  const appliesTo = parseAppliesTo(input.appliesTo)
+  assertCanConfigureReasonActions(permissions, appliesTo)
   const supplied = input.code?.trim() || null
   if (supplied && supplied.toUpperCase() === OTHER_REASON_CODE) {
     throw new ApiError(400, `"${OTHER_REASON_CODE}" is reserved for the exception path`, "RESERVED_REASON_CODE")
@@ -89,7 +94,7 @@ export async function createActionReason(
       code,
       label      : input.label,
       description: input.description ?? null,
-      appliesTo  : input.appliesTo,
+      appliesTo,
       countryId  : input.countryId ?? null,
     },
   })
@@ -106,22 +111,36 @@ export async function createActionReason(
   return reason
 }
 
+/** `appliesTo`: a non-empty list of distinct action names (validated against the registry by the caller's check). */
+function parseAppliesTo(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.some((a) => typeof a !== "string" || !a.trim())) {
+    throw new ApiError(400, "appliesTo must be a non-empty array of action names", "INVALID_APPLIES_TO")
+  }
+  return [...new Set(raw as string[])]
+}
+
 export async function updateActionReason(
   id: string,
   input: { label?: string; description?: string; appliesTo?: string[]; isActive?: boolean },
   actorId: string,
   scope  : AdminScopeContext,
+  /** The actor's EFFECTIVE permissions — see createActionReason. */
+  permissions: readonly string[],
 ) {
+  const appliesTo = input.appliesTo != null ? parseAppliesTo(input.appliesTo) : null
   const existing = await prisma.adminActionReason.findUnique({ where: { id } })
   if (!existing) throw new ApiError(404, "Reason not found", "NOT_FOUND")
   assertReasonReach(scope, existing.countryId)
+  // Every action the reason serves now AND will serve: editing the words of a
+  // reason shared with customer suspension needs that authority too.
+  assertCanConfigureReasonActions(permissions, [...new Set([...existing.appliesTo, ...(appliesTo ?? [])])])
 
   const updated = await prisma.adminActionReason.update({
     where: { id },
     data : {
       ...(input.label != null ? { label: input.label } : {}),
       ...(input.description != null ? { description: input.description } : {}),
-      ...(input.appliesTo != null ? { appliesTo: input.appliesTo } : {}),
+      ...(appliesTo != null ? { appliesTo } : {}),
       ...(input.isActive != null ? { isActive: input.isActive } : {}),
     },
   })

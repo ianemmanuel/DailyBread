@@ -54,3 +54,6 @@ export function requireIdentityAccess(req: Request, _res: Response, next: NextFu
     "IDENTITY_ROLE_REQUIRED",
   ))
 }
+
+/** Tag for the route-manifest test: routes behind this guard also need an identity or super role. */
+Object.assign(requireIdentityAccess, { authorizationRule: "identity-role" })

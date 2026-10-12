@@ -56,8 +56,10 @@ function SectionTitle({ children, hint }: { children: React.ReactNode; hint?: Re
 export default async function MealListingDetailPage({ params }: Props) {
   const { mealId } = await params
   const session = await getAdminSession()
-  if (!session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)) redirect("/vendors")
+  // /overview, not a section this admin may also lack (every signed-in admin reaches it).
+  if (!session.permissions.includes(AdminPermissions.VENDORS_MEALS_READ)) redirect("/overview")
   const canModerate = session.permissions.includes(AdminPermissions.VENDORS_MEALS_MODERATE)
+  const canEnforce  = session.permissions.includes(AdminPermissions.VENDORS_MEALS_ENFORCE)
 
   let listing: AdminListingDetail
   try {
@@ -272,8 +274,10 @@ export default async function MealListingDetailPage({ params }: Props) {
             </dl>
 
             <div className="border-t border-border/70 pt-4">
-              {canModerate ? (
+              {canModerate || canEnforce ? (
                 <ListingControls
+                  canModerate={canModerate}
+                  canEnforce={canEnforce}
                   mealId={listing.id}
                   countryId={listing.country.id}
                   canEscalate={listing.escalation.canEscalate}

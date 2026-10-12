@@ -34,6 +34,9 @@ type Props = (
   | { mode: "override"; base: MealReasonLibraryRow; countryId: string; countryName: string }
   | { mode: "edit"; reason: MealReasonLibraryRow }
 ) & {
+  /** The meal actions this admin may write reasons for — from the server
+   *  (authorableActions). Only these are offered; the backend refuses the rest. */
+  authorableActions: readonly MealReasonAction[]
   /** Controlled from outside (e.g. a row's menu); otherwise renders its own trigger. */
   open?        : boolean
   onOpenChange?: (open: boolean) => void
@@ -189,7 +192,10 @@ export function ReasonForm(props: Props) {
 
             <fieldset className="space-y-3">
               <legend className="text-sm font-medium text-foreground">Can justify</legend>
-              {ACTION_GROUPS.map((g) => (
+              {ACTION_GROUPS
+                .map((g) => ({ ...g, actions: g.actions.filter((a) => props.authorableActions.includes(a.key)) }))
+                .filter((g) => g.actions.length > 0)
+                .map((g) => (
                 <div key={g.title} className="space-y-1.5">
                   <p className="text-xs text-muted-foreground">
                     <span className="font-medium text-foreground">{g.title}</span> · {g.hint}

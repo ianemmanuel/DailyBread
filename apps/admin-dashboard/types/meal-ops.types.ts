@@ -61,6 +61,9 @@ export interface MealReasonLibrary {
   /** Set for a COUNTRY admin who may add their own country's reasons and
    *  country versions of platform reasons. */
   canCreateCountry: { id: string; name: string } | null
+  /** The meal actions this admin may write reasons for (server-computed from
+   *  their effective permissions); the form offers exactly these. */
+  authorableActions: MealReasonAction[]
 }
 
 export interface MealReasonDetail extends MealReasonLibraryRow {
@@ -68,4 +71,5 @@ export interface MealReasonDetail extends MealReasonLibraryRow {
   /** For a country version: the platform reason it replaces. */
   platform : { id: string; label: string; vendorMessage: string | null } | null
   canCreateCountry: { id: string; name: string } | null
+  authorableActions: MealReasonAction[]
 }

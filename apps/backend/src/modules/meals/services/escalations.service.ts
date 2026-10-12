@@ -5,6 +5,7 @@ import { ApiError } from "@/middleware/error"
 import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
 import { loadListingInScope } from "./listings.service"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 /*
  * Meal escalations — the smallest path that makes "CITY admins may not use
@@ -27,7 +28,7 @@ const MAX_NOTE = 1000
 function eligibleRecipientsWhere(countryId: string): Prisma.AdminUserWhereInput {
   return {
     status     : "active",
-    permissions: { some: { permission: { key: AdminPermissions.VENDORS_MEALS_MODERATE, isActive: true } } },
+    ...effectivelyHoldsWhere(AdminPermissions.VENDORS_MEALS_MODERATE),
     // One scope per admin (single-scope.ts), so "some" is "the".
     scopes     : { some: { scopeType: "COUNTRY", countryId } },
   }

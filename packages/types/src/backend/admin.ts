@@ -163,8 +163,11 @@ export interface AuthenticatedAdminRequest extends Request {
 // After the full chain runs — what controllers receive
 export interface AdminRequest extends AuthenticatedAdminRequest {
   adminUser        : AdminUserWithRole
+  /** EFFECTIVE keys (admin/lib/permissions/effective.ts) — empty unless the scope is valid. */
   adminPermissions : AdminPermissionKey[]
   adminScope       : AdminScopeContext
+  /** False for a missing, malformed or role-incompatible scope (adminScope is then NO_SCOPE). */
+  adminScopeValid  : boolean
 }
 
 

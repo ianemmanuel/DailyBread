@@ -4,6 +4,7 @@ import { logger } from "@/lib/pino/logger"
 import { sendEmail } from "@/lib/email/mailer"
 import { createAdminNotification } from "./admin.notification.service"
 import { buildOutletComplianceEmail, type OutletComplianceKind } from "@/lib/email/templates/outlet-compliance-notice"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 const log = logger.child({ module: "outlet-notification-service" })
 
@@ -58,8 +59,7 @@ export async function notifyAdminsOutletAutoSuspended(t: OutletComplianceTarget)
   try {
     const recipients = await prisma.adminUser.findMany({
       where: {
-        status     : AdminUserStatus.active,
-        permissions: { some: { permission: { key: AdminPermissions.VENDORS_OUTLETS_MODERATE, isActive: true } } },
+        ...effectivelyHoldsWhere(AdminPermissions.VENDORS_OUTLETS_MODERATE),
         scopes     : {
           some: {
             OR: [

@@ -343,7 +343,7 @@ async function main() {
       const r = await call(method, path, { name: "Admin edit", outletId: o1.id })
       check(`${method} ${path.replace(menu.id, ":id")} is not a route for the ERP`, r.status === 404, [r.status, r.json.code])
     }
-    asAdmin(admin.id, [AdminPermissions.VENDORS_MEALS_READ, AdminPermissions.VENDORS_MEALS_MODERATE], { isGlobal: true, countryIds: [], cityIds: [], tier: "GLOBAL" })
+    asAdmin(admin.id, [AdminPermissions.VENDORS_MEALS_READ, AdminPermissions.VENDORS_MEALS_MODERATE, AdminPermissions.VENDORS_MEALS_ENFORCE], { isGlobal: true, countryIds: [], cityIds: [], tier: "GLOBAL" })
     const modWrite = await call("PUT", `${AM}/${menu.id}`, { name: "Admin edit" })
     check("…not even with moderate permission and global scope", modWrite.status === 404, modWrite.status)
     check("…and the menu is unchanged after every attempt",

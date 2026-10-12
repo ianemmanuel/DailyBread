@@ -135,7 +135,13 @@ export const AdminPermissions = {
   //* Vendor-authored menu content. Separate from outlets because a dish is
   //* vendor-owned catalog, not a location — see MenuItem vs Meal.
   VENDORS_MEALS_READ      : "vendors:meals:read",
+  //* REVIEW vs ENFORCEMENT (RBAC Meals): moderate is the content verdict —
+  //* approve / send back a dish or option group, hide / unhide a listing,
+  //* escalate and resolve. enforce is the marketplace sanction — suspend,
+  //* reinstate, ban and unban a dish, and suspend / reinstate a listing — so a
+  //* reviewer can be trusted with verdicts without the power to ban.
   VENDORS_MEALS_MODERATE  : "vendors:meals:moderate",
+  VENDORS_MEALS_ENFORCE   : "vendors:meals:enforce",
   VENDORS_OUTLETS_READ    : "vendors:outlets:read",
   VENDORS_OUTLETS_MODERATE: "vendors:outlets:moderate",
   // Schedule and conduct physical premises inspections of an outlet (the

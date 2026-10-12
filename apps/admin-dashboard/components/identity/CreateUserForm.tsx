@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RoleCombobox } from "@/components/identity/RoleCombobox"
-import { PermissionPicker } from "@/components/identity/PermissionPicker"
 import { ScopeSelector } from "@/components/identity/ScopeSelector"
 import {
   createAdminUserSchema,
@@ -45,7 +44,6 @@ export function CreateUserForm({ roles, session }: Props) {
       email         : "",
       employeeId    : "",
       roleId        : "",
-      permissionKeys: [] as string[],
       scopes        : [] as CreateAdminUserFormValues["scopes"],
     } as CreateAdminUserFormValues,
     validators: {
@@ -168,7 +166,8 @@ export function CreateUserForm({ roles, session }: Props) {
       <div className="admin-card space-y-4">
         <h2 className="text-sm font-semibold text-foreground">Role</h2>
         <p className="text-xs text-muted-foreground">
-          The role defines the permission pool ceiling. Permissions can be adjusted below.
+          The role defines the permission pool ceiling. A new administrator starts with no
+          permissions — a senior administrator of their role grants them after creation.
         </p>
         <form.Field name="roleId" validators={{ onBlur: createAdminUserSchema.shape.roleId }}>
           {(field) => (
@@ -177,7 +176,7 @@ export function CreateUserForm({ roles, session }: Props) {
               <RoleCombobox
                 roles={roles}
                 value={field.state.value}
-                onChange={(v) => { field.handleChange(v); form.setFieldValue("permissionKeys", []) }}
+                onChange={(v) => field.handleChange(v)}
               />
               {field.state.value && (
                 <p className="text-xs text-muted-foreground">
@@ -212,31 +211,6 @@ export function CreateUserForm({ roles, session }: Props) {
           )}
         </form.Field>
       </div>
-
-      {/* Permissions  */}
-      <form.Subscribe selector={(s) => s.values.roleId}>
-        {(roleId) => roleId ? (
-          <div className="admin-card space-y-4">
-            <h2 className="text-sm font-semibold text-foreground">Permissions</h2>
-            <p className="text-xs text-muted-foreground">
-              Select from this role's permission pool. Can be updated later.
-            </p>
-            <form.Subscribe selector={(s) => s.values.permissionKeys}>
-              {(permKeys) => (
-                <form.Field name="permissionKeys">
-                  {(field) => (
-                    <PermissionPicker
-                      roleId={roleId}
-                      selectedKeys={permKeys}
-                      onChange={(keys) => field.handleChange(keys)}
-                    />
-                  )}
-                </form.Field>
-              )}
-            </form.Subscribe>
-          </div>
-        ) : null}
-      </form.Subscribe>
 
       {/* Submit */}
       <form.Subscribe selector={(s) => ({ isSubmitting: s.isSubmitting, canSubmit: s.canSubmit })}>

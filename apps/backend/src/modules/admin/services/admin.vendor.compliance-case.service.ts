@@ -4,6 +4,7 @@ import { AdminPermissions, type AdminPermissionKey } from "@repo/types/enums"
 import { ApiError } from "@/errors/ApiError"
 import { auditService } from "@/services/audit"
 import { getVendorComplianceIssues, type ComplianceIssueKind } from "./admin.vendor.compliance.service"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 /*
  * Claim/reassign/escalate workflow for compliance cases — deliberately
@@ -197,7 +198,7 @@ async function assertEscalationReceiverExists(countryId: string): Promise<void> 
     where: {
       status            : AdminUserStatus.active,
       reviewAvailability: AdminReviewAvailability.AVAILABLE,
-      permissions       : { some: { permission: { key: AdminPermissions.VENDORS_COMPLIANCE_RECEIVE_ESCALATION, isActive: true } } },
+      ...effectivelyHoldsWhere(AdminPermissions.VENDORS_COMPLIANCE_RECEIVE_ESCALATION),
       scopes: {
         some: {
           OR: [
@@ -315,8 +316,9 @@ async function assertEligibleComplianceTarget(
   if (target.status !== AdminUserStatus.active) throw new ApiError(400, "Target admin is not an active admin", "TARGET_INACTIVE")
   if (target.reviewAvailability !== AdminReviewAvailability.AVAILABLE) throw new ApiError(400, "Target admin is unavailable", "TARGET_UNAVAILABLE")
 
-  const hasCapability = await prisma.adminUserPermission.findFirst({
-    where : { adminUserId: targetAdminId, permission: { key: requireCapability, isActive: true } },
+  const hasCapability = await prisma.adminUser.findFirst({
+    // EFFECTIVE capability (grant ∩ current pool ∩ active ∩ valid scope), not a raw grant row
+    where : { AND: [{ id: targetAdminId }, effectivelyHoldsWhere(requireCapability)] },
     select: { id: true },
   })
   if (!hasCapability) throw new ApiError(400, "Target admin does not have the required capability", "TARGET_NOT_CAPABLE")
@@ -351,7 +353,7 @@ export async function listEligibleComplianceTargets(
     where: {
       status            : AdminUserStatus.active,
       reviewAvailability: AdminReviewAvailability.AVAILABLE,
-      permissions       : { some: { permission: { key: capability, isActive: true } } },
+      ...effectivelyHoldsWhere(capability),
       scopes: {
         some: {
           OR: [

@@ -8,6 +8,7 @@ import { SYSTEM_USER_ID } from "@/constants/system"
 import { DOCUMENT_EXPIRY_CRON_INTERVAL_HOURS, COMPLIANCE_CASE_STALE_DAYS, COMPLIANCE_CASE_STALE_NOTIFY_HOURS } from "@/constants/vendor"
 import { detectComplianceCandidates } from "@/modules/admin/services/admin.vendor.compliance.service"
 import { createAdminNotification } from "@/modules/admin/services/admin.notification.service"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 const cronLog = logger.child({ module: "compliance-case-sync-cron" })
 
@@ -126,8 +127,7 @@ export function startComplianceCaseSyncCron(): ReturnType<typeof cron.schedule> 
             if (kase.status === "OPEN" && !kase.staleNotifiedAt && kase.createdAt < staleNotifyThreshold) {
               const recipients = await prisma.adminUser.findMany({
                 where : {
-                  status     : AdminUserStatus.active,
-                  permissions: { some: { permission: { key: AdminPermissions.VENDORS_COMPLIANCE_RECEIVE_STALE_ALERT, isActive: true } } },
+                  ...effectivelyHoldsWhere(AdminPermissions.VENDORS_COMPLIANCE_RECEIVE_STALE_ALERT),
                   // Deliberately COUNTRY-scoped only, not GLOBAL — same
                   // reasoning as the sidebar compliance dot: a global admin
                   // always has stale cases somewhere, so the nudge wouldn't

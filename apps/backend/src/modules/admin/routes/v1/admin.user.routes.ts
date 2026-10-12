@@ -35,7 +35,18 @@ import {
 
 const router: Router = Router()
 
-// Apply identity guard to ALL routes in this router.
+// ── Permission delegation — the ONE route outside the identity guard ─────────
+// Registered BEFORE router.use(requireIdentityAccess), so that guard does not
+// run for it. A designated superior of an operational role (e.g. a COUNTRY
+// vendor_ops lead holding admin_users:permissions:manage, now in that role's
+// pool as a ceiling-only entry) grants their own permissions to subordinates
+// of their role. Authority comes from the permission and from
+// assertCanDelegatePermissions in the service — same role or pool coverage,
+// inside the actor's scope, only keys the actor effectively holds — never
+// from a role name.
+router.put("/:id/permissions", requirePermission(AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE), handleUpdatePermissions)
+
+// Apply identity guard to every OTHER route in this router.
 // This runs after adminAuthChain (already applied at parent router level).
 router.use(requireIdentityAccess)
 
@@ -54,9 +65,11 @@ router.post("/",   requirePermission(AdminPermissions.ADMIN_USERS_ACCOUNTS_CREAT
 router.post("/:id/invite", requirePermission(AdminPermissions.ADMIN_USERS_INVITATIONS_SEND), handleSendInvitation)
 
 // ── Assignments ───────────────────────────────────────────────────────────────
-router.put("/:id/permissions",  requirePermission(AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE), handleUpdatePermissions)
-router.patch("/:id/role",       requirePermission(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN),       handleUpdateRole)
-router.patch("/:id/scopes",     requirePermission(AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE), handleUpdateScopes)
+// (PUT /:id/permissions is registered above the identity guard.)
+router.patch("/:id/role",      requirePermission(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN),       handleUpdateRole)
+// Scope is assigned with the role (identity provisioning), so it is gated on
+// roles:assign — permissions:manage is the superior's grant capability.
+router.patch("/:id/scopes",     requirePermission(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN),       handleUpdateScopes)
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 router.post("/:id/suspend",    requirePermission(AdminPermissions.ADMIN_USERS_ACCOUNTS_SUSPEND),    handleSuspendAdminUser)

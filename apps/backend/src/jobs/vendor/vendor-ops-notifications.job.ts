@@ -12,6 +12,7 @@ import {
   APPEAL_STALE_ESCALATE_DAYS,
   PROFILE_STALE_NOTIFY_HOURS,
 } from "@/constants/vendor"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 const cronLog = logger.child({ module: "vendor-ops-notifications-cron" })
 
@@ -79,8 +80,7 @@ export function startVendorOpsNotificationsCron(): ReturnType<typeof cron.schedu
           if (!appeal.staleNotifiedAt && appeal.createdAt < appealNotifyThreshold) {
             const recipients = await prisma.adminUser.findMany({
               where : {
-                status     : AdminUserStatus.active,
-                permissions: { some: { permission: { key: AdminPermissions.VENDORS_APPEALS_RECEIVE_STALE_ALERT, isActive: true } } },
+                ...effectivelyHoldsWhere(AdminPermissions.VENDORS_APPEALS_RECEIVE_STALE_ALERT),
                 scopes     : { some: { scopeType: AdminScopeType.COUNTRY, countryId } },
               },
               select: { id: true },
@@ -134,8 +134,7 @@ export function startVendorOpsNotificationsCron(): ReturnType<typeof cron.schedu
         if (staleProfiles.length > 0) {
           const recipients = await prisma.adminUser.findMany({
             where : {
-              status     : AdminUserStatus.active,
-              permissions: { some: { permission: { key: AdminPermissions.VENDORS_PROFILES_MODERATE, isActive: true } } },
+              ...effectivelyHoldsWhere(AdminPermissions.VENDORS_PROFILES_MODERATE),
               scopes     : { some: { scopeType: AdminScopeType.COUNTRY, countryId } },
             },
             select: { id: true },

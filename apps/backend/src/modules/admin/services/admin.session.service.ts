@@ -4,6 +4,7 @@ import type {
   AdminSessionData,
 } from "@repo/types/backend"
 import type { AdminPermissionKey, AdminScopeType  } from "@repo/types/enums"
+import type { ScopeInvalidReason } from "@/lib/permissions/effective"
 
 /*
  * Builds the session payload the frontend uses for page/feature gating.
@@ -15,6 +16,7 @@ export function buildAdminSession(
   adminUser       : AdminUserWithRole,
   adminPermissions: AdminPermissionKey[],
   adminScope      : AdminScopeContext,
+  scopeValidity   : { valid: boolean; invalidReason: ScopeInvalidReason | null } = { valid: true, invalidReason: null },
 ): AdminSessionData {
   return {
     id        : adminUser.id,
@@ -25,8 +27,11 @@ export function buildAdminSession(
     role      : adminUser.role
       ? { name: adminUser.role.name, displayName: adminUser.role.displayName }
       : null,
+    // EFFECTIVE permissions — the same list every route gate checks.
     permissions: adminPermissions,
     scope: {
+      valid        : scopeValidity.valid,
+      invalidReason: scopeValidity.invalidReason,
       isGlobal  : adminScope.isGlobal,
       countryIds: adminScope.countryIds,
       cityIds   : adminScope.cityIds,

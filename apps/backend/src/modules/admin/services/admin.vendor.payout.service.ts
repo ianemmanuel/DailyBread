@@ -6,6 +6,7 @@ import { logger } from "@/lib/pino/logger"
 import { auditService } from "@/services/audit"
 import { createAdminNotification } from "./admin.notification.service"
 import { assertPayoutReviewClaimedByActor } from "./admin.payoutReview.service"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 const serviceLog = logger.child({ module: "admin-vendor-payout-service" })
 
@@ -401,9 +402,7 @@ export async function flagPayoutAccountForReview(
   const recipients = await prisma.adminUser.findMany({
     where : {
       status     : AdminUserStatus.active,
-      permissions: {
-        some: { permission: { key: AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION, isActive: true } },
-      },
+      ...effectivelyHoldsWhere(AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_RECEIVE_ESCALATION),
       scopes     : { some: { scopeType: AdminScopeType.COUNTRY, countryId: vendor.countryId } },
       // The admin raising the concern doesn't need to be told about it.
       id         : { not: actorId },

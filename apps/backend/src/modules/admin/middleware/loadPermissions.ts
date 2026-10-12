@@ -1,30 +1,20 @@
 import { Request, Response, NextFunction } from "express"
 import type { AdminPermissionKey } from "@repo/types/enums"
 import type { AdminRequest } from "@repo/types/backend"
+import { effectivePermissionKeys, type PermissionSubject } from "@/lib/permissions/effective"
 
 /*
- * STEP 4 — Extract the flat permission key array from AdminUserPermission.
+ * Compute the admin's EFFECTIVE permission keys for this request — the one
+ * definition in lib/permissions/effective.ts: active grants inside the role's
+ * CURRENT pool, and none at all unless the account is active and its scope is
+ * valid. A grant left over from a pool that has since shrunk does nothing.
  *
- * Individual permission grants live in AdminUserPermission — not in the role.
- * The role defines what CAN be granted (the pool). AdminUserPermission holds
- * what IS granted to this specific user.
- *
- * loadAdminUser already loaded the user's permission grants in the same query
- * (via include). This middleware simply flattens them into a string array for
- * O(1) lookup by requirePermission.
- *
- * Only active permissions are included — isActive=false permissions are
- * deprecated and excluded even if a grant row exists.
- *
- * No additional database call.
-*/
+ * Runs after buildScopeContext. No additional database call: loadAdminUser
+ * already loaded the grants, the role pool and the scope rows.
+ */
 export function loadPermissions(req: Request, _res: Response, next: NextFunction) {
   const { adminUser } = req as AdminRequest
-
-  const permissions: AdminPermissionKey[] = (adminUser.permissions ?? [])
-    .filter((grant) => grant.permission?.isActive === true)
-    .map((grant) => grant.permission.key as AdminPermissionKey)
-
-  ;(req as Partial<AdminRequest>).adminPermissions = permissions
+  ;(req as Partial<AdminRequest>).adminPermissions =
+    effectivePermissionKeys(adminUser as unknown as PermissionSubject) as AdminPermissionKey[]
   next()
 }

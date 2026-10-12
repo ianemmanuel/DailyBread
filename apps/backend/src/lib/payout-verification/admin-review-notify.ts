@@ -1,14 +1,15 @@
 import { prisma } from "@repo/db"
-import { AdminPermissions, AdminScopeType, AdminUserStatus } from "@repo/types/enums"
+import { AdminPermissions, AdminScopeType } from "@repo/types/enums"
 import { logger } from "@/lib/pino/logger"
+import { effectivelyHoldsWhere } from "@/lib/permissions/effective"
 
 const log = logger.child({ module: "payout-review-notify" })
 
 /*
  * Operational fan-out when a vendor's payout account lands in FAILED or
  * REQUIRES_REVIEW at creation time: an in-app AdminNotification to every
- * active admin who can act on it — holders of VENDORS_PAYOUT_ACCOUNTS_MANAGE
- * (by role pool OR individual grant) who are either GLOBAL-scoped or
+ * active admin who can act on it — EFFECTIVE holders of
+ * VENDORS_PAYOUT_ACCOUNTS_MANAGE (lib/permissions/effective.ts) who are either GLOBAL-scoped or
  * COUNTRY-scoped to the vendor's country (§15 — country issues go to that
  * country's team plus global finance/ops; never a blanket broadcast).
  *
@@ -33,11 +34,10 @@ export async function notifyAdminsPayoutAccountNeedsReview(params: {
   try {
     const recipients = await prisma.adminUser.findMany({
       where: {
-        status: AdminUserStatus.active,
-        OR: [
-          { permissions: { some: { permission: { key: AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_MANAGE, isActive: true } } } },
-          { role: { permissions: { some: { permission: { key: AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_MANAGE, isActive: true } } } } },
-        ],
+        // Holders who can ACT: an effective grant. Pool membership alone used
+        // to qualify ("by role pool OR individual grant"), which notified
+        // admins who had never been given the permission.
+        ...effectivelyHoldsWhere(AdminPermissions.VENDORS_PAYOUT_ACCOUNTS_MANAGE),
         scopes: {
           some: {
             OR: [

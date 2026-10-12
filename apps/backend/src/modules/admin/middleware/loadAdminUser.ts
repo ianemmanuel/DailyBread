@@ -27,7 +27,9 @@ export async function loadAdminUser(req: Request, _res: Response, next: NextFunc
   const adminUser = await prisma.adminUser.findUnique({
     where  : { externalAuthId: adminClerkUserId },
     include: {
-      role: true,
+      // The role and its CURRENT assignment pool: a grant outside it is not
+      // effective (loadPermissions → lib/permissions/effective.ts).
+      role: { include: { permissions: { select: { permission: { select: { key: true, isActive: true } } } } } },
       // Individual permission grants — what this user CAN DO
       permissions: {
         include: { permission: true },

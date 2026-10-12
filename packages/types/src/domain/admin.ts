@@ -222,6 +222,11 @@ export interface SessionScopeContext {
    *  re-deriving one from the raw rows. */
   tier?   : "GLOBAL" | "COUNTRY" | "CITY"
   scopes? : SessionScope[]
+  /** False when the assignment is missing, malformed or not allowed for the
+   *  role: the admin then has NO operational permissions until it is fixed —
+   *  a different state from a valid scope with no grants yet. */
+  valid?  : boolean
+  invalidReason?: "NO_ROLE" | "MALFORMED_SCOPE" | "SCOPE_NOT_ALLOWED_FOR_ROLE" | null
 }
 
 //* Full session shape

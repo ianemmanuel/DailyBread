@@ -55,6 +55,7 @@ export default async function ActionReasonsPage({ searchParams }: { searchParams
           {lib && (lib.canCreateGlobal || lib.canCreateCountry) && (
             <ReasonForm
               mode="create"
+              authorableActions={lib.authorableActions}
               countryId={lib.canCreateGlobal ? null : lib.canCreateCountry?.id ?? null}
               reachLabel={lib.canCreateGlobal
                 ? "Platform-wide — every country without its own version"
@@ -121,7 +122,7 @@ export default async function ActionReasonsPage({ searchParams }: { searchParams
                     )}
                   </TableCell>
                   <TableCell className="py-3 text-right">
-                    <ActionReasonRowMenu reason={r} />
+                    <ActionReasonRowMenu reason={r} authorableActions={lib.authorableActions} />
                   </TableCell>
                 </TableRow>
               ))}

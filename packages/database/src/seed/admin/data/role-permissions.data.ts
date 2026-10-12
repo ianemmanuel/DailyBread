@@ -87,6 +87,11 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "finance:tax:read",
     "finance:tax:manage",
     "orders:all:read",
+    // RBAC Phase 1.1 — ceiling-only, like every RECEIVE_ESCALATION: granted
+    // individually to a designated superior (a GLOBAL finance lead, a COUNTRY
+    // finance head), who may then grant finance admins in their scope the
+    // finance keys they themselves hold (assertCanDelegatePermissions).
+    "admin_users:permissions:manage",
   ],
 
   vendor_ops: [
@@ -136,6 +141,8 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "vendors:profiles:moderate",
     "vendors:meals:read",
     "vendors:meals:moderate",
+    // Ceiling-only: the marketplace sanction, granted separately from review.
+    "vendors:meals:enforce",
     "vendors:outlets:read",
     "vendors:outlets:moderate",
     "vendors:outlets:inspect",
@@ -161,6 +168,13 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "settings:zones:receive_alert",
     "settings:documents:read",
     "settings:vendor_types:read",
+    // RBAC Phase 1.1 — ceiling-only: granted individually to a designated
+    // vendor_ops lead, who may then grant vendor_ops admins in their scope the
+    // vendor_ops keys they themselves hold (assertCanDelegatePermissions).
+    "admin_users:permissions:manage",
+    // Ceiling-only: authoring the reasons for actions the author can configure
+    // (a meals lead writes meal reasons) — admin/lib/reasons/reason-actions.ts.
+    "settings:action_reasons:write",
   ],
 
   customer_care: [
@@ -171,6 +185,9 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "customers:accounts:reinstate",
     "orders:all:read",
     "vendors:accounts:read",
+    // Ceiling-only: look up dishes and listings for a complaint. Read only —
+    // no moderation or enforcement.
+    "vendors:meals:read",
   ],
 
   courier_ops: [

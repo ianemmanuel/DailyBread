@@ -210,7 +210,12 @@ export const PERMISSIONS = [
   {
     key        : "vendors:meals:moderate",
     module     : "vendors",
-    description: "Approve or send back a flagged meal, and suspend or ban one from the marketplace",
+    description: "Review meals: approve or send back a dish or option group, hide or unhide a listing, escalate and resolve",
+  },
+  {
+    key        : "vendors:meals:enforce",
+    module     : "vendors",
+    description: "Enforce on meals: suspend, reinstate, ban or unban a dish, and suspend or reinstate a listing",
   },
   {
     key        : "vendors:outlets:read",
