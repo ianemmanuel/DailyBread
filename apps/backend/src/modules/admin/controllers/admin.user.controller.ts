@@ -10,12 +10,16 @@ import {
   updateAdminUserScopes,
   suspendAdminUser,
   reinstateAdminUser,
+  reactivateAdminUser,
   deactivateAdminUser,
   setAdminUserAvailability,
   getAdminUser,
   listAdminUsers,
   getRolePermissionPool,
   listRoles,
+  actorScopeOf,
+  getPermissionOptions,
+  listDelegableAdmins,
 } from "../services/admin.user.service"
 import { parseAvailabilityInput } from "./admin.reviewerAvailability.controller"
 
@@ -36,19 +40,20 @@ function refuseFields(body: Record<string, unknown> | undefined, fields: string[
 
 export const handleListAdminUsers: RequestHandler = async (req, res, next) => {
   try {
-    const { adminUser, adminScope } = req as unknown as AdminRequest
+    const { adminScope, adminScopeValid } = req as unknown as AdminRequest
     const { status, roleId, search, countryId, page, pageSize } = req.query
+    const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined)
+    const int  = (v: unknown) => (typeof v === "string" ? parseInt(v, 10) : undefined)
     const result = await listAdminUsers(
       {
-        status   : status    as string | undefined,
-        roleId   : roleId    as string | undefined,
-        search   : search    as string | undefined,
-        countryId: countryId as string | undefined,
-        page     : page      ? parseInt(page     as string) : undefined,
-        pageSize : pageSize  ? parseInt(pageSize as string) : undefined,
+        status   : text(status),
+        roleId   : text(roleId),
+        search   : text(search),
+        countryId: text(countryId),
+        page     : int(page),
+        pageSize : int(pageSize),
       },
-      adminScope,
-      adminUser.role?.name,
+      actorScopeOf(adminScope, adminScopeValid),
     )
     return sendSuccess(res, result, "Admin users fetched")
   } catch (err) { next(err) }
@@ -56,9 +61,9 @@ export const handleListAdminUsers: RequestHandler = async (req, res, next) => {
 
 export const handleGetAdminUser: RequestHandler = async (req, res, next) => {
   try {
-    const { adminUser, adminScope } = req as unknown as AdminRequest
-    const { id }         = req.params as { id: string }
-    const user           = await getAdminUser(id, adminScope, adminUser.role?.name)
+    const { adminUser } = req as unknown as AdminRequest
+    const { id }        = req.params as { id: string }
+    const user          = await getAdminUser(id, adminUser.id)
     return sendSuccess(res, user, "Admin user fetched")
   } catch (err) { next(err) }
 }
@@ -100,14 +105,46 @@ export const handleSendInvitation: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err) }
 }
 
-export const handleUpdatePermissions: RequestHandler = async (req, res, next) => {
+/** Ordinary delegation (PUT /:id/permissions) or recovery (PUT /:id/permissions/recovery) —
+ *  the route decides the mode, never the body. */
+function permissionsHandler(mode: "delegation" | "recovery"): RequestHandler {
+  return async (req, res, next) => {
+    try {
+      const { adminUser } = req as unknown as AdminRequest
+      const { id }        = req.params as { id: string }
+      refuseFields(req.body, ["roleId", "scopes", "mode"])
+      const { permissionKeys } = req.body ?? {}
+      const result = await updateAdminUserPermissions({ adminUserId: id, permissionKeys }, adminUser.id, mode)
+      return sendSuccess(res, result, mode === "recovery" ? "Permissions recovered" : "Permissions updated")
+    } catch (err) { next(err) }
+  }
+}
+
+export const handleUpdatePermissions  = permissionsHandler("delegation")
+export const handleRecoverPermissions = permissionsHandler("recovery")
+
+export const handleGetPermissionOptions: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser } = req as unknown as AdminRequest
     const { id }        = req.params as { id: string }
-    refuseFields(req.body, ["roleId", "scopes"])
-    const { permissionKeys } = req.body ?? {}
-    const result = await updateAdminUserPermissions({ adminUserId: id, permissionKeys }, adminUser.id)
-    return sendSuccess(res, result, "Permissions updated")
+    return sendSuccess(res, await getPermissionOptions(id, adminUser.id), "Permission options fetched")
+  } catch (err) { next(err) }
+}
+
+export const handleListDelegableAdmins: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser } = req as unknown as AdminRequest
+    const { search, mode, page, pageSize } = req.query
+    const result = await listDelegableAdmins(
+      {
+        search  : typeof search === "string" ? search : undefined,
+        mode    : typeof mode === "string" ? mode : undefined,
+        page    : page     ? parseInt(page as string)     : undefined,
+        pageSize: pageSize ? parseInt(pageSize as string) : undefined,
+      },
+      adminUser.id,
+    )
+    return sendSuccess(res, result, "Delegable administrators fetched")
   } catch (err) { next(err) }
 }
 
@@ -154,6 +191,15 @@ export const handleReinstateAdminUser: RequestHandler = async (req, res, next) =
     const { id }        = req.params as { id: string }
     const result = await reinstateAdminUser(id, adminUser.id)
     return sendSuccess(res, result, "User reinstated")
+  } catch (err) { next(err) }
+}
+
+export const handleReactivateAdminUser: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser } = req as unknown as AdminRequest
+    const { id }        = req.params as { id: string }
+    const result = await reactivateAdminUser(id, adminUser.id)
+    return sendSuccess(res, result, "User reactivated")
   } catch (err) { next(err) }
 }
 

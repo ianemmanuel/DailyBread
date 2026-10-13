@@ -9,35 +9,42 @@ import { validateScopeForRole } from "../scope/scope-rules"
  * database by the caller (admin.user.service.ts), so the whole rule is
  * unit-testable without Prisma (principle 8).
  *
- * Two kinds of authority, deliberately different:
+ * The model, and the only things that decide:
+ *   ROLE   — the ceiling: which keys an admin MAY be given (its pool)
+ *   SCOPE  — where: GLOBAL ⊃ COUNTRY ⊃ CITY, containment is inclusive
+ *   GRANTS — what they actually hold (effective = grants ∩ current pool)
+ * There is NO administrator hierarchy beyond scope containment: being the same
+ * role or the same tier as the target never refuses an otherwise authorized
+ * action, and never authorizes one either.
  *
- *   PROVISIONING (identity administrators — holders of the admin_users key
- *   for the action). Creates and invites an employee, assigns their ROLE and
- *   SCOPE, and runs lifecycle actions — never grants permissions. The actor's
- *   scope bounds the target's, inclusively, for any OTHER role; a target of
- *   the actor's OWN role only from strictly above (assertCanManageTarget).
+ * Three kinds of authority:
  *
- *   PERMISSION DELEGATION (designated superiors — holders of
- *   admin_users:permissions:manage). Grants keys the actor effectively holds
- *   to an administrator whose ROLE the actor may manage, inside the actor's
- *   scope (inclusive: a COUNTRY superior manages COUNTRY and CITY admins of
- *   their country). Between same-tier peers only keys the actor holds move,
- *   in either direction, and the management key never moves sideways
- *   (assertCanDelegatePermissions).
+ *   PROVISIONING / LIFECYCLE (holders of the admin_users key for the action).
+ *   Create, invite, role, scope, suspend, reinstate, reactivate, deactivate,
+ *   availability. The actor is GLOBAL or COUNTRY, and the target — and any
+ *   scope assigned to it — sits inside the actor's scope
+ *   (assertCanManageTarget, assertProvisioningScope). Never yourself; never a
+ *   super_admin.
  *
- * "May manage the target's ROLE" is decided by POOLS, never by a role name:
- * the same role, or an actor whose current role pool contains the target
- * role's entire current pool. Today only super_admin's pool (every key)
- * covers another role's; a test pins that no other pool does.
+ *   ORDINARY DELEGATION (admin_users:permissions:manage). PERMISSION
+ *   OWNERSHIP: every key added or removed is one the actor effectively holds,
+ *   inside the target role's current pool, for a target of a role the actor
+ *   may manage (the same role, or a pool that covers the target role's) and
+ *   inside the actor's scope.
  *
- * Every permission an actor uses here is EFFECTIVE: granted, active, and
- * inside the actor's CURRENT role pool. A stale grant outside that pool is not
- * authority (the per-request runtime ceiling is a separate, later phase; these
- * checks do not lean on its absence).
+ *   RECOVERY / BOOTSTRAP (admin_users:permissions:recover). The exception to
+ *   ownership, for when nobody in a department can grant what it needs — its
+ *   first lead, or the only lead has gone: ANY key of the target role's
+ *   current pool may be added or removed, held or not. Independently gated,
+ *   and still bounded by scope, the target's pool and role/scope validity. It
+ *   never reaches a role whose pool can itself hold the recovery key (so
+ *   recovery cannot mint recovery-holders: identity and super admin stay
+ *   under ordinary delegation), never a super_admin and never yourself.
  *
- * super_admin remains the CLI-controlled exception it always was: never
- * assignable, never a target. That is a TARGET protection, by name, and it is
- * the only place a role name decides anything here.
+ * "May manage the target's ROLE" is decided by POOLS, never by a role name.
+ * Every permission an actor uses here is EFFECTIVE. super_admin remains the
+ * CLI-controlled exception: never assignable, never a target — a TARGET
+ * protection, by name, the only place a role name decides anything here.
  */
 
 export type ScopeTier = "GLOBAL" | "COUNTRY" | "CITY"
@@ -69,9 +76,16 @@ export interface TargetSubject {
   permissions: ReadonlySet<string>
 }
 
+/** Which authority a permission assignment is exercised under. */
+export type AssignmentMode = "delegation" | "recovery"
+
 const TIER_RANK: Record<ScopeTier, number> = { GLOBAL: 0, COUNTRY: 1, CITY: 2 }
 
-const MANAGE = AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE
+const MANAGE  = AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE
+const RECOVER = AdminPermissions.ADMIN_USERS_PERMISSIONS_RECOVER
+
+/** The key each assignment mode is gated on. */
+export const ASSIGNMENT_KEY: Record<AssignmentMode, string> = { delegation: MANAGE, recovery: RECOVER }
 
 export const NOT_ASSIGNABLE_ROLES: ReadonlySet<string> = new Set([AdminRoleNames.SUPER_ADMIN, "system"])
 
@@ -110,6 +124,18 @@ export function poolCovers(actorPool: ReadonlySet<string>, targetPool: ReadonlyS
   return true
 }
 
+/**
+ * THE geographic eligibility rule, shared by reads (list, detail, audit) and
+ * every mutation: may an actor at `actorScope` reach a target at
+ * `targetScope`? Inclusive containment. A target with no valid scope is
+ * reachable only from GLOBAL, so it can still be repaired.
+ */
+export function targetInScope(actorScope: ResolvedScope | null, targetScope: ResolvedScope | null): boolean {
+  if (!actorScope) return false
+  if (!targetScope) return actorScope.tier === "GLOBAL"
+  return scopeContains(actorScope, targetScope)
+}
+
 function forbid(message: string, code: string): never {
   throw new ApiError(403, message, code)
 }
@@ -141,8 +167,8 @@ export function assertAssignableRoleAndScope(roleName: string, scope: ResolvedSc
 
 /**
  * Provisioning: the actor may place a target at `targetScope` — any role, any
- * tier inside the actor's own scope (inclusive). Used for create, and for the
- * NEW scope on a re-scope.
+ * tier inside the actor's own scope (inclusive), never broader. Used for
+ * create, and for the NEW scope on a re-scope.
  */
 export function assertProvisioningScope(actorScope: ResolvedScope, targetScope: ResolvedScope): void {
   if (!scopeContains(actorScope, targetScope)) {
@@ -152,16 +178,13 @@ export function assertProvisioningScope(actorScope: ResolvedScope, targetScope: 
 
 /**
  * PROVISIONING / LIFECYCLE: may `actor` act on the EXISTING `target`? Shared
- * by role, scope, invite, suspend, reinstate, deactivate and availability.
+ * by role, scope, invite, suspend, reinstate, reactivate, deactivate and
+ * availability (each also needs its own admin_users key).
  *
  *   - never yourself, never a super_admin
- *   - a target of the actor's own role → strictly below only (no peers)
- *   - any other role → inside the actor's scope (inclusive)
- *
- * A target with no well-formed scope is reachable only by a GLOBAL actor, so
- * it can still be repaired. Lifecycle authority is deliberately NOT widened
- * to same-tier peers: who may suspend or deactivate whom is an open product
- * decision.
+ *   - the actor is GLOBAL or COUNTRY
+ *   - the target sits inside the actor's scope (inclusive) — whatever its
+ *     role, the actor's own role at the actor's own tier included
  */
 export function assertCanManageTarget(actor: ActorAuthority, target: TargetSubject): void {
   if (actor.id === target.id) {
@@ -173,50 +196,25 @@ export function assertCanManageTarget(actor: ActorAuthority, target: TargetSubje
   if (!actor.scope || actor.scope.tier === "CITY") {
     forbid("City-scoped administrators cannot manage other administrators", "PROVISIONER_SCOPE_REQUIRED")
   }
-  if (!target.scope) {
-    if (actor.scope.tier === "GLOBAL") return
-    forbid("This administrator is outside your scope", "SCOPE_FORBIDDEN")
-  }
-  const sameRole = target.roleName !== null && target.roleName === actor.roleName
-  if (sameRole) {
-    if (!scopeContains(actor.scope, target.scope, true)) {
-      forbid("You can only manage administrators of your own role who are scoped below you", "SUPERIOR_SCOPE_REQUIRED")
-    }
-    return
-  }
-  if (!scopeContains(actor.scope, target.scope)) {
+  if (!targetInScope(actor.scope, target.scope)) {
     forbid("This administrator is outside your scope", "SCOPE_FORBIDDEN")
   }
 }
 
 /**
- * PERMISSION DELEGATION — all of:
- *   1. the actor effectively holds admin_users:permissions:manage
+ * May `actor` assign permissions to `target` at all, under `mode`? Everything
+ * except the per-key rule (canMoveKey):
+ *   1. the actor effectively holds the mode's key (manage / recover)
  *   2. not themselves; never a super_admin target
- *   3. the actor is GLOBAL or COUNTRY (a CITY admin is never a superior)
- *   4. the actor may manage the target's ROLE: same role, or pool coverage
- *   5. the target's scope sits inside the actor's (inclusive)
+ *   3. the actor is GLOBAL or COUNTRY
+ *   4. delegation: the actor may manage the target's ROLE (same role, or pool
+ *      coverage). recovery: the target's role is assignable and its pool does
+ *      NOT contain the recovery key
+ *   5. the target's scope is valid and sits inside the actor's (inclusive)
  *   6. the target's role/scope pair is valid
- *   7. every requested key is in the target role's CURRENT pool
- *   8. every key being ADDED is one the actor effectively holds
- *   9. PEERS (same role, same tier): every key ADDED or REMOVED is one the
- *      actor holds, and the management key itself is never added or removed
- *
- * Below the actor, revoking needs no matching grant: taking a key away never
- * widens anyone, and a superior must be able to strip a subordinate's grant
- * they never held. Between peers it does, so a peer cannot undo a superior's
- * decision about a permission the peer was never trusted with.
  */
-export function assertCanDelegatePermissions(input: {
-  actor          : ActorAuthority
-  target         : TargetSubject
-  targetPool     : ReadonlySet<string>
-  requestedKeys  : readonly string[]
-  currentKeys    : readonly string[]
-}): { added: string[]; removed: string[] } {
-  const { actor, target, targetPool, requestedKeys, currentKeys } = input
-
-  assertActorHolds(actor, MANAGE)
+export function assertCanAssignTo(actor: ActorAuthority, target: TargetSubject, targetPool: ReadonlySet<string>, mode: AssignmentMode): ResolvedScope {
+  assertActorHolds(actor, ASSIGNMENT_KEY[mode])
   if (actor.id === target.id) {
     forbid("You cannot change your own permissions", "SELF_ACTION_FORBIDDEN")
   }
@@ -224,25 +222,67 @@ export function assertCanDelegatePermissions(input: {
     forbid("Super admin accounts cannot be managed here", "SUPER_ADMIN_PROTECTED")
   }
   if (!actor.scope || actor.scope.tier === "CITY") {
-    forbid("City-scoped administrators cannot grant permissions", "SUPERIOR_SCOPE_REQUIRED")
+    forbid("City-scoped administrators cannot assign permissions", "GRANTOR_SCOPE_REQUIRED")
   }
   if (!target.roleName) {
     throw new ApiError(400, "User has no role assigned", "NO_ROLE")
   }
 
-  const sameRole = target.roleName === actor.roleName
-  if (!sameRole && !poolCovers(actor.pool, targetPool)) {
-    forbid("You cannot manage administrators of this role", "ROLE_NOT_MANAGEABLE")
+  if (mode === "delegation") {
+    const sameRole = target.roleName === actor.roleName
+    if (!sameRole && !poolCovers(actor.pool, targetPool)) {
+      forbid("You cannot manage administrators of this role", "ROLE_NOT_MANAGEABLE")
+    }
+  } else {
+    if (NOT_ASSIGNABLE_ROLES.has(target.roleName)) {
+      forbid("This role cannot be managed here", "ROLE_NOT_MANAGEABLE")
+    }
+    // A role that can hold the recovery key is outside recovery's reach, so
+    // recovery can never mint another recovery-holder (nor manage its own
+    // department). Decided by the POOL, not the role's name.
+    if (targetPool.has(RECOVER)) {
+      forbid("Recovery does not apply to this role — its permissions are managed by ordinary delegation", "RECOVERY_ROLE_PROTECTED")
+    }
   }
 
   if (!target.scope) {
     if (actor.scope.tier !== "GLOBAL") forbid("This administrator is outside your scope", "SCOPE_FORBIDDEN")
-    throw new ApiError(400, "This administrator has no valid scope — fix their scope before granting permissions", "TARGET_SCOPE_INVALID")
+    throw new ApiError(400, "This administrator has no valid scope — fix their scope before assigning permissions", "TARGET_SCOPE_INVALID")
   }
   if (!scopeContains(actor.scope, target.scope)) {
     forbid("This administrator is outside your scope", "SCOPE_FORBIDDEN")
   }
   assertAssignableRoleAndScope(target.roleName, target.scope)
+  return target.scope
+}
+
+/**
+ * The PER-KEY rule, once the target is assignable: may this key be added to,
+ * or removed from, the target? It must be in the target role's current pool;
+ * under delegation the actor must also effectively hold it (ownership); under
+ * recovery that is waived. A key OUTSIDE the pool (a stale grant, which
+ * confers nothing) is never addable and is always dropped freely.
+ */
+export function canMoveKey(actor: ActorAuthority, key: string, targetPool: ReadonlySet<string>, mode: AssignmentMode): boolean {
+  if (!targetPool.has(key)) return false
+  return mode === "recovery" || actor.permissions.has(key)
+}
+
+/**
+ * PERMISSION ASSIGNMENT — the request REPLACES the target's grants.
+ * assertCanAssignTo, then every requested key is in the target pool, then
+ * every key added or removed passes canMoveKey.
+ */
+export function assertCanAssignPermissions(input: {
+  actor        : ActorAuthority
+  target       : TargetSubject
+  targetPool   : ReadonlySet<string>
+  requestedKeys: readonly string[]
+  currentKeys  : readonly string[]
+  mode         : AssignmentMode
+}): { added: string[]; removed: string[] } {
+  const { actor, target, targetPool, requestedKeys, currentKeys, mode } = input
+  assertCanAssignTo(actor, target, targetPool, mode)
 
   const outOfPool = requestedKeys.filter((k) => !targetPool.has(k))
   if (outOfPool.length > 0) {
@@ -254,31 +294,47 @@ export function assertCanDelegatePermissions(input: {
   const added   = requestedKeys.filter((k) => !current.has(k))
   const removed = currentKeys.filter((k) => !requested.has(k))
 
-  // PEERS — the same role at the actor's own tier. Protect the KEY, not the
-  // person: a peer may add or remove only permissions the actor itself holds,
-  // and never the management key, which only someone strictly above (or a
-  // pool-covering actor) grants or removes. That closes the lateral takeover
-  // (stripping a fellow lead's key) and the lateral hand-out (minting a new
-  // peer lead), without making the key a rank that freezes a peer's ordinary
-  // grants.
-  const peer = sameRole && target.scope.tier === actor.scope.tier
-  if (peer && (added.includes(MANAGE) || removed.includes(MANAGE))) {
-    forbid(
-      "Only an administrator above this one can grant or remove the permission-management permission",
-      "PEER_MANAGEMENT_KEY_PROTECTED",
-    )
-  }
-
-  const notHeld = [...added, ...(peer ? removed : [])].filter((k) => !actor.permissions.has(k))
-  if (notHeld.length > 0) {
-    forbid(
-      peer
-        ? `At your own level you can only grant or remove permissions you hold: ${notHeld.join(", ")}`
-        : `You cannot grant permissions you do not hold: ${notHeld.join(", ")}`,
-      "PERMISSION_NOT_HELD",
-    )
+  const blocked = [...added, ...removed.filter((k) => targetPool.has(k))]
+    .filter((k) => !canMoveKey(actor, k, targetPool, mode))
+  if (blocked.length > 0) {
+    forbid(`You can only grant or remove permissions you hold yourself: ${blocked.join(", ")}`, "PERMISSION_NOT_HELD")
   }
   return { added, removed }
+}
+
+/** Ordinary delegation (the name existing callers use). */
+export function assertCanDelegatePermissions(input: Omit<Parameters<typeof assertCanAssignPermissions>[0], "mode">) {
+  return assertCanAssignPermissions({ ...input, mode: "delegation" })
+}
+
+export interface AssignmentOption {
+  /** May the actor assign permissions to this target under this mode at all? */
+  allowed: boolean
+  /** Why not — the same code the write would fail with. */
+  code   : string | null
+  message: string | null
+  /** Pool keys the actor may add or remove under this mode. */
+  movable: string[]
+}
+
+/**
+ * What the ERP may OFFER, computed by running the very rules the write runs
+ * (assertCanAssignTo + canMoveKey), so the screen and the server cannot drift
+ * (principle 1). An agreement test pins this against assertCanAssignPermissions.
+ */
+export function assignmentOptions(actor: ActorAuthority, target: TargetSubject, targetPool: ReadonlySet<string>, mode: AssignmentMode): AssignmentOption {
+  try {
+    assertCanAssignTo(actor, target, targetPool, mode)
+  } catch (err) {
+    const e = err as ApiError
+    return { allowed: false, code: e.code ?? "FORBIDDEN", message: e.message, movable: [] }
+  }
+  return { allowed: true, code: null, message: null, movable: [...targetPool].filter((k) => canMoveKey(actor, k, targetPool, mode)).sort() }
+}
+
+/** Non-throwing form of a check, for server-computed capability flags. */
+export function passes(check: () => unknown): boolean {
+  try { check(); return true } catch { return false }
 }
 
 const PERMISSION_KEY_SHAPE = /^[a-z_]+:[a-z_]+:[a-z_]+$/

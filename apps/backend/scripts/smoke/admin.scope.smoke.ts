@@ -81,7 +81,7 @@ async function sweep() {
 async function scopeOf(adminUserId: string): Promise<AdminScopeContext> {
   const adminUser = await prisma.adminUser.findUniqueOrThrow({
     where  : { id: adminUserId },
-    include: { role: true, scopes: { include: { city: { select: { countryId: true } } } } },
+    include: { role: true, scopes: { include: { city: { select: { countryId: true, status: true } } } } },
   })
   const req = { adminUser } as unknown as Request
   buildScopeContext(req, {} as Response, () => undefined)
@@ -388,7 +388,7 @@ async function main() {
         include: {
           role       : { include: { permissions: { select: { permission: { select: { key: true, isActive: true } } } } } },
           permissions: { include: { permission: true } },
-          scopes     : { include: { city: { select: { countryId: true } } } },
+          scopes     : { include: { city: { select: { countryId: true, status: true } } } },
         },
       })
       const req = { adminUser } as unknown as Request & { adminPermissions: string[]; adminScopeValid: boolean }

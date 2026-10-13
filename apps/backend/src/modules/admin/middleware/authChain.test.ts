@@ -80,7 +80,7 @@ describe("adminAuthChain — effective permissions at request time", () => {
   it("an invalid scope (none, two, or role-incompatible) yields NO_SCOPE and no authority — never a fallback", () => {
     for (const scopes of [
       [],
-      [...KENYA, { id: "s2", adminUserId: "a1", scopeType: "CITY", countryId: "ke", cityId: "nbo", city: { countryId: "ke" } }],
+      [...KENYA, { id: "s2", adminUserId: "a1", scopeType: "CITY", countryId: "ke", cityId: "nbo", city: { countryId: "ke", status: "ACTIVE" } }],
     ]) {
       const req = runChain(adminUser({ scopes }))
       expect(req.adminScopeValid).toBe(false)
@@ -90,9 +90,20 @@ describe("adminAuthChain — effective permissions at request time", () => {
     const identityAtCity = adminUser({
       role       : { name: "identity_admin", displayName: "Identity", permissions: [perm("admin_users:profiles:read")] },
       permissions: [perm("admin_users:profiles:read")],
-      scopes     : [{ id: "s3", adminUserId: "a1", scopeType: "CITY", countryId: "ke", cityId: "nbo", city: { countryId: "ke" } }],
+      scopes     : [{ id: "s3", adminUserId: "a1", scopeType: "CITY", countryId: "ke", cityId: "nbo", city: { countryId: "ke", status: "ACTIVE" } }],
     })
     expect(runChain(identityAtCity).adminPermissions).toEqual([])
+  })
+
+  it("a CITY admin whose city has been switched off holds no scope and no authority", () => {
+    const city = (status: string) => adminUser({
+      scopes: [{ id: "s4", adminUserId: "a1", scopeType: "CITY", countryId: "ke", cityId: "nbo", city: { countryId: "ke", status } }],
+    })
+    expect(runChain(city("ACTIVE")).adminScopeValid).toBe(true)
+    const off = runChain(city("INACTIVE"))
+    expect(off.adminScopeValid).toBe(false)
+    expect(off.adminScope).toMatchObject({ isGlobal: false, countryIds: [], cityIds: [] })
+    expect(off.adminPermissions).toEqual([])
   })
 
   it("a valid scope with zero grants is a VALID admin who may do nothing", () => {

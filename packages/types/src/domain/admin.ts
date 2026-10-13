@@ -55,9 +55,10 @@ export interface AdminUser {
   middleName? : string
   status : AdminUserStatus
   isActive : boolean
-  invitedById : string | null
+  createdById : string | null
   invitationSentCount : number
   invitationSentAt : Date | null
+  invitationSentById : string | null
   lastSeenAt : Date | null
   deactivatedAt : Date | null
   deactivationReason : string | null
@@ -89,8 +90,11 @@ export interface AdminUserWithRole extends AdminUser {
 export interface AdminUserProfile extends AdminUser {
   role : AdminRole | null
   scopes : AdminUserScope[]
-  invitedBy : Pick<AdminUser, "id" | "firstName" | "lastName" | "email"> | null
+  createdBy        : AdminUserRef | null
+  invitationSentBy : AdminUserRef | null
 }
+
+export type AdminUserRef = Pick<AdminUser, "id" | "firstName" | "lastName" | "email">
 
 
 export interface AdminScopeContext {
@@ -226,7 +230,7 @@ export interface SessionScopeContext {
    *  role: the admin then has NO operational permissions until it is fixed —
    *  a different state from a valid scope with no grants yet. */
   valid?  : boolean
-  invalidReason?: "NO_ROLE" | "MALFORMED_SCOPE" | "SCOPE_NOT_ALLOWED_FOR_ROLE" | null
+  invalidReason?: "NO_ROLE" | "MALFORMED_SCOPE" | "SCOPE_NOT_ALLOWED_FOR_ROLE" | "SCOPE_CITY_INACTIVE" | null
 }
 
 //* Full session shape

@@ -405,7 +405,12 @@ export const PERMISSIONS = [
   {
     key        : "admin_users:permissions:manage",
     module     : "admin_users",
-    description: "Assign or revoke individual permission grants within a user's role pool",
+    description: "Ordinary delegation: grant or revoke, within a user's role pool and your scope, only permissions you hold yourself",
+  },
+  {
+    key        : "admin_users:permissions:recover",
+    module     : "admin_users",
+    description: "Recovery and bootstrap: assign or revoke ANY permission in another department's role pool (held or not) for an administrator inside your scope — to set up a department's first lead or restore one. Never for your own account, super admins, or roles that can themselves hold this permission",
   },
   {
     key        : "admin_users:accounts:suspend",

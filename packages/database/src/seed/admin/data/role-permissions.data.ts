@@ -10,6 +10,9 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
     "admin_users:accounts:create",
     "admin_users:invitations:send",
     "admin_users:permissions:manage",
+    //* Recovery/bootstrap authority over OTHER departments' grants. Ceiling
+    //* only: granted individually to identity admins trusted with it.
+    "admin_users:permissions:recover",
     "admin_users:accounts:suspend",
     "admin_users:accounts:reinstate",
     "admin_users:accounts:deactivate",

@@ -8,17 +8,23 @@ import { effectivePermissionKeys, resolveAdminScope, rolePoolKeys } from "@/lib/
 import {
   assertActorHolds,
   assertAssignableRoleAndScope,
-  assertCanDelegatePermissions,
+  assertCanAssignPermissions,
   assertCanManageTarget,
   assertCanProvision,
   assertProvisioningScope,
+  assignmentOptions,
+  NOT_ASSIGNABLE_ROLES,
   parsePermissionKeys,
+  passes,
   resolvedScopeFrom,
   sameScope,
+  targetInScope,
   type ActorAuthority,
+  type AssignmentMode,
   type ResolvedScope,
   type TargetSubject,
 } from "../lib/delegation/delegation-policy"
+import { getAllowedScopesForRole } from "@/lib/permissions/scope-rules"
 import { SYSTEM_USER_ID } from "@/constants/system"
 import { env } from "@/env"
 import { AdminPermissions } from "@repo/types/enums"
@@ -69,7 +75,7 @@ type Db = Prisma.TransactionClient
 const SUBJECT_INCLUDE = {
   role       : { include: { permissions: { include: { permission: true } } } },
   permissions: { include: { permission: true } },
-  scopes     : { include: { city: { select: { countryId: true } } } },
+  scopes     : { include: { city: { select: { countryId: true, status: true } } } },
 } satisfies Prisma.AdminUserInclude
 
 type Subject = Prisma.AdminUserGetPayload<{ include: typeof SUBJECT_INCLUDE }>
@@ -148,12 +154,14 @@ async function authorizeTargetAction(db: Db, actorId: string, targetId: string, 
  * A requested scope → one validated ResolvedScope. Shape first
  * (assertSingleScopeShape), then the rows it names: a COUNTRY must exist, a
  * CITY must exist and be ACTIVE, and a CITY's country is the city's own — a
- * supplied one that disagrees is refused, never corrected. An absent request
- * inherits the actor's own scope (only where `fallback` is given — create).
+ * supplied one that disagrees is refused, never corrected. There is no
+ * default: the scope is always chosen explicitly (an absent one used to
+ * inherit the creator's own, which silently made new admins as wide as the
+ * person creating them).
  */
-async function resolveRequestedScope(db: Db, requested: unknown, fallback?: ResolvedScope): Promise<ResolvedScope> {
-  if (fallback && (requested === undefined || (Array.isArray(requested) && requested.length === 0))) {
-    return { ...fallback }
+async function resolveRequestedScope(db: Db, requested: unknown): Promise<ResolvedScope> {
+  if (requested === undefined || requested === null || (Array.isArray(requested) && requested.length === 0)) {
+    throw new ApiError(400, "Choose the administrator's scope: global, one country, or one city", "SCOPE_REQUIRED")
   }
   if (!Array.isArray(requested) || requested.some((e) => !e || typeof e !== "object")) {
     throw new ApiError(400, "An admin has exactly one scope: global, one country, or one city", "SINGLE_SCOPE_REQUIRED")
@@ -237,7 +245,8 @@ async function auditInTx(db: Db, entry: AuditLogInput): Promise<void> {
 //* ─── Create ──────────────────────────────────────────────────────────────────
 //
 // PROVISIONING: identity, role and scope — never permissions. A new admin
-// holds nothing until a superior of their role grants it
+// holds nothing until permissions are assigned (ordinary delegation, or
+// recovery for a department's first lead)
 // (updateAdminUserPermissions). Requesting grants here is refused rather than
 // ignored, so a manipulated request cannot look like it worked.
 
@@ -248,7 +257,7 @@ export async function createAdminUser(input: CreateAdminUserRequest, actorId: st
   if (permissionKeys.length > 0) {
     throw new ApiError(
       403,
-      "Permissions are not granted when an administrator is created — a superior administrator of their role grants them afterwards",
+      "Permissions are not granted when an administrator is created — assign them afterwards",
       "PERMISSIONS_NOT_GRANTABLE_AT_PROVISIONING",
     )
   }
@@ -264,7 +273,7 @@ export async function createAdminUser(input: CreateAdminUserRequest, actorId: st
     const role = await tx.adminRole.findUnique({ where: { id: roleId } })
     if (!role) throw new ApiError(404, "Role not found", "ROLE_NOT_FOUND")
 
-    const scope = await resolveRequestedScope(tx, scopes, actorScope)
+    const scope = await resolveRequestedScope(tx, scopes)
     assertAssignableRoleAndScope(role.name, scope)
     assertProvisioningScope(actorScope, scope)
 
@@ -286,7 +295,7 @@ export async function createAdminUser(input: CreateAdminUserRequest, actorId: st
         roleId,
         status     : AdminUserStatus.pending,
         isActive   : false,
-        invitedById: actorId,
+        createdById: actorId,
       },
     })
     await tx.adminUserScope.create({ data: scopeRowData(user.id, scope) })
@@ -346,8 +355,8 @@ export async function sendAdminInvitation(adminUserId: string, actorId: string) 
         roleDisplayName : adminUser.role?.displayName ?? "",
         displayName,
         inviteMessage: adminUser.role
-          ? `You've been invited to join DailyBread Admin as ${adminUser.role.displayName}.`
-          : "You've been invited to join DailyBread Admin.",
+          ? `You've been invited to join the DailyBread ERP as ${adminUser.role.displayName}.`
+          : "You've been invited to join the DailyBread ERP.",
       },
     })
   } catch (err) {
@@ -357,15 +366,23 @@ export async function sendAdminInvitation(adminUserId: string, actorId: string) 
 
   const invitationExpiresAt = new Date(Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
 
-  await prisma.adminUser.update({
-    where: { id: adminUserId },
+  // CONDITIONAL on the account still awaiting activation: a resend racing the
+  // Clerk webhook that just activated the account must not set it back to
+  // `invited` (the old unconditional update could).
+  const written = await prisma.adminUser.updateMany({
+    where: { id: adminUserId, status: { in: [AdminUserStatus.pending, AdminUserStatus.invited] } },
     data : {
       status              : AdminUserStatus.invited,
       invitationSentAt    : new Date(),
+      invitationSentById  : actorId,
       invitationExpiresAt,
       invitationSentCount : { increment: 1 },
     },
   })
+  if (written.count !== 1) {
+    serviceLog.warn({ adminUserId, actorId }, "Invitation sent, but the account changed status meanwhile — status left as it is")
+    throw new ApiError(409, "This administrator's account changed while the invitation was being sent — reload to see its current status", "STATUS_CHANGED")
+  }
 
   serviceLog.info({ adminUserId, actorId }, "Invitation sent")
 
@@ -386,13 +403,18 @@ export async function sendAdminInvitation(adminUserId: string, actorId: string) 
 
 //* ─── Update permissions ──────────────────────────────────────────────────────
 //
-// DELEGATION: a designated superior (admin_users:permissions:manage) grants
-// keys they personally and effectively hold, inside the target role's current
-// pool, to an administrator whose role and scope they may manage
-// (assertCanDelegatePermissions). The request replaces the target's grants;
-// revoking needs no matching grant.
+// ONE write path, two authorities (lib/delegation/delegation-policy.ts):
+//   "delegation" (PUT /:id/permissions, admin_users:permissions:manage) —
+//     ownership: only keys the actor effectively holds move, in either
+//     direction, inside the target role's pool and the actor's scope.
+//   "recovery"   (PUT /:id/permissions/recovery, …:permissions:recover) —
+//     bootstrap / restore a department: any key of the target role's pool,
+//     held or not, for a role that cannot itself hold the recovery key.
+// The request replaces the target's grants. Same transaction, locks and
+// audit row either way; the row's metadata names the mode (the only audit
+// change made for recovery — see the audit session notes).
 
-export async function updateAdminUserPermissions(input: UpdateAdminUserPermissionsRequest, actorId: string) {
+export async function updateAdminUserPermissions(input: UpdateAdminUserPermissionsRequest, actorId: string, mode: AssignmentMode = "delegation") {
   const { adminUserId } = input
   if (!Array.isArray(input.permissionKeys)) {
     throw new ApiError(400, "permissionKeys must be an array of permission keys", "INVALID_PERMISSION_KEYS")
@@ -405,12 +427,13 @@ export async function updateAdminUserPermissions(input: UpdateAdminUserPermissio
     if (!target) throw new ApiError(404, "Admin user not found", "USER_NOT_FOUND")
 
     const currentKeys = target.permissions.map((g) => g.permission.key)
-    const { added, removed } = assertCanDelegatePermissions({
+    const { added, removed } = assertCanAssignPermissions({
       actor,
       target       : targetOf(target),
       targetPool   : poolOf(target.role),
       requestedKeys: permissionKeys,
       currentKeys,
+      mode,
     })
 
     if (target.status === AdminUserStatus.deactivated) {
@@ -445,19 +468,19 @@ export async function updateAdminUserPermissions(input: UpdateAdminUserPermissio
       entityType : "AdminUser",
       entityId   : adminUserId,
       changes    : { before: { permissions: currentKeys }, after: { permissions: after } },
-      metadata   : { added, removed },
+      metadata   : { added, removed, mode },
     })
     return after
   })
 
-  serviceLog.info({ adminUserId, actorId, permissionCount: result.length }, "Permissions updated")
+  serviceLog.info({ adminUserId, actorId, permissionCount: result.length, mode }, "Permissions updated")
   return { updated: result.length }
 }
 
 //* ─── Update role ─────────────────────────────────────────────────────────────
 //
 // PROVISIONING. Changing a role CLEARS every grant: grants are valid only
-// inside a role's pool, and the new role's superior decides what to re-grant.
+// inside a role's pool, and they are re-assigned for the new role.
 // The new role must be valid at the target's CURRENT scope — change the scope
 // first if it is not.
 
@@ -514,7 +537,7 @@ export async function updateAdminUserRole(input: UpdateAdminUserRoleRequest, act
   return {
     success           : true,
     permissionsCleaned: result.before.permissions.length,
-    note              : "All permission grants were cleared. A superior administrator of the new role grants permissions.",
+    note              : "All permission grants were cleared. Permissions for the new role are assigned separately.",
   }
 }
 
@@ -526,7 +549,7 @@ export async function updateAdminUserRole(input: UpdateAdminUserRoleRequest, act
 //
 // A SCOPE CHANGE CLEARS EVERY GRANT. A grant was decided for a job in one
 // place; the same keys somewhere else — wider, narrower or merely different —
-// are a different decision, and the target's superior there makes it. The
+// are a different decision, made again by whoever manages them there. The
 // role and the account are kept. Scope, grant reset and audit row commit in
 // ONE transaction or not at all. A request naming the scope the target
 // already holds is refused (NO_CHANGE) rather than silently wiping grants.
@@ -577,15 +600,26 @@ export async function updateAdminUserScopes(input: UpdateAdminUserScopesRequest,
   return {
     success           : true,
     permissionsCleaned: result.before.permissions.length,
-    note              : "All permission grants were cleared. A superior administrator of this role grants permissions for the new scope.",
+    note              : "All permission grants were cleared. Permissions for the new scope are assigned separately.",
   }
 }
 
-// ─── Suspend, Reinstate, Deactivate ──────────────────────────────────────────
+// ─── Suspend, Reinstate, Reactivate, Deactivate ──────────────────────────────
 //
-// The same target-management rule as every other mutation: not yourself, never
-// a super_admin, a same-role target only from strictly above, any other role
-// only inside your scope.
+// The same target rule as every other mutation (assertCanManageTarget): not
+// yourself, never a super_admin, a target inside your scope. Each status
+// change is CONDITIONAL on the status it was decided against, so two admins
+// acting at once cannot, say, reinstate an account someone just deactivated.
+// Postgres decides access (every request re-reads status); Clerk calls only
+// revoke or restore sessions.
+
+/** Moves `adminUserId` from one of `from` to a new status, or 409s if it moved meanwhile. */
+async function transitionStatus(db: Db, adminUserId: string, from: AdminUserStatus[], data: Prisma.AdminUserUncheckedUpdateManyInput) {
+  const written = await db.adminUser.updateMany({ where: { id: adminUserId, status: { in: from } }, data })
+  if (written.count !== 1) {
+    throw new ApiError(409, "This administrator's status changed just now — reload and try again", "STATUS_CHANGED")
+  }
+}
 
 export async function suspendAdminUser(adminUserId: string, reason: string, actorId: string) {
   const { user } = await authorizeTargetAction(prisma, actorId, adminUserId, AdminPermissions.ADMIN_USERS_ACCOUNTS_SUSPEND)
@@ -597,7 +631,10 @@ export async function suspendAdminUser(adminUserId: string, reason: string, acto
     try { await ClerkAdminStateService.banUser(user.externalAuthId) }
     catch (err) { throw new ApiError(502, `Clerk ban failed: ${(err as Error).message}`, "CLERK_ERROR") }
   }
-  await prisma.adminUser.update({ where: { id: adminUserId }, data: { status: AdminUserStatus.suspended, isActive: false, deactivationReason: reason } })
+  // Grants are KEPT and frozen: effective permissions are empty while the
+  // account is not active (lib/permissions/effective.ts), and come back on
+  // reinstatement.
+  await transitionStatus(prisma, adminUserId, [AdminUserStatus.active], { status: AdminUserStatus.suspended, isActive: false, deactivationReason: reason })
   serviceLog.warn({ adminUserId, actorId, reason }, "Admin user suspended")
   auditService.log({ adminUserId: actorId, action: "admin_user.suspended", entityType: "AdminUser", entityId: adminUserId, changes: { before: { status: user.status }, after: { status: "suspended" } }, metadata: { reason } })
   return { success: true }
@@ -610,9 +647,55 @@ export async function reinstateAdminUser(adminUserId: string, actorId: string) {
     try { await ClerkAdminStateService.unbanUser(user.externalAuthId) }
     catch (err) { throw new ApiError(502, `Clerk unban failed: ${(err as Error).message}`, "CLERK_ERROR") }
   }
-  await prisma.adminUser.update({ where: { id: adminUserId }, data: { status: AdminUserStatus.active, isActive: true, deactivationReason: null } })
+  await transitionStatus(prisma, adminUserId, [AdminUserStatus.suspended], { status: AdminUserStatus.active, isActive: true, deactivationReason: null })
   serviceLog.info({ adminUserId, actorId }, "Admin user reinstated")
   auditService.log({ adminUserId: actorId, action: "admin_user.reinstated", entityType: "AdminUser", entityId: adminUserId, changes: { before: { status: "suspended" }, after: { status: "active" } } })
+  return { success: true }
+}
+
+/*
+ * REACTIVATION — the one way back from `deactivated`, for re-hiring someone
+ * (AdminUser.email is unique, so a fresh record for them is impossible). The
+ * SAME record returns to `pending` with NO grants and no identity link: it
+ * needs a new invitation, and permissions are granted again from scratch —
+ * old grants are never restored (deactivation already deleted them; this
+ * deletes again in case anything was written since). Role and scope are kept;
+ * change them before inviting if the new job differs.
+ */
+export async function reactivateAdminUser(adminUserId: string, actorId: string) {
+  const result = await prisma.$transaction(async (tx) => {
+    const { actor, row: actorRow } = await loadActorRow(tx, actorId)
+    assertActorHolds(actor, AdminPermissions.ADMIN_USERS_ACCOUNTS_REINSTATE)
+    const target = await loadSubject(tx, adminUserId)
+    if (!target) throw new ApiError(404, "Admin user not found", "USER_NOT_FOUND")
+    assertCanManageTarget(actor, targetOf(target))
+    if (target.status !== AdminUserStatus.deactivated) {
+      throw new ApiError(400, "Only deactivated administrators can be reactivated", "INVALID_STATUS")
+    }
+
+    await lockVersions(tx, [actorRow, target])
+    await transitionStatus(tx, adminUserId, [AdminUserStatus.deactivated], {
+      status             : AdminUserStatus.pending,
+      isActive           : false,
+      deactivatedAt      : null,
+      deactivationReason : null,
+      externalAuthId     : null,
+      invitationSentAt   : null,
+      invitationSentById : null,
+      invitationExpiresAt: null,
+    })
+    await tx.adminUserPermission.deleteMany({ where: { adminUserId } })
+    return { roleName: target.role?.name ?? null }
+  })
+  serviceLog.info({ adminUserId, actorId }, "Admin user reactivated — pending a new invitation")
+  auditService.log({
+    adminUserId: actorId,
+    action     : "admin_user.reactivated",
+    entityType : "AdminUser",
+    entityId   : adminUserId,
+    changes    : { before: { status: "deactivated" }, after: { status: "pending", permissions: [] } },
+    metadata   : { roleName: result.roleName, note: "Reactivated with no permissions; a new invitation is required." },
+  })
   return { success: true }
 }
 
@@ -624,12 +707,12 @@ export async function deactivateAdminUser(adminUserId: string, reason: string, a
     catch (err) { serviceLog.error({ err, adminUserId }, "Clerk deletion failed — continuing with DB deactivation") }
   }
   const clearedPermissions = user.permissions.map((p) => p.permission.key)
-  await prisma.$transaction([
-    prisma.adminUser.update({ where: { id: adminUserId }, data: { status: AdminUserStatus.deactivated, isActive: false, deactivatedAt: new Date(), deactivationReason: reason, externalAuthId: null } }),
+  await prisma.$transaction(async (tx) => {
+    await transitionStatus(tx, adminUserId, [user.status], { status: AdminUserStatus.deactivated, isActive: false, deactivatedAt: new Date(), deactivationReason: reason, externalAuthId: null })
     // A deactivated admin retains their DB record (offboarding, not deletion)
     // but must hold no live permission grants.
-    prisma.adminUserPermission.deleteMany({ where: { adminUserId } }),
-  ])
+    await tx.adminUserPermission.deleteMany({ where: { adminUserId } })
+  })
   serviceLog.warn({ adminUserId, actorId, reason }, "Admin user deactivated")
   auditService.log({
     adminUserId: actorId,
@@ -645,169 +728,314 @@ export async function deactivateAdminUser(adminUserId: string, reason: string, a
   return { success: true }
 }
 
-//* Read queries
+//* ─── Reads ───────────────────────────────────────────────────────────────────
+//
+// ONE geographic eligibility rule for reads and writes: targetInScope
+// (delegation-policy.ts) — inclusive containment of the target's single scope
+// in the actor's. adminsInScopeWhere is its SQL transcription for lists; the
+// detail read applies the pure rule to the loaded row. Out of scope is a 404
+// (principle 6), not a 403.
 
-export async function getAdminUser(adminUserId: string, actorScope: AdminScopeContext, actorRoleName: string | undefined) {
-  const user = await prisma.adminUser.findUnique({
-    where  : { id: adminUserId },
-    include: {
-      role       : true,
-      permissions: { include: { permission: true } },
-      scopes     : { include: { country: { select: { id: true, name: true, code: true } }, city: { select: { id: true, name: true } } } },
-      invitedBy  : { select: { id: true, firstName: true, lastName: true, email: true } },
-    },
-  })
-  if (!user) throw new ApiError(404, "Admin user not found", "USER_NOT_FOUND")
-  assertUserWithinActorScope(user.scopes, actorScope, actorRoleName)
-  return user
+/** The actor's resolved scope from the request chain (null = invalid → sees nothing). */
+export function actorScopeOf(context: AdminScopeContext, valid = true): ResolvedScope | null {
+  return resolvedScopeFrom(context, valid)
 }
 
-export async function listAdminUsers(
-  filters: { status?: string; roleId?: string; search?: string; countryId?: string; page?: number; pageSize?: number },
-  actorScope: AdminScopeContext,
-  actorRoleName: string | undefined,
-) {
-  const { status, roleId, search, countryId, page = 1, pageSize = 20 } = filters
-
-  const scopeFilter  = buildScopeFilter(actorScope, actorRoleName)
-  const countryScoped = !actorHasFullAccess(actorScope)
-  const scopesInclude  = { include: { country: { select: { id: true, name: true, code: true } } } } as const
-
-  const where: any = {
-    ...scopeFilter,
-    ...(status ? { status } : {}),
-    ...(roleId ? { roleId } : {}),
-    ...(countryId ? { scopes: { some: { countryId } } } : {}),
-    ...(search ? {
-      OR: [
-        { email    : { contains: search, mode: "insensitive" } },
-        { firstName: { contains: search, mode: "insensitive" } },
-        { lastName : { contains: search, mode: "insensitive" } },
-        { employeeId: { contains: search, mode: "insensitive" } },
-      ],
-    } : {}),
+/**
+ * targetInScope as a where-clause. A CITY target counts as inside a COUNTRY
+ * scope by the CITY's own country (city.countryId), the same reading the
+ * scope resolution uses. Combine with other conditions through AND (bug
+ * class #2): it sets `id` and `scopes`.
+ */
+export function adminsInScopeWhere(scope: ResolvedScope | null): Prisma.AdminUserWhereInput {
+  if (!scope) return { id: { in: [] } }
+  const notSystem = { id: { not: SYSTEM_USER_ID } }
+  if (scope.tier === "GLOBAL") return notSystem
+  if (scope.tier === "COUNTRY") {
+    return {
+      ...notSystem,
+      scopes: { some: { OR: [
+        { scopeType: "COUNTRY", countryId: scope.countryId },
+        { scopeType: "CITY", city: { countryId: scope.countryId! } },
+      ] } },
+    }
   }
-
-  // A country-scoped actor's DB filter (buildScopeFilter) only narrows to
-  // "has a scope row in one of my countries" — it can't express "is scoped
-  // to exactly one country, and it's mine" in a single Prisma where clause.
-  // So for a country-scoped actor we over-fetch a bounded page.pageSize
-  // window and post-filter to scopeClassOf === SINGLE_COUNTRY here, same
-  // hierarchy rule enforced by assertUserWithinActorScope. Global actors
-  // (full access) skip this — no post-filtering, no page-size distortion.
-  if (!countryScoped) {
-    const skip = (page - 1) * pageSize
-    const [users, total] = await Promise.all([
-      prisma.adminUser.findMany({ where, skip, take: pageSize, orderBy: { createdAt: "desc" }, include: { role: true, scopes: scopesInclude } }),
-      prisma.adminUser.count({ where }),
-    ])
-    return { users, total, page, pageSize, totalPages: Math.ceil(total / pageSize) }
-  }
-
-  const actorCountries = new Set(actorScope.countryIds)
-  const allCandidates = await prisma.adminUser.findMany({
-    where, orderBy: { createdAt: "desc" }, include: { role: true, scopes: scopesInclude },
-  })
-  const inScope = allCandidates.filter((u) => {
-    const cls = scopeClassOf(u.scopes)
-    if (cls !== "SINGLE_COUNTRY") return false
-    const [country] = u.scopes.filter((s) => s.countryId).map((s) => s.countryId!)
-    return !!country && actorCountries.has(country)
-  })
-
-  const total = inScope.length
-  const skip  = (page - 1) * pageSize
-  const users = inScope.slice(skip, skip + pageSize)
-
-  return { users, total, page, pageSize, totalPages: Math.ceil(total / pageSize) }
+  return { ...notSystem, scopes: { some: { scopeType: "CITY", cityId: scope.cityId } } }
 }
 
+const ADMIN_REF_SELECT = { id: true, firstName: true, lastName: true, email: true } as const
+
+const DETAIL_INCLUDE = {
+  role       : { include: { permissions: { include: { permission: true } } } },
+  permissions: { include: { permission: true } },
+  scopes     : { include: {
+    country: { select: { id: true, name: true, code: true } },
+    city   : { select: { id: true, name: true, countryId: true, status: true } },
+  } },
+  createdBy       : { select: ADMIN_REF_SELECT },
+  invitationSentBy: { select: ADMIN_REF_SELECT },
+} satisfies Prisma.AdminUserInclude
+
+/**
+ * What the ACTOR may do to this target, computed by the very checks the
+ * mutations run — the ERP renders these and never re-derives them
+ * (principle 1). Authority AND the status the action needs.
+ */
+function capabilitiesFor(actor: ActorAuthority, user: Subject) {
+  const target = targetOf(user)
+  const can = (key: string) => passes(() => { assertActorHolds(actor, key); assertCanManageTarget(actor, target) })
+  const s = user.status
+  const pool = poolOf(user.role)
+  return {
+    invite            : can(AdminPermissions.ADMIN_USERS_INVITATIONS_SEND) && (s === AdminUserStatus.pending || s === AdminUserStatus.invited),
+    changeRole        : can(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN) && s !== AdminUserStatus.deactivated,
+    changeScope       : can(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN) && s !== AdminUserStatus.deactivated,
+    suspend           : can(AdminPermissions.ADMIN_USERS_ACCOUNTS_SUSPEND) && s === AdminUserStatus.active,
+    reinstate         : can(AdminPermissions.ADMIN_USERS_ACCOUNTS_REINSTATE) && s === AdminUserStatus.suspended,
+    reactivate        : can(AdminPermissions.ADMIN_USERS_ACCOUNTS_REINSTATE) && s === AdminUserStatus.deactivated,
+    deactivate        : can(AdminPermissions.ADMIN_USERS_ACCOUNTS_DEACTIVATE) && s !== AdminUserStatus.deactivated,
+    manageAvailability: can(AdminPermissions.ADMIN_USERS_ACCOUNTS_MANAGE_AVAILABILITY) && (s === AdminUserStatus.active || s === AdminUserStatus.suspended),
+    delegation        : s === AdminUserStatus.deactivated ? false : assignmentOptions(actor, target, pool, "delegation").allowed,
+    recovery          : s === AdminUserStatus.deactivated ? false : assignmentOptions(actor, target, pool, "recovery").allowed,
+  }
+}
+
+export async function getAdminUser(adminUserId: string, actorId: string) {
+  const actor = await loadActor(prisma, actorId)
+  const user  = await prisma.adminUser.findUnique({ where: { id: adminUserId }, include: { ...DETAIL_INCLUDE } })
+  if (!user || user.id === SYSTEM_USER_ID || !targetInScope(actor.scope, scopeOfRows(user.scopes))) {
+    throw new ApiError(404, "Admin user not found", "USER_NOT_FOUND")
+  }
+  const { role, ...rest } = user
+  return {
+    ...rest,
+    role        : role ? { id: role.id, name: role.name, displayName: role.displayName, description: role.description } : null,
+    isSelf      : user.id === actor.id,
+    capabilities: capabilitiesFor(actor, user),
+  }
+}
+
+export interface ListAdminUsersFilters {
+  status?   : string
+  roleId?   : string
+  search?   : string
+  countryId?: string
+  page?     : number
+  pageSize? : number
+}
+
+const ADMIN_USER_STATUSES = Object.values(AdminUserStatus) as AdminUserStatus[]
+
+function parseStatusFilter(status: string | undefined): AdminUserStatus | undefined {
+  if (!status) return undefined
+  if (!ADMIN_USER_STATUSES.includes(status as AdminUserStatus)) {
+    throw new ApiError(400, `Unknown status: ${status}`, "INVALID_STATUS_FILTER")
+  }
+  return status as AdminUserStatus
+}
+
+function pageNumber(value: number | undefined, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(1, Math.trunc(value)))
+}
+
+/*
+ * statusCounts describe the actor's WHOLE scoped population — every
+ * administrator they may see — and ignore the list's filters, so the summary
+ * stays a fixed picture of their directory while the table narrows. `total`
+ * is the sum of the per-status counts. Both run on adminsInScopeWhere, the
+ * same clause as the rows: nothing outside the actor's scope is ever counted.
+ */
+async function countAdminsByStatus(scopeWhere: Prisma.AdminUserWhereInput) {
+  const groups = await prisma.adminUser.groupBy({ by: ["status"], where: scopeWhere, _count: { _all: true } })
+  const byStatus = Object.fromEntries(ADMIN_USER_STATUSES.map((s) => [s, 0])) as Record<AdminUserStatus, number>
+  for (const g of groups) byStatus[g.status] = g._count._all
+  return { total: Object.values(byStatus).reduce((a, b) => a + b, 0), ...byStatus }
+}
+
+export async function listAdminUsers(filters: ListAdminUsersFilters, actorScope: ResolvedScope | null) {
+  const status   = parseStatusFilter(filters.status)
+  const { roleId, countryId } = filters
+  const search   = filters.search?.trim()
+  const page     = pageNumber(filters.page, 1)
+  const pageSize = pageNumber(filters.pageSize, 20, 100)
+
+  // An AND list: the actor's scope and the country filter both constrain
+  // `scopes`, and one object would let the second overwrite the first.
+  const scopeWhere = adminsInScopeWhere(actorScope)
+  const and: Prisma.AdminUserWhereInput[] = [scopeWhere]
+  if (status)    and.push({ status })
+  if (roleId)    and.push({ roleId })
+  if (countryId) and.push({ scopes: { some: { OR: [{ countryId }, { city: { countryId } }] } } })
+  if (search) {
+    and.push({ OR: [
+      { email     : { contains: search, mode: "insensitive" } },
+      { firstName : { contains: search, mode: "insensitive" } },
+      { lastName  : { contains: search, mode: "insensitive" } },
+      { employeeId: { contains: search, mode: "insensitive" } },
+    ] })
+  }
+  const where: Prisma.AdminUserWhereInput = { AND: and }
+  const scopesInclude = { include: { country: { select: { id: true, name: true, code: true } }, city: { select: { id: true, name: true } } } } as const
+
+  const [users, total, statusCounts] = await Promise.all([
+    prisma.adminUser.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: "desc" }, include: { role: true, scopes: scopesInclude } }),
+    prisma.adminUser.count({ where }),
+    countAdminsByStatus(scopeWhere),
+  ])
+  return { users, total, page, pageSize, totalPages: Math.ceil(total / pageSize), statusCounts }
+}
+
+/** A role's CURRENT pool — active definitions only (an inactive key cannot be granted). */
 export async function getRolePermissionPool(roleId: string) {
   const pool = await prisma.adminRolePermission.findMany({
-    where  : { roleId },
+    where  : { roleId, permission: { isActive: true } },
     include: { permission: true },
     orderBy: { permission: { module: "asc" } },
   })
   return pool.map((rp) => rp.permission)
 }
 
+/**
+ * Roles, with what the server already knows about assigning each: the scope
+ * tiers it may hold (ROLE_SCOPE_RULES) and whether it is assignable here at
+ * all. The ERP offers exactly these (principle 1).
+ */
 export async function listRoles() {
-  return prisma.adminRole.findMany({
+  const roles = await prisma.adminRole.findMany({
     where  : { name: { not: "system" } },
     orderBy: { name: "asc" },
   })
-}
-
-//* Read-side scope helpers (list / get / audit). Mutations use the delegation policy.
-
-/*
- * Any globally-scoped actor (super_admin, or a globally-scoped
- * identity_admin) sees admins in every country.
- */
-export function actorHasFullAccess(actorScope: AdminScopeContext): boolean {
-  return actorScope.isGlobal
+  return roles.map((r) => ({
+    ...r,
+    allowedScopes: getAllowedScopesForRole(r.name),
+    assignable   : !NOT_ASSIGNABLE_ROLES.has(r.name) && getAllowedScopesForRole(r.name).length > 0,
+  }))
 }
 
 /*
- * Classifies a set of scope rows so a country-scoped actor's read check can
- * tell "one of my countries" apart from "spans multiple countries" or
- * "global".
+ * The AdminUser ids an actor may see, for the audit read (AuditLog.entityId
+ * has no FK to AdminUser). null = no restriction (GLOBAL). The same rule as
+ * every other read: adminsInScopeWhere.
  */
-export function scopeClassOf(
-  scopes: Array<{ scopeType: string; countryId: string | null }>,
-): "GLOBAL" | "MULTI_COUNTRY" | "SINGLE_COUNTRY" {
-  if (scopes.some((s) => s.scopeType === "GLOBAL")) return "GLOBAL"
-  const countries = new Set(scopes.filter((s) => s.countryId).map((s) => s.countryId))
-  return countries.size > 1 ? "MULTI_COUNTRY" : "SINGLE_COUNTRY"
+export async function getManageableAdminUserIds(actorScopeContext: AdminScopeContext): Promise<string[] | null> {
+  const scope = resolvedScopeFrom(actorScopeContext, true)
+  if (scope?.tier === "GLOBAL") return null
+  if (!scope) return []
+  const rows = await prisma.adminUser.findMany({ where: adminsInScopeWhere(scope), select: { id: true } })
+  return rows.map((u) => u.id)
 }
 
-/*
- * Resolves the set of AdminUser ids a given actor is allowed to see, per the
- * same read rules as assertUserWithinActorScope/buildScopeFilter. Returns null
- * for a full-access actor (no restriction needed) — callers should treat null
- * as "don't filter" rather than "empty set."
- *
- * Used by the audit log module (AuditLog.entityId has no real FK relation to
- * AdminUser — it's a generic string shared across every module's events).
- */
-export async function getManageableAdminUserIds(actorScope: AdminScopeContext): Promise<string[] | null> {
-  if (actorHasFullAccess(actorScope)) return null
+//* ─── Permission assignment: what may be offered ─────────────────────────────
+//
+// The shared workflow for identity admins AND department leads. Neither read
+// needs admin_users:profiles:read: a lead holding only the management key sees
+// exactly the administrators they may assign to — never the rest of the
+// directory, and a target they cannot assign to is a 404 like a missing one.
 
-  const candidates = await prisma.adminUser.findMany({
-    where : buildScopeFilter(actorScope, undefined),
-    select: { id: true, scopes: { select: { scopeType: true, countryId: true } } },
-  })
-  const actorCountries = new Set(actorScope.countryIds)
-  return candidates
-    .filter((u) => {
-      if (scopeClassOf(u.scopes) !== "SINGLE_COUNTRY") return false
-      const [country] = u.scopes.filter((s) => s.countryId).map((s) => s.countryId!)
-      return !!country && actorCountries.has(country)
+const OPTIONS_INCLUDE = {
+  ...SUBJECT_INCLUDE,
+  scopes: { include: { city: { select: { countryId: true, status: true, name: true } }, country: { select: { name: true } } } },
+} satisfies Prisma.AdminUserInclude
+
+type OptionsUser = Prisma.AdminUserGetPayload<{ include: typeof OPTIONS_INCLUDE }>
+
+function summaryOf(user: OptionsUser) {
+  return {
+    id         : user.id,
+    firstName  : user.firstName,
+    lastName   : user.lastName,
+    email      : user.email,
+    status     : user.status,
+    role       : user.role ? { id: user.role.id, name: user.role.name, displayName: user.role.displayName } : null,
+    scope      : scopeOfRows(user.scopes),
+    scopeLabel : user.scopes[0]?.city?.name ?? user.scopes[0]?.country?.name ?? (user.scopes[0]?.scopeType === "GLOBAL" ? "Global" : null),
+  }
+}
+
+/** The actor's assignment authority over one target, in both modes. */
+function optionsFor(actor: ActorAuthority, user: Subject) {
+  if (user.status === AdminUserStatus.deactivated) {
+    const closed = { allowed: false, code: "INVALID_STATUS", message: "Deactivated administrators hold no permissions", movable: [] as string[] }
+    return { delegation: closed, recovery: closed }
+  }
+  const target = targetOf(user)
+  const pool   = poolOf(user.role)
+  return {
+    delegation: assignmentOptions(actor, target, pool, "delegation"),
+    recovery  : actor.permissions.has(AdminPermissions.ADMIN_USERS_PERMISSIONS_RECOVER)
+      ? assignmentOptions(actor, target, pool, "recovery")
+      : { allowed: false, code: "FORBIDDEN", message: null, movable: [] as string[] },
+  }
+}
+
+/** GET /users/:id/permission-options */
+export async function getPermissionOptions(adminUserId: string, actorId: string) {
+  const actor = await loadActor(prisma, actorId)
+  const user  = await prisma.adminUser.findUnique({ where: { id: adminUserId }, include: OPTIONS_INCLUDE })
+  if (!user || user.id === SYSTEM_USER_ID) throw new ApiError(404, "Admin user not found", "USER_NOT_FOUND")
+  const options = optionsFor(actor, user)
+  // Reachable only for an actor who may assign to this target under SOME
+  // mode, or who may read the directory there anyway.
+  const canRead = actor.permissions.has(AdminPermissions.ADMIN_USERS_PROFILES_READ) && targetInScope(actor.scope, scopeOfRows(user.scopes))
+  if (!options.delegation.allowed && !options.recovery.allowed && !canRead) {
+    throw new ApiError(404, "Admin user not found", "USER_NOT_FOUND")
+  }
+  const pool = (user.role?.permissions ?? [])
+    .map((rp) => rp.permission)
+    .filter((p) => p.isActive)
+    .map((p) => ({ key: p.key, module: p.module, description: p.description }))
+    .sort((a, b) => a.module.localeCompare(b.module) || a.key.localeCompare(b.key))
+  const poolKeys = new Set(pool.map((p) => p.key))
+  const grants   = user.permissions.map((g) => g.permission.key)
+  return {
+    target    : summaryOf(user),
+    pool,
+    grants,
+    /** Grant rows outside the current pool: confer nothing, dropped on the next save. */
+    staleGrants: grants.filter((k) => !poolKeys.has(k)),
+    delegation: options.delegation,
+    recovery  : options.recovery,
+  }
+}
+
+/**
+ * GET /users/delegable — the administrators this actor may assign permissions
+ * to (ordinary delegation or recovery), with which mode applies. Computed by
+ * the same assignmentOptions over every admin in the actor's scope, so it can
+ * never list someone the write would refuse, nor omit someone it would accept.
+ */
+export async function listDelegableAdmins(
+  filters: { search?: string; mode?: string; page?: number; pageSize?: number },
+  actorId: string,
+) {
+  const actor    = await loadActor(prisma, actorId)
+  const page     = Math.max(1, filters.page ?? 1)
+  const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 20))
+  const search   = filters.search?.trim()
+
+  const and: Prisma.AdminUserWhereInput[] = [
+    adminsInScopeWhere(actor.scope),
+    { id: { not: actorId }, status: { not: AdminUserStatus.deactivated } },
+  ]
+  if (search) {
+    and.push({ OR: [
+      { email    : { contains: search, mode: "insensitive" } },
+      { firstName: { contains: search, mode: "insensitive" } },
+      { lastName : { contains: search, mode: "insensitive" } },
+    ] })
+  }
+  const candidates = await prisma.adminUser.findMany({ where: { AND: and }, include: OPTIONS_INCLUDE, orderBy: [{ firstName: "asc" }, { lastName: "asc" }] })
+
+  const rows = candidates
+    .map((u) => {
+      const o = optionsFor(actor, u)
+      return { ...summaryOf(u), grantCount: u.permissions.length, delegation: o.delegation.allowed, recovery: o.recovery.allowed }
     })
-    .map((u) => u.id)
-}
+    .filter((r) => (filters.mode === "recovery" ? r.recovery : filters.mode === "delegation" ? r.delegation : r.delegation || r.recovery))
 
-function assertUserWithinActorScope(
-  userScopes   : Array<{ scopeType: string; countryId: string | null }>,
-  actorScope   : AdminScopeContext,
-  _actorRoleName: string | undefined,
-): void {
-  if (actorHasFullAccess(actorScope)) return
-
-  const targetClass = scopeClassOf(userScopes)
-  if (targetClass !== "SINGLE_COUNTRY") {
-    throw new ApiError(403, "This user is outside your scope", "SCOPE_FORBIDDEN")
-  }
-  const actorCountries = new Set(actorScope.countryIds)
-  const [userCountry]  = userScopes.filter((s) => s.countryId).map((s) => s.countryId!)
-  if (!userCountry || !actorCountries.has(userCountry)) {
-    throw new ApiError(403, "This user is outside your scope", "SCOPE_FORBIDDEN")
-  }
-}
-
-function buildScopeFilter(actorScope: AdminScopeContext, _actorRoleName: string | undefined): object {
-  if (actorHasFullAccess(actorScope)) return { id: { not: SYSTEM_USER_ID } }
-  return { id: { not: SYSTEM_USER_ID }, scopes: { some: { countryId: { in: actorScope.countryIds } } } }
+  const total = rows.length
+  return { users: rows.slice((page - 1) * pageSize, page * pageSize), total, page, pageSize, totalPages: Math.ceil(total / pageSize) }
 }
 
 //* ─── Availability (Identity & Access-managed) ───────────────────────────────

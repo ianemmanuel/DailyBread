@@ -2,26 +2,7 @@ import "dotenv/config"
 import { z } from "zod"
 import { parseTrustProxy } from "./config/rateLimitKey"
 
-/**
- * An identity provider's ISSUER, canonicalised at the edge.
- *
- * `verifyClerkJwt` compares this to a token's `iss` claim by exact string, so
- * `https://x.clerk.accounts.dev/` and `https://x.clerk.accounts.dev` are two
- * different issuers and one of them rejects every token. That is not a
- * hypothetical: the customer issuer was configured with the trailing slash a
- * dashboard shows, and every authenticated request failed as "Untrusted Clerk
- * issuer" — reaching the browser as a bare "Unauthorized" with nothing
- * pointing at config, while the webhook (verified by Svix secret, never by
- * issuer) kept working and made everything look wired.
- *
- * Normalised HERE rather than at the comparison, for the same reason
- * `R2_PUBLIC_ENDPOINT` is checked here: env traps that fail silently belong at
- * the boundary, once, so the rest of the app only ever sees a canonical value.
- * Only TRAILING slashes go — a provider that issues from a path
- * (`…/realms/dailybread`) keeps it.
- */
-/** True for "https://host" / "http://host:3003" — exactly what a browser
- *  puts in an Origin header, and so in a Clerk token's `azp`. */
+
 export function isBareOrigin(value: string): boolean {
   try {
     const url = new URL(value)

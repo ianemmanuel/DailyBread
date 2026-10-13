@@ -5,7 +5,7 @@
  * var. Used directly by Server Components for reads, and by the
  * app/api/** Route Handlers that proxy client-initiated writes — the
  * Clerk token never reaches client JS either way, mirroring the
- * pattern already established in apps/admin-dashboard.
+ * pattern already established in apps/erp.
  */
 import { auth } from "@clerk/nextjs/server"
 
