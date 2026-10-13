@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { Building2, Globe2, Hourglass, MapPin } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { UserStatusBadge } from "@/components/identity/UserStatusBadge"
 import { UserActionsMenu } from "@/components/identity/UserActionsMenu"
@@ -15,19 +16,25 @@ interface Props {
   showCountryColumn?: boolean
 }
 
+const PLACE_CHIP = "inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-xs font-medium text-foreground shadow-xs"
+
+/** Where an administrator works: the one scope, as a small pill with an icon for its tier. */
 function CountryCell({ scopes }: { scopes: AdminUserScope[] }) {
-  if (!scopes || scopes.length === 0) return <span className="text-xs text-muted-foreground">—</span>
-  if (scopes.some((s) => s.scopeType === "GLOBAL")) {
-    return <span className="badge-info text-[10px]">🌍 Global</span>
+  const s = scopes?.[0]
+  if (!s) return <span className="text-xs text-muted-foreground">—</span>
+  if (s.scopeType === "GLOBAL") {
+    return <span className={PLACE_CHIP}><Globe2 aria-hidden className="h-3.5 w-3.5 text-sky-600" />Global</span>
   }
-  const codes = [...new Set(scopes.map((s) => s.country?.code).filter(Boolean))] as string[]
-  if (codes.length === 0) return <span className="text-xs text-muted-foreground">—</span>
+  const country = s.country
+  if (!country) return <span className="text-xs text-muted-foreground">—</span>
   return (
-    <div className="flex flex-wrap gap-1">
-      {codes.map((code) => (
-        <span key={code} className="badge-neutral font-mono text-[10px] uppercase">{code}</span>
-      ))}
-    </div>
+    <span className={PLACE_CHIP} title={s.scopeType === "CITY" && s.city ? `${s.city.name}, ${country.name}` : country.name}>
+      {s.scopeType === "CITY"
+        ? <Building2 aria-hidden className="h-3.5 w-3.5 text-violet-600" />
+        : <MapPin aria-hidden className="h-3.5 w-3.5 text-emerald-600" />}
+      {s.scopeType === "CITY" && s.city ? s.city.name : country.name}
+      <span className="font-mono text-[10px] uppercase text-muted-foreground">{country.code}</span>
+    </span>
   )
 }
 
@@ -81,7 +88,15 @@ export function AdminUsersTable({ result, page, search, status, country, showCou
                     <span className="text-sm text-muted-foreground">{user.role?.displayName ?? "—"}</span>
                   </TableCell>
                   <TableCell>
-                    <UserStatusBadge status={user.status} />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <UserStatusBadge status={user.status} />
+                      {user.permissionSetup?.status === "PENDING" && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-600/20">
+                          <Hourglass aria-hidden className="h-3 w-3" />
+                          Needs permissions
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
                     {showCountryColumn

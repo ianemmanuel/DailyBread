@@ -8,6 +8,7 @@ import { getAdminSession } from "@/lib/auth/session"
 import { AdminPermissions } from "@repo/types/admin-app"
 import { UserStatusBadge } from "@/components/identity/UserStatusBadge"
 import { PermissionEditor } from "@/components/identity/permissions/PermissionEditor"
+import { SetupStatusNote } from "@/components/identity/setup/SetupStatusNote"
 import type { PermissionOptions } from "@/types"
 
 export const metadata: Metadata = { title: "Manage Permissions" }
@@ -74,8 +75,10 @@ export default async function ManagePermissionsPage({ params }: Props) {
         )}
       </div>
 
+      <SetupStatusNote setup={options.setup} />
+
       <section className="admin-card">
-        <PermissionEditor options={options} />
+        <PermissionEditor key={options.grants.join(",")} options={options} />
       </section>
     </div>
   )

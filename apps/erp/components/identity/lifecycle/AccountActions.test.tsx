@@ -10,7 +10,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 import { AccountActions } from "./AccountActions"
 
 const NONE: AdminUserCapabilities = {
-  invite: false, changeRole: false, changeScope: false, suspend: false, reinstate: false,
+  invite: false, editProfile: false, changeRole: false, changeScope: false, suspend: false, reinstate: false,
   reactivate: false, deactivate: false, manageAvailability: false, delegation: false, recovery: false,
 }
 const fetchSpy = vi.fn()
@@ -51,7 +51,7 @@ describe("AccountActions", () => {
   })
 
   it("a refusal keeps the dialog open with the backend's message and claims no success", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse(403, { message: "You cannot manage your own administrator account" }))
+    fetchSpy.mockResolvedValueOnce(jsonResponse(400, { message: "You cannot manage your own administrator account" }))
     renderActions({ deactivate: true })
     await click(button("Deactivate"))
     await type(document.querySelector("[role=alertdialog] textarea"), "Left the company")
@@ -62,6 +62,15 @@ describe("AccountActions", () => {
     expect(document.querySelector("[role=alertdialog]")).not.toBeNull()
     expect(document.querySelector("[role=alert]")?.textContent).toBe("You cannot manage your own administrator account")
     expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("a stale view (the account changed meanwhile) keeps the message and re-reads the page", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(409, { code: "STATUS_CHANGED", message: "This administrator's status changed just now — reload and try again" }))
+    renderActions({ reinstate: true }, "suspended")
+    await click(button("Reinstate"))
+    await click([...document.querySelectorAll("[role=alertdialog] button")].find((b) => b.textContent === "Reinstate")!)
+    expect(document.querySelector("[role=alert]")?.textContent).toContain("status changed just now")
+    expect(refresh).toHaveBeenCalled()
   })
 
   it("closes only after the backend accepts, then refreshes the page", async () => {

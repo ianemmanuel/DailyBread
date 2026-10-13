@@ -1,4 +1,7 @@
 import { ManagePermissionsDialog } from "@/components/identity/permissions/ManagePermissionsDialog"
+import { SetupStatusNote } from "@/components/identity/setup/SetupStatusNote"
+import { AllPermissionsDialog } from "./AllPermissionsDialog"
+import { PermissionBadge, type PermissionSummary } from "./PermissionBadge"
 import type { AdminUserDetail, PermissionOptions } from "@/types"
 
 interface Props {
@@ -6,6 +9,9 @@ interface Props {
   /** Present only when the viewer may assign this account's permissions; "unavailable" when that read failed. */
   options?: PermissionOptions | "unavailable" | null
 }
+
+/** How many badges the panel shows before the rest move behind "See all". */
+const PREVIEW_COUNT = 8
 
 function statusNote(status: string): string | null {
   if (status === "pending" || status === "invited") return "Not active yet — permissions take effect once the invitation is accepted."
@@ -15,9 +21,10 @@ function statusNote(status: string): string | null {
 }
 
 export function PermissionsPanel({ user, options }: Props) {
-  const grants = user.permissions.map((g) => g.permission)
-  const byModule = new Map<string, string[]>()
-  for (const p of grants) byModule.set(p.module, [...(byModule.get(p.module) ?? []), p.key])
+  const grants: PermissionSummary[] = user.permissions
+    .map(({ permission: p }) => ({ key: p.key, module: p.module, description: p.description }))
+    .sort((a, b) => a.module.localeCompare(b.module) || a.key.localeCompare(b.key))
+  const hidden = grants.length - PREVIEW_COUNT
   const note = statusNote(user.status)
 
   return (
@@ -33,6 +40,7 @@ export function PermissionsPanel({ user, options }: Props) {
       </div>
 
       <div className="space-y-3 px-4 py-3">
+        <SetupStatusNote setup={user.permissionSetup} />
         {note && <p className="text-xs text-muted-foreground">{note}</p>}
         {options === "unavailable" && (
           <p role="alert" className="text-xs text-destructive">The permission editor could not be loaded. Reload the page to try again.</p>
@@ -40,16 +48,17 @@ export function PermissionsPanel({ user, options }: Props) {
         {grants.length === 0 ? (
           <p className="text-sm text-muted-foreground">No permissions granted.</p>
         ) : (
-          [...byModule.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([module, keys]) => (
-            <div key={module} className="flex flex-col gap-1.5 sm:flex-row sm:gap-4">
-              <p className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:w-36 sm:pt-0.5">{module.replace(/_/g, " ")}</p>
-              <ul className="flex flex-wrap gap-1.5">
-                {keys.sort().map((k) => (
-                  <li key={k} className="rounded-md bg-muted/50 px-2 py-0.5 font-mono text-xs text-foreground">{k.split(":").slice(1).join(":")}</li>
-                ))}
-              </ul>
-            </div>
-          ))
+          <>
+            <ul className="flex flex-wrap gap-1.5">
+              {grants.slice(0, PREVIEW_COUNT).map((p) => <li key={p.key}><PermissionBadge permission={p} /></li>)}
+            </ul>
+            {hidden > 0 && (
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <AllPermissionsDialog name={[user.firstName, user.lastName].join(" ")} permissions={grants} />
+                <span className="text-xs text-muted-foreground">+{hidden} more not shown</span>
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>

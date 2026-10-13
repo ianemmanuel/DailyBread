@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { KeyRound, LifeBuoy, Loader2, Lock, Search } from "lucide-react"
+import { ArrowLeft, Check, KeyRound, ListChecks, Loader2, Lock, RotateCw, Search, ShieldPlus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { AssignmentMode, PermissionOptions } from "@/types"
+import { permissionTitle } from "@/lib/identity/format"
+import { PermissionReview, type ReviewItem } from "./PermissionReview"
 
 /*
  * Edits one administrator's grants under ONE of two authorities, kept visibly
@@ -17,8 +19,12 @@ import type { AssignmentMode, PermissionOptions } from "@/types"
  * keys may move is the server's answer (permission-options, computed by the
  * rules the save runs); everything else is locked. The save goes to the
  * route for the chosen mode and the backend re-checks it — its refusal is
- * shown as-is.
+ * shown as-is. The save carries the grants the editor started from, so a
+ * colleague's newer save (say, completing the same pending setup) is refused
+ * rather than overwritten; the editor then offers the latest state.
  */
+
+const STALE_CODES = new Set(["PERMISSIONS_CHANGED", "PERMISSION_SETUP_COMPLETED", "CONCURRENT_MODIFICATION"])
 
 const MODE_COPY: Record<AssignmentMode, { title: string; blurb: string }> = {
   delegation: {
@@ -26,8 +32,8 @@ const MODE_COPY: Record<AssignmentMode, { title: string; blurb: string }> = {
     blurb: "You can grant or remove only permissions you hold yourself.",
   },
   recovery: {
-    title: "Recovery",
-    blurb: "Set up or restore a department's lead: any permission in this role's pool, including ones you do not hold. Recorded as a recovery.",
+    title: "Department setup",
+    blurb: "Assign any permission in this role, including ones you don't hold yourself — for a department's first lead, or to replace one who has left. Recorded in the audit log.",
   },
 }
 
@@ -53,6 +59,7 @@ export function PermissionEditor({ options, onSaved, onCancel, scrollClassName }
   const [confirming, setConfirming] = useState(false)
   const [pending, setPending]   = useState(false)
   const [error, setError]       = useState<string | null>(null)
+  const [stale, setStale]       = useState(false)
 
   const movable = useMemo(() => new Set(mode ? options[mode].movable : []), [mode, options])
   const added   = [...selected].filter((k) => !initial.includes(k))
@@ -93,15 +100,15 @@ export function PermissionEditor({ options, onSaved, onCancel, scrollClassName }
       const res = await fetch(`/api/identity/users/${encodeURIComponent(target.id)}/permissions${recovery ? "/recovery" : ""}`, {
         method : "PUT",
         headers: { "Content-Type": "application/json" },
-        body   : JSON.stringify({ permissionKeys: [...selected] }),
+        body   : JSON.stringify({ permissionKeys: [...selected], expectedGrants: grants }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setError(data.message ?? "The permissions were not saved.")
-        setConfirming(false)
+        setStale(STALE_CODES.has(data.code))
         return
       }
-      toast.success(recovery ? "Permissions recovered" : "Permissions saved")
+      toast.success(recovery ? "Permissions assigned" : "Permissions saved")
       setConfirming(false)
       router.refresh()
       onSaved?.()
@@ -110,6 +117,49 @@ export function PermissionEditor({ options, onSaved, onCancel, scrollClassName }
     } finally {
       setPending(false)
     }
+  }
+
+  const describe = (key: string): ReviewItem => ({ key, description: pool.find((p) => p.key === key)?.description ?? null })
+  const reviewAdded   = added.map(describe)
+  const reviewRemoved = [...removed.map(describe), ...staleGrants.map((key) => ({ key, description: null, stale: true }))]
+  const unchanged     = initial.filter((k) => selected.has(k)).length
+
+  const errorBanner = error && (
+    <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-sm text-destructive">
+      <p>{error}</p>
+      {stale && (
+        <Button type="button" size="sm" variant="outline" onClick={() => router.refresh()}>
+          <RotateCw />
+          Load latest
+        </Button>
+      )}
+    </div>
+  )
+
+  if (confirming) {
+    return (
+      <div className="flex min-h-0 flex-col gap-3">
+        <div>
+          <p className="text-base font-semibold text-foreground">Review changes for {target.firstName} {target.lastName}</p>
+          <p className="text-sm text-muted-foreground">
+            Check each permission below. Nothing changes until you confirm.
+            {recovery && " You are assigning as department setup, which is recorded in the audit log."}
+          </p>
+        </div>
+        <PermissionReview added={reviewAdded} removed={reviewRemoved} unchanged={unchanged} className={scrollClassName} />
+        {errorBanner}
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-3">
+          <Button type="button" variant="neutral" className="group" disabled={pending} onClick={() => setConfirming(false)}>
+            <ArrowLeft className="transition-transform duration-200 group-hover:-translate-x-0.5" />
+            Back
+          </Button>
+          <Button type="button" variant="solid-success" className="group" disabled={pending} onClick={save}>
+            {pending ? <Loader2 className="animate-spin" /> : <Check className="transition-transform duration-200 group-hover:scale-110" />}
+            {recovery ? "Confirm and assign" : "Confirm and save"}
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -129,14 +179,14 @@ export function PermissionEditor({ options, onSaved, onCancel, scrollClassName }
                 mode === m ? (m === "recovery" ? "bg-warning/15 text-warning" : "bg-primary/10 text-primary") : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {m === "recovery" ? <LifeBuoy className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}
+              {m === "recovery" ? <ShieldPlus className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />}
               {MODE_COPY[m].title}
             </button>
           ))}
         </div>
       )}
 
-      <p className={cn("rounded-lg border px-3 py-2 text-xs", recovery ? "border-warning/40 bg-warning/5 text-foreground" : "border-border/70 bg-muted/30 text-muted-foreground")}>
+      <p className={cn("rounded-lg border px-3 py-2 text-sm", recovery ? "border-warning/40 bg-warning/5 text-foreground" : "border-border/70 bg-muted/30 text-muted-foreground")}>
         <span className="font-medium text-foreground">{MODE_COPY[mode].title}.</span> {MODE_COPY[mode].blurb}
       </p>
 
@@ -160,7 +210,7 @@ export function PermissionEditor({ options, onSaved, onCancel, scrollClassName }
         )}
         {groups.map(([module, perms]) => (
           <fieldset key={module} className="space-y-1.5">
-            <legend className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{module.replace(/_/g, " ")}</legend>
+            <legend className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{module.replace(/_/g, " ")}</legend>
             <div className="grid gap-1.5 sm:grid-cols-2">
               {perms.map((p) => {
                 const locked  = !movable.has(p.key)
@@ -170,18 +220,19 @@ export function PermissionEditor({ options, onSaved, onCancel, scrollClassName }
                     key={p.key}
                     title={locked ? "You cannot change this permission under this authority" : undefined}
                     className={cn(
-                      "flex items-start gap-2.5 rounded-lg border px-3 py-2",
+                      "flex items-start gap-2.5 rounded-lg border px-3 py-2.5",
                       locked ? "cursor-not-allowed border-border/40 opacity-60" : "cursor-pointer border-border/70 hover:bg-muted/40",
                       checked && "border-primary/30 bg-primary/5",
                     )}
                   >
                     <Checkbox className="mt-0.5" checked={checked} disabled={locked || pending} onCheckedChange={(v) => toggle(p.key, v === true)} />
                     <span className="min-w-0">
-                      <span className="flex items-center gap-1 break-all font-mono text-xs text-foreground">
-                        {p.key.split(":").slice(1).join(":")}
+                      <span className="flex items-center gap-1 text-sm font-medium text-foreground">
+                        {permissionTitle(p.key)}
                         {locked && <Lock aria-label="Locked" className="h-3 w-3 shrink-0 text-muted-foreground" />}
                       </span>
-                      {p.description && <span className="block text-xs text-muted-foreground">{p.description}</span>}
+                      {p.description && <span className="block text-sm leading-snug text-muted-foreground">{p.description}</span>}
+                      <span className="block break-all font-mono text-[11px] text-muted-foreground/80">{p.key}</span>
                     </span>
                   </label>
                 )
@@ -197,42 +248,25 @@ export function PermissionEditor({ options, onSaved, onCancel, scrollClassName }
         </p>
       )}
 
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {errorBanner}
 
-      {confirming ? (
-        <div className="space-y-2 rounded-lg border border-warning/40 bg-warning/5 p-3">
-          <p className="text-sm font-medium text-foreground">Apply recovery to {target.firstName} {target.lastName}?</p>
-          {added.length > 0 && <p className="text-xs"><span className="font-medium">Add ({added.length}):</span> <span className="break-all font-mono text-muted-foreground">{added.join(", ")}</span></p>}
-          {removed.length > 0 && <p className="text-xs"><span className="font-medium">Remove ({removed.length}):</span> <span className="break-all font-mono text-muted-foreground">{removed.join(", ")}</span></p>}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" disabled={pending} onClick={() => setConfirming(false)}>Back</Button>
-            <Button type="button" variant="warning" disabled={pending} onClick={save}>
-              {pending && <Loader2 className="animate-spin" />}
-              Apply recovery
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+        <span className="text-xs text-muted-foreground" aria-live="polite">
+          {changed ? `${added.length} to add · ${removed.length + staleGrants.length} to remove` : `${selected.size} of ${pool.length} granted`}
+        </span>
+        <div className="flex gap-2">
+          {(onCancel || changed) && (
+            <Button type="button" variant="neutral" className="group" disabled={pending} onClick={cancel}>
+              <X className="transition-transform duration-200 group-hover:rotate-90" />
+              Cancel
             </Button>
-          </div>
+          )}
+          <Button type="button" variant="solid-info" className="group" disabled={pending || !changed} onClick={() => { setError(null); setConfirming(true) }}>
+            <ListChecks className="transition-transform duration-200 group-hover:scale-110" />
+            Review changes
+          </Button>
         </div>
-      ) : (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
-          <span className="text-xs text-muted-foreground" aria-live="polite">
-            {changed ? `${added.length} to add · ${removed.length + staleGrants.length} to remove` : `${selected.size} of ${pool.length} granted`}
-          </span>
-          <div className="flex gap-2">
-            {(onCancel || changed) && (
-              <Button type="button" variant="outline" disabled={pending} onClick={cancel}>Cancel</Button>
-            )}
-            <Button
-              type="button"
-              variant={recovery ? "warning" : "default"}
-              disabled={pending || !changed}
-              onClick={() => (recovery ? setConfirming(true) : save())}
-            >
-              {pending && <Loader2 className="animate-spin" />}
-              {recovery ? "Review recovery…" : "Save permissions"}
-            </Button>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   )
 }

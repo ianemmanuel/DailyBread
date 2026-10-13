@@ -28,6 +28,9 @@ export function useLifecycleAction(userId: string) {
         const message = data.message ?? "The action was not completed."
         setError(message)
         toast.error("Action failed", { description: message })
+        // Refused because the account or the viewer's authority changed since
+        // this page rendered: re-read it so the offered actions are current.
+        if (res.status === 403 || res.status === 409) router.refresh()
         return false
       }
       toast.success(LIFECYCLE_ACTIONS[action].success)

@@ -145,20 +145,37 @@ export class ClerkAdminStateService {
     return this.client.users.deleteUser(clerkUserId)
   }
 
-  /** Used by sendAdminInvitation. */
+  /**
+   * Used by sendAdminInvitation — a send AND a resend. Clerk refuses a second
+   * invitation while one is pending (duplicate_record), which made every
+   * resend fail, and it can also hold a pending record its list API does not
+   * return. So the new invitation is created with ignoreExisting, then every
+   * OTHER pending invitation for the same address is revoked: exactly one
+   * live link, the newest. A failed revoke is left for the old link's own
+   * expiry rather than failing a send that already went out.
+   */
   static async createInvitation(params: {
     emailAddress  : string
     redirectUrl   : string
     publicMetadata: Record<string, unknown>
     expiresInDays : number
   }) {
-    return this.client.invitations.createInvitation({
+    const invitation = await this.client.invitations.createInvitation({
       emailAddress  : params.emailAddress,
       redirectUrl   : params.redirectUrl,
       publicMetadata: params.publicMetadata,
       expiresInDays : params.expiresInDays,
       notify        : true,
+      ignoreExisting: true,
     })
+    const email = params.emailAddress.toLowerCase()
+    const { data: pending } = await this.client.invitations.getInvitationList({ status: "pending", query: email, limit: 100 })
+    await Promise.allSettled(
+      pending
+        .filter((i) => i.id !== invitation.id && i.emailAddress.toLowerCase() === email)
+        .map((i) => this.client.invitations.revokeInvitation(i.id)),
+    )
+    return invitation
   }
 }
 

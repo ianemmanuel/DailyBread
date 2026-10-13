@@ -7,6 +7,7 @@ export const ROLE_POOLS: Record<string, PermissionKey[]> = {
 
   identity_admin: [
     "admin_users:profiles:read",
+    "admin_users:profiles:update",
     "admin_users:accounts:create",
     "admin_users:invitations:send",
     "admin_users:permissions:manage",

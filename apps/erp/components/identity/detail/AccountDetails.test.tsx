@@ -16,7 +16,7 @@ function user(overrides: Partial<AdminUserDetail>): AdminUserDetail {
     scopes: [{ id: "s1", scopeType: "COUNTRY", countryId: "ke", cityId: null, country: { id: "ke", name: "Kenya", code: "KE" } }],
     reviewAvailability: "AVAILABLE", unavailableFrom: null, unavailableUntil: null, unavailableReason: null,
     roleId: "r", createdBy: creator, invitationSentBy: null, deactivatedAt: null, deactivationReason: null,
-    isSelf: false, permissions: [], capabilities: {} as AdminUserDetail["capabilities"],
+    isSelf: false, updatedAt: "2026-10-01T10:00:00Z", permissionSetup: null, permissions: [], capabilities: {} as AdminUserDetail["capabilities"],
     ...overrides,
   }
 }

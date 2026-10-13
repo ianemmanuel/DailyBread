@@ -224,6 +224,7 @@ export const AdminPermissions = {
 
   // ── Admin users (identity module) ─────────────────────────────────────────
   ADMIN_USERS_PROFILES_READ      : "admin_users:profiles:read",
+  ADMIN_USERS_PROFILES_UPDATE    : "admin_users:profiles:update",
   ADMIN_USERS_ACCOUNTS_CREATE    : "admin_users:accounts:create",
   ADMIN_USERS_INVITATIONS_SEND   : "admin_users:invitations:send",
   ADMIN_USERS_PERMISSIONS_MANAGE : "admin_users:permissions:manage",

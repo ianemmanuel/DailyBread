@@ -1,4 +1,5 @@
 import {
+  ClipboardList,
   KeyRound,
   ListChecks,
   Megaphone,
@@ -277,7 +278,11 @@ export const navSections: NavSection[] = [
       { label: "Audit",  href: "/identity/audit",   icon: History,    requiredPermission: AdminPermissions.AUDIT_LOGS_ALL_READ },
       // The SHARED delegation workflow: identity admins and department leads
       // alike — anyone holding the management or recovery permission.
-      { label: "Permissions", href: "/identity/permissions", icon: KeyRound,
+      // CITY-tier admins never assign permissions (the backend refuses them),
+      // so neither link is offered to them even if they hold a key.
+      { label: "Pending setup", href: "/identity/setup", icon: ClipboardList, hideForCityTier: true,
+        requiredAnyPermission: [AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE, AdminPermissions.ADMIN_USERS_PERMISSIONS_RECOVER] },
+      { label: "Permissions", href: "/identity/permissions", icon: KeyRound, hideForCityTier: true,
         requiredAnyPermission: [AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE, AdminPermissions.ADMIN_USERS_PERMISSIONS_RECOVER] },
     ],
   },

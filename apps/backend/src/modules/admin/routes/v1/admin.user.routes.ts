@@ -10,8 +10,12 @@ import {
   handleRecoverPermissions,
   handleGetPermissionOptions,
   handleListDelegableAdmins,
+  handleListPermissionSetups,
+  handleGetPermissionSetupSummary,
   handleUpdateRole,
   handleUpdateScopes,
+  handleUpdateProfile,
+  handleUpdateAssignment,
   handleSuspendAdminUser,
   handleReinstateAdminUser,
   handleReactivateAdminUser,
@@ -53,6 +57,9 @@ router.get("/meta/roles/:roleId/pool", requirePermission(AdminPermissions.ADMIN_
 // Registered before "/:id" so "delegable" is not read as an id. Both reads
 // return only targets the actor may assign to (service-computed).
 router.get("/delegable",                 requireAnyPermission([MANAGE, RECOVER]), handleListDelegableAdmins)
+// Pending initial setups: who sees which is derived per viewer in the service.
+router.get("/permission-setup",          requireAnyPermission([MANAGE, RECOVER]), handleListPermissionSetups)
+router.get("/permission-setup/summary",  requireAnyPermission([MANAGE, RECOVER]), handleGetPermissionSetupSummary)
 router.get("/:id/permission-options",    requireAnyPermission([MANAGE, RECOVER]), handleGetPermissionOptions)
 // Ordinary delegation: permission ownership.
 router.put("/:id/permissions",           requirePermission(MANAGE),  handleUpdatePermissions)
@@ -72,6 +79,10 @@ router.patch("/:id/role",   requirePermission(AdminPermissions.ADMIN_USERS_ROLES
 // Scope is assigned with the role (identity provisioning), so it is gated on
 // roles:assign — permissions:manage is the grant capability.
 router.patch("/:id/scopes", requirePermission(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN), handleUpdateScopes)
+// Role and scope as one validated pair (the ERP's edit page uses this).
+router.put("/:id/assignment", requirePermission(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN), handleUpdateAssignment)
+// Name and employee ID; the email is never editable.
+router.patch("/:id/profile", requirePermission(AdminPermissions.ADMIN_USERS_PROFILES_UPDATE), handleUpdateProfile)
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 router.post("/:id/suspend",    requirePermission(AdminPermissions.ADMIN_USERS_ACCOUNTS_SUSPEND),    handleSuspendAdminUser)

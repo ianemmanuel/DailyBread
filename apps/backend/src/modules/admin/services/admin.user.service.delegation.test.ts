@@ -20,7 +20,7 @@ import { ALL_PERMISSION_KEYS } from "../../../../../../packages/database/src/see
 type Row = Record<string, any>
 interface Store {
   roles: Row[]; permissions: Row[]; rolePerms: Row[]; users: Row[]
-  grants: Row[]; scopes: Row[]; countries: Row[]; cities: Row[]; audits: Row[]
+  grants: Row[]; scopes: Row[]; countries: Row[]; cities: Row[]; audits: Row[]; setups: Row[]
 }
 
 const h = vi.hoisted(() => ({
@@ -47,6 +47,10 @@ function joinUser(u: Row): Row {
     ...clone(u),
     createdBy       : ref(u.createdById),
     invitationSentBy: ref(u.invitationSentById),
+    permissionSetup : (() => {
+      const t = s.setups.find((x) => x.adminUserId === u.id)
+      return t ? { ...clone(t), resolvedBy: ref(t.resolvedById) } : null
+    })(),
     role: role ? {
       ...clone(role),
       permissions: s.rolePerms.filter((rp) => rp.roleId === role.id)
@@ -75,6 +79,17 @@ function matches(u: Row, where: any): boolean {
     if (k === "scopes") {
       const rows = joinUser(u).scopes
       if (!rows.some((r: Row) => matchesRow(r, v.some))) return false
+      continue
+    }
+    if (k === "permissions") {
+      if (!joinUser(u).permissions.some((g: Row) => matchesRow(g.permission, v.some.permission))) return false
+      continue
+    }
+    if (k === "role") {
+      const role = joinUser(u).role
+      if (!role) return false
+      if (v.name !== undefined && !matchesValue(role.name, v.name)) return false
+      if (v.permissions && !role.permissions.some((rp: Row) => matchesRow(rp.permission, v.permissions.some.permission))) return false
       continue
     }
     if (!matchesValue(u[k], v)) return false
@@ -164,6 +179,39 @@ function makeDb(): any {
       },
       findMany: async ({ where }: any) => h.store.grants.filter((g) => g.adminUserId === where.adminUserId)
         .map((g) => ({ permission: { key: h.store.permissions.find((p) => p.id === g.permissionId)!.key } })),
+      count: async ({ where }: any) => h.store.grants.filter((g) => g.adminUserId === where.adminUserId).length,
+    },
+    adminPermissionSetup: {
+      findUnique: async ({ where }: any) => clone(h.store.setups.find((t) => t.adminUserId === where.adminUserId) ?? null),
+      findMany  : async ({ where, take }: any) => h.store.setups
+        .filter((t) => t.status === where.status)
+        .map((t): Row => ({ ...clone(t), adminUser: h.store.users.find((u) => u.id === t.adminUserId)! }))
+        .filter((t) => matches(t.adminUser, where.adminUser))
+        .sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime())
+        .slice(0, take)
+        .map((t) => ({ ...t, adminUser: joinUser(t.adminUser) })),
+      createMany: async ({ data, skipDuplicates }: any) => {
+        let count = 0
+        for (const d of data) {
+          if (h.store.setups.some((t) => t.adminUserId === d.adminUserId)) {
+            if (skipDuplicates) continue
+            throw Object.assign(new Error("unique"), { code: "P2002" })
+          }
+          h.store.setups.push({ status: "PENDING", openedAt: new Date(t0++), resolvedAt: null, resolvedById: null, ...d })
+          count++
+        }
+        return { count }
+      },
+      updateMany: async ({ where, data }: any) => {
+        const rows = h.store.setups.filter((t) => t.adminUserId === where.adminUserId && t.status === where.status)
+        for (const t of rows) Object.assign(t, data)
+        return { count: rows.length }
+      },
+      deleteMany: async ({ where }: any) => {
+        const before = h.store.setups.length
+        h.store.setups = h.store.setups.filter((t) => t.adminUserId !== where.adminUserId)
+        return { count: before - h.store.setups.length }
+      },
     },
     adminUserScope: {
       deleteMany: async ({ where }: any) => {
@@ -197,6 +245,7 @@ function makeDb(): any {
 vi.mock("@repo/db", () => ({
   prisma          : makeDb(),
   Prisma          : {},
+  AdminPermissionSetupStatus: { PENDING: "PENDING", COMPLETED: "COMPLETED", CANCELLED: "CANCELLED" },
   AdminUserStatus : { pending: "pending", invited: "invited", active: "active", suspended: "suspended", deactivated: "deactivated" },
   GeoStatus       : { ACTIVE: "ACTIVE", INACTIVE: "INACTIVE" },
   AdminReviewAvailability: { AVAILABLE: "AVAILABLE", UNAVAILABLE: "UNAVAILABLE" },
@@ -223,6 +272,7 @@ vi.mock("@/modules/admin/middleware", async () => ({
 }))
 
 const svc = await import("./admin.user.service")
+const setupSvc = await import("./admin.permissionSetup.service")
 const { ClerkAdminStateService } = await import("@/lib/clerk")
 const { handleUpdateRole, handleUpdateScopes, handleUpdatePermissions } = await import("../controllers/admin.user.controller")
 const { default: userRouter } = await import("../routes/v1/admin.user.routes")
@@ -255,7 +305,7 @@ function seed(): void {
   h.loseVersionRace = false
   h.loseVersionFor  = null
   h.failAudit       = false
-  const s: Store = { roles: [], permissions: [], rolePerms: [], users: [], grants: [], scopes: [], countries: [], cities: [], audits: [] }
+  const s: Store = { roles: [], permissions: [], rolePerms: [], users: [], grants: [], scopes: [], countries: [], cities: [], audits: [], setups: [] }
   for (const name of ROLE_NAMES) s.roles.push({ id: roleId(name), name, displayName: name })
   for (const key of ALL_PERMISSION_KEYS) s.permissions.push({ id: permId(key), key, isActive: true, module: key.split(":")[0], description: "" })
   for (const [role, keys] of Object.entries(ROLE_POOLS)) {
@@ -1267,5 +1317,332 @@ describe("router boundary", () => {
     expect(await call("PUT", "/users/mover/permissions", "super", { permissionKeys: ["vendors:outlets:read"], scopes: [SCOPE.MSA] }))
       .toEqual({ status: 400, code: "UNSUPPORTED_FIELD" })
     expect(JSON.stringify(h.store)).toBe(before)
+  })
+
+  it("the setup queue is closed without the management or recovery key, and open to a lead", async () => {
+    expect(await call("GET", "/users/permission-setup", "voPlainKE")).toEqual({ status: 403, code: "FORBIDDEN" })
+    expect(await call("GET", "/users/permission-setup/summary", "ccKE")).toEqual({ status: 403, code: "FORBIDDEN" })
+    expect(await call("GET", "/users/permission-setup", "voLeadKE")).toEqual({ status: 200, code: "OK" })
+    expect(await call("GET", "/users/permission-setup/summary", "idKE")).toEqual({ status: 200, code: "OK" })
+  })
+
+  it("expectedGrants reaches the service through the real controller (a stale editor is refused)", async () => {
+    addAdmin("stale", "vendor_ops", SCOPE.NBO, ["vendors:outlets:read"])
+    const before = JSON.stringify(h.store)
+    expect(await call("PUT", "/users/stale/permissions", "voLeadKE", { permissionKeys: [], expectedGrants: [] }))
+      .toEqual({ status: 409, code: "PERMISSIONS_CHANGED" })
+    expect(JSON.stringify(h.store)).toBe(before)
+  })
+})
+
+// ─── Pending permission setup ────────────────────────────────────────────────
+
+const setupOf = (id: string) => h.store.setups.find((t) => t.adminUserId === id)
+const invite  = (id: string, actor = "idG") => svc.sendAdminInvitation(id, actor)
+/** A newly provisioned account whose invitation has been sent. */
+async function invited(id: string, role: string, scope: Row): Promise<string> {
+  addAdmin(id, role, scope, [], "pending")
+  await invite(id)
+  return id
+}
+const queue = (actor: string, lane?: string) => setupSvc.listPermissionSetups({ lane, pageSize: 100 }, actor)
+const lanes = async (actor: string) => {
+  const q = await queue(actor)
+  return Object.fromEntries(["department", "recovery", "oversight"].map((l) => [l, q.setups.filter((t) => t.lane === l).map((t) => t.target.id).sort()]))
+}
+
+describe("pending permission setup: lifecycle", () => {
+  it("opens only after an invitation is actually sent — not at creation, not on a failed send or a lost race", async () => {
+    const user = await create("idKE", "vendor_ops", [SCOPE.KE])
+    expect(setupOf(user.id)).toBeUndefined()
+
+    vi.mocked(ClerkAdminStateService.createInvitation).mockRejectedValueOnce(new Error("clerk down"))
+    await expect(invite(user.id, "idKE")).rejects.toMatchObject({ code: "CLERK_ERROR" })
+    expect(setupOf(user.id)).toBeUndefined()
+
+    vi.mocked(ClerkAdminStateService.createInvitation).mockImplementationOnce(async () => {
+      userOf(user.id).status = "deactivated"
+      return {} as never
+    })
+    await expect(invite(user.id, "idKE")).rejects.toMatchObject({ code: "STATUS_CHANGED" })
+    expect(setupOf(user.id)).toBeUndefined()
+
+    userOf(user.id).status = "pending"
+    await invite(user.id, "idKE")
+    expect(setupOf(user.id)).toMatchObject({ status: "PENDING", resolvedAt: null })
+  })
+
+  it("a resend never duplicates it or moves its opening time", async () => {
+    await invited("hire", "vendor_ops", SCOPE.KE)
+    const openedAt = setupOf("hire")!.openedAt
+    await invite("hire")
+    await invite("hire", "idKE")
+    expect(h.store.setups.filter((t) => t.adminUserId === "hire")).toHaveLength(1)
+    expect(setupOf("hire")!.openedAt).toEqual(openedAt)
+  })
+
+  it("accepting the invitation does not complete it, and nothing is granted automatically", async () => {
+    await invited("hire", "vendor_ops", SCOPE.KE)
+    userOf("hire").status = "active" // the activation webhook
+    expect(setupOf("hire")!.status).toBe("PENDING")
+    expect(grantsOf("hire")).toEqual([])
+    expect((await lanes("voLeadKE")).department).toEqual(["hire"])
+  })
+
+  it("the first non-empty grant completes it and records who; an empty save leaves it pending", async () => {
+    await invited("hire", "vendor_ops", SCOPE.NBO)
+    await grant("hire", [], "voLeadKE")
+    expect(setupOf("hire")!.status).toBe("PENDING")
+    await grant("hire", ["vendors:outlets:read"], "voLeadKE")
+    expect(setupOf("hire")).toMatchObject({ status: "COMPLETED", resolvedById: "voLeadKE" })
+    expect((await queue("voLeadKE")).total).toBe(0)
+    expect((await queue("voLeadKE2")).total).toBe(0)
+  })
+
+  it("an account that already holds grants when invited gets no task", async () => {
+    addAdmin("ready", "vendor_ops", SCOPE.KE, [], "pending")
+    await grant("ready", ["vendors:outlets:read"], "voLeadKE")
+    await invite("ready")
+    expect(setupOf("ready")).toBeUndefined()
+  })
+
+  it("two delegates on one task: the first save wins; the second is told, and overwrites nothing", async () => {
+    await invited("hire", "vendor_ops", SCOPE.KE)
+    await svc.updateAdminUserPermissions({ adminUserId: "hire", permissionKeys: ["vendors:outlets:read"], expectedGrants: [] }, "voLeadKE")
+    await refusedWithoutWrites(
+      () => svc.updateAdminUserPermissions({ adminUserId: "hire", permissionKeys: ["vendors:meals:read"], expectedGrants: [] }, "voLeadKE2"),
+      "PERMISSION_SETUP_COMPLETED",
+    )
+    // A retry of the winning request is refused the same way: nothing is applied twice.
+    await refusedWithoutWrites(
+      () => svc.updateAdminUserPermissions({ adminUserId: "hire", permissionKeys: ["vendors:outlets:read"], expectedGrants: [] }, "voLeadKE"),
+      "PERMISSION_SETUP_COMPLETED",
+    )
+    expect(grantsOf("hire")).toEqual(["vendors:outlets:read"])
+    expect(setupOf("hire")!.resolvedById).toBe("voLeadKE")
+  })
+
+  it("…the stale check runs after authorization, so it reveals nothing to someone who may not assign", async () => {
+    await invited("hire", "vendor_ops", SCOPE.UG)
+    await grant("hire", ["vendors:outlets:read"], "voG")
+    await refusedWithoutWrites(
+      () => svc.updateAdminUserPermissions({ adminUserId: "hire", permissionKeys: [], expectedGrants: [] }, "voLeadKE"),
+      "SCOPE_FORBIDDEN",
+    )
+  })
+
+  it("deactivation cancels it; reactivation starts a new cycle that the next invitation opens", async () => {
+    await invited("hire", "vendor_ops", SCOPE.KE)
+    await svc.deactivateAdminUser("hire", "left", "idKE")
+    expect(setupOf("hire")).toMatchObject({ status: "CANCELLED", resolvedById: "idKE" })
+    expect((await queue("voLeadKE")).total).toBe(0)
+    await svc.reactivateAdminUser("hire", "idKE")
+    expect(setupOf("hire")).toBeUndefined()
+    await invite("hire", "idKE")
+    expect(setupOf("hire")!.status).toBe("PENDING")
+  })
+
+  it("a role change re-opens a completed setup, and the audience follows the new role", async () => {
+    await invited("hire", "vendor_ops", SCOPE.KE)
+    await grant("hire", ["vendors:outlets:read"], "voLeadKE")
+    await svc.updateAdminUserRole({ adminUserId: "hire", roleId: roleId("finance") }, "idKE")
+    expect(setupOf("hire")).toMatchObject({ status: "PENDING", resolvedById: null })
+    expect((await queue("voLeadKE")).total).toBe(0)
+    expect((await lanes("idKE")).recovery).toEqual(["hire"])
+  })
+
+  it("a scope change re-opens it and moves it to the new scope's audience", async () => {
+    await invited("hire", "vendor_ops", SCOPE.KE)
+    await grant("hire", ["vendors:outlets:read"], "voLeadKE")
+    await rescope("hire", SCOPE.UG, "idG")
+    expect(setupOf("hire")!.status).toBe("PENDING")
+    expect((await queue("voLeadKE")).total).toBe(0)
+    expect((await queue("idKE")).total).toBe(0)
+    expect((await lanes("idUG")).recovery).toEqual(["hire"])
+  })
+
+  it("a setup still pending when its role changes stays one task", async () => {
+    await invited("hire", "vendor_ops", SCOPE.KE)
+    await svc.updateAdminUserRole({ adminUserId: "hire", roleId: roleId("finance") }, "idKE")
+    expect(h.store.setups.filter((t) => t.adminUserId === "hire")).toHaveLength(1)
+    expect(setupOf("hire")!.status).toBe("PENDING")
+  })
+})
+
+describe("pending permission setup: who sees it", () => {
+  beforeEach(async () => {
+    await invited("tG",   "vendor_ops", SCOPE.GLOBAL)
+    await invited("tKE",  "vendor_ops", SCOPE.KE)
+    await invited("tNBO", "vendor_ops", SCOPE.NBO)
+    await invited("tUG",  "vendor_ops", SCOPE.UG)
+    await invited("fKE",  "finance",    SCOPE.KE)
+  })
+
+  it("a GLOBAL lead: its department is GLOBAL targets; lower ones are visible but never counted", async () => {
+    expect(await lanes("voG")).toEqual({ department: ["tG"], recovery: [], oversight: ["tKE", "tNBO", "tUG"] })
+    expect(await setupSvc.getPermissionSetupSummary("voG")).toEqual({ total: 4, attention: 1 })
+  })
+
+  it("a COUNTRY lead: COUNTRY and CITY targets of its role in its country — never GLOBAL, another country or another role", async () => {
+    expect(await lanes("voLeadKE")).toEqual({ department: ["tKE", "tNBO"], recovery: [], oversight: [] })
+    expect(await setupSvc.getPermissionSetupSummary("voLeadKE")).toEqual({ total: 2, attention: 2 })
+  })
+
+  it("a CITY admin holding the management key, or anyone without it, sees nothing", async () => {
+    expect(await setupSvc.getPermissionSetupSummary("voLeadNBO")).toEqual({ total: 0, attention: 0 })
+    expect(await setupSvc.getPermissionSetupSummary("voPlainKE")).toEqual({ total: 0, attention: 0 })
+    expect(await setupSvc.getPermissionSetupSummary("finKE")).toEqual({ total: 0, attention: 0 })
+  })
+
+  it("a COUNTRY identity admin recovers in its country only, nudged only where no department lead can act", async () => {
+    expect(await lanes("idKE")).toEqual({ department: [], recovery: ["fKE", "tKE", "tNBO"], oversight: [] })
+    const q = await queue("idKE")
+    expect(q.setups.filter((t) => t.attention).map((t) => t.target.id)).toEqual(["fKE"])
+    expect(q.counts).toMatchObject({ total: 3, attention: 1, recovery: 3 })
+  })
+
+  it("a GLOBAL identity admin recovers everywhere; Uganda has no country lead, so tUG needs attention too", async () => {
+    const q = await queue("idG")
+    expect(q.setups.map((t) => t.target.id).sort()).toEqual(["fKE", "tG", "tKE", "tNBO", "tUG"])
+    expect(q.setups.filter((t) => t.attention).map((t) => t.target.id).sort()).toEqual(["fKE", "tUG"])
+  })
+
+  it("without the recovery key an identity admin has no recovery queue", async () => {
+    revoke("idKE", RECOVER)
+    expect((await queue("idKE")).total).toBe(0)
+  })
+
+  it("super admin oversees every outstanding setup", async () => {
+    expect((await queue("super")).setups.map((t) => t.target.id).sort()).toEqual(["fKE", "tG", "tKE", "tNBO", "tUG"])
+  })
+
+  it("eligibility is live: when the department's leads are suspended, recovery picks the task up", async () => {
+    await svc.suspendAdminUser("voLeadKE", "leave", "idKE")
+    await svc.suspendAdminUser("voLeadKE2", "leave", "idKE")
+    await expect(queue("voLeadKE")).rejects.toMatchObject({ code: "ACTOR_NOT_ACTIVE" })
+    const q = await queue("idKE")
+    expect(q.setups.filter((t) => t.attention).map((t) => t.target.id).sort()).toEqual(["fKE", "tKE", "tNBO"])
+  })
+
+  it("…and when a lead loses the management key it leaves their queue", async () => {
+    revoke("voLeadKE", MANAGE)
+    expect((await queue("voLeadKE")).total).toBe(0)
+    expect((await lanes("voLeadKE2")).department).toEqual(["tKE", "tNBO"])
+  })
+
+  it("a deactivated target leaves every queue", async () => {
+    await svc.deactivateAdminUser("tKE", "left", "idKE")
+    expect((await lanes("voLeadKE")).department).toEqual(["tNBO"])
+    expect((await queue("idG")).setups.map((t) => t.target.id)).not.toContain("tKE")
+  })
+
+  it("the lane filter narrows rows but not counts; counts never include what the viewer cannot see", async () => {
+    const q = await queue("voG", "department")
+    expect(q.setups.map((t) => t.target.id)).toEqual(["tG"])
+    expect(q.total).toBe(1)
+    expect(q.counts).toEqual({ total: 4, attention: 1, department: 1, recovery: 0, oversight: 3 })
+  })
+
+  it("the detail and permission-options reads carry the setup state", async () => {
+    expect((await svc.getAdminUser("tKE", "idKE")).permissionSetup).toMatchObject({ status: "PENDING" })
+    expect((await svc.getPermissionOptions("tKE", "voLeadKE")).setup).toMatchObject({ status: "PENDING" })
+    await grant("tKE", ["vendors:outlets:read"], "voLeadKE")
+    expect((await svc.getPermissionOptions("tKE", "voLeadKE")).setup).toMatchObject({ status: "COMPLETED", resolvedBy: { id: "voLeadKE" } })
+  })
+})
+
+// ─── Editing an account ──────────────────────────────────────────────────────
+
+const editProfile = (targetId: string, fields: Row, actorId: string) =>
+  svc.updateAdminUserProfile({ adminUserId: targetId, ...fields }, actorId)
+const reassign = (targetId: string, role: string, scope: Row, actorId: string, extra: Row = {}) =>
+  svc.updateAdminUserAssignment({ adminUserId: targetId, roleId: roleId(role), scopes: [scope], ...extra }, actorId)
+
+describe("editing a profile (the same authority as create)", () => {
+  it("an identity admin edits names and employee ID in its scope, in one audited transaction", async () => {
+    await editProfile("voNBO", { firstName: "  Wanjiru ", middleName: "", lastName: "Kamau", employeeId: "EMP-7" }, "idKE")
+    expect(userOf("voNBO")).toMatchObject({ firstName: "Wanjiru", middleName: null, lastName: "Kamau", employeeId: "EMP-7" })
+    expect(lastAudit()).toMatchObject({
+      action : "admin_user.profile_updated",
+      changes: { before: { firstName: "voNBO", lastName: "Test", employeeId: null }, after: { firstName: "Wanjiru", lastName: "Kamau", employeeId: "EMP-7" } },
+    })
+    expect(userOf("voNBO").email).toBe("vonbo@example.test")
+  })
+
+  it("only the fields sent are touched, and nothing changed is refused rather than written", async () => {
+    await editProfile("voKE", { lastName: "Otieno" }, "idKE")
+    expect(userOf("voKE")).toMatchObject({ firstName: "voKE", lastName: "Otieno" })
+    await refusedWithoutWrites(() => editProfile("voKE", { lastName: "Otieno" }, "idKE"), "NO_CHANGE")
+  })
+
+  it("follows create's scope rules: not outside the actor's scope, not from a CITY actor, not yourself, never a super admin", async () => {
+    await refusedWithoutWrites(() => editProfile("voUG", { lastName: "X" }, "idKE"), "SCOPE_FORBIDDEN")
+    await refusedWithoutWrites(() => editProfile("voG", { lastName: "X" }, "idKE"), "SCOPE_FORBIDDEN")
+    await refusedWithoutWrites(() => editProfile("voNBO", { lastName: "X" }, "idNBO"), "FORBIDDEN")
+    await refusedWithoutWrites(() => editProfile("idKE", { lastName: "X" }, "idKE"), "SELF_ACTION_FORBIDDEN")
+    await refusedWithoutWrites(() => editProfile("super", { lastName: "X" }, "idG"), "SUPER_ADMIN_PROTECTED")
+  })
+
+  it("needs the profile-update key: a department lead cannot, an identity admin without it cannot", async () => {
+    await refusedWithoutWrites(() => editProfile("voNBO", { lastName: "X" }, "voLeadKE"), "FORBIDDEN")
+    revoke("idKE", "admin_users:profiles:update")
+    await refusedWithoutWrites(() => editProfile("voNBO", { lastName: "X" }, "idKE"), "FORBIDDEN")
+  })
+
+  it("rejects blank required names, over-long values, a taken employee ID and deactivated accounts", async () => {
+    await refusedWithoutWrites(() => editProfile("voKE", { firstName: "   " }, "idKE"), "INVALID_FIELD")
+    await refusedWithoutWrites(() => editProfile("voKE", { lastName: "x".repeat(101) }, "idKE"), "INVALID_FIELD")
+    userOf("voNBO").employeeId = "EMP-1"
+    await refusedWithoutWrites(() => editProfile("voKE", { employeeId: "EMP-1" }, "idKE"), "DUPLICATE_EMPLOYEE_ID")
+    userOf("voKE").status = "deactivated"
+    await refusedWithoutWrites(() => editProfile("voKE", { lastName: "New" }, "idKE"), "INVALID_STATUS")
+  })
+
+  it("a form loaded before someone else's change cannot overwrite it", async () => {
+    const loadedAt = userOf("voKE").updatedAt.toISOString()
+    await editProfile("voKE", { lastName: "First", expectedUpdatedAt: loadedAt }, "idKE")
+    await refusedWithoutWrites(() => editProfile("voKE", { lastName: "Second", expectedUpdatedAt: loadedAt }, "idKE2"), "ACCOUNT_CHANGED")
+    expect(userOf("voKE").lastName).toBe("First")
+  })
+
+  it("the detail read offers the edit only where the write would accept it", async () => {
+    expect((await svc.getAdminUser("voNBO", "idKE")).capabilities.editProfile).toBe(true)
+    expect((await svc.getAdminUser("idKE", "idKE")).capabilities.editProfile).toBe(false)
+    expect((await svc.getAdminUser("voNBO", "voLeadKE")).capabilities.editProfile).toBe(false)
+  })
+})
+
+describe("changing role and scope together", () => {
+  it("applies a move that depends on order when done in steps: a city colleague becomes a country identity admin", async () => {
+    addAdmin("mover", "vendor_ops", SCOPE.NBO, ["vendors:outlets:read"])
+    await expect(svc.updateAdminUserRole({ adminUserId: "mover", roleId: roleId("identity_admin") }, "idKE")).rejects.toMatchObject({ code: "SCOPE_ROLE_MISMATCH" })
+    await reassign("mover", "identity_admin", SCOPE.KE, "idKE")
+    expect(userOf("mover").roleId).toBe(roleId("identity_admin"))
+    expect(scopeOf("mover")).toEqual([SCOPE.KE])
+    expect(grantsOf("mover")).toEqual([])
+    expect(lastAudit()).toMatchObject({ action: "admin_user.assignment_updated", metadata: { roleChanged: true, scopeChanged: true } })
+  })
+
+  it("clears grants once and re-opens a completed setup", async () => {
+    await invited("hire2", "vendor_ops", SCOPE.KE)
+    await grant("hire2", ["vendors:outlets:read"], "voLeadKE")
+    await reassign("hire2", "vendor_ops", SCOPE.NBO, "idKE")
+    expect(grantsOf("hire2")).toEqual([])
+    expect(setupOf("hire2")!.status).toBe("PENDING")
+  })
+
+  it("validates the PAIR, the actor's scope, and refuses no-ops, stale forms and deactivated accounts", async () => {
+    await refusedWithoutWrites(() => reassign("voKE", "identity_admin", SCOPE.NBO, "idKE"), "INVALID_SCOPE_FOR_ROLE")
+    await refusedWithoutWrites(() => reassign("voKE", "vendor_ops", SCOPE.UG, "idKE"), "SCOPE_FORBIDDEN")
+    await refusedWithoutWrites(() => reassign("voKE", "vendor_ops", SCOPE.KE, "idKE"), "NO_CHANGE")
+    await refusedWithoutWrites(() => reassign("voKE", "vendor_ops", SCOPE.NBO, "idKE", { expectedUpdatedAt: new Date(0).toISOString() }), "ACCOUNT_CHANGED")
+    await refusedWithoutWrites(() => reassign("voKE", "super_admin", SCOPE.GLOBAL, "idG"), "INVALID_ROLE")
+    userOf("voKE").status = "deactivated"
+    await refusedWithoutWrites(() => reassign("voKE", "vendor_ops", SCOPE.NBO, "idKE"), "INVALID_STATUS")
+  })
+
+  it("is provisioning authority: a department lead cannot, a CITY actor cannot", async () => {
+    await refusedWithoutWrites(() => reassign("voNBO", "vendor_ops", SCOPE.MSA, "voLeadKE"), "FORBIDDEN")
+    await refusedWithoutWrites(() => reassign("voNBO", "vendor_ops", SCOPE.MSA, "idNBO"), "FORBIDDEN")
   })
 })

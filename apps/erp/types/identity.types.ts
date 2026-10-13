@@ -50,12 +50,16 @@ export interface AdminUserListItem {
   unavailableFrom     : string | null
   unavailableUntil    : string | null
   unavailableReason   : string | null
+  /** Present once an invitation has been sent; the list carries only the status. */
+  permissionSetup?    : { status: PermissionSetupStatus } | null
 }
 
 /** What the signed-in admin may do to this target — computed by the backend
  *  with the very checks its mutations run. Render these; never re-derive them. */
 export interface AdminUserCapabilities {
   invite            : boolean
+  /** Edit name and employee ID (never the email). */
+  editProfile       : boolean
   changeRole        : boolean
   changeScope       : boolean
   suspend           : boolean
@@ -85,8 +89,11 @@ export interface AdminUserDetail extends AdminUserListItem {
   invitationExpiresAt: string | null
   deactivatedAt      : string | null
   deactivationReason : string | null
+  /** The account version; edit forms send it back so a stale form is refused. */
+  updatedAt          : string
   /** The record is the signed-in administrator's own. */
   isSelf             : boolean
+  permissionSetup    : PermissionSetupState | null
   permissions        : Array<{ permission: AdminPermission }>
   role        : { id: string; name: string; displayName: string; description: string | null } | null
   capabilities: AdminUserCapabilities
@@ -121,6 +128,7 @@ export interface PermissionOptions {
   pool       : Array<{ key: string; module: string; description: string | null }>
   grants     : string[]
   staleGrants: string[]
+  setup      : PermissionSetupState | null
   delegation : AssignmentOption
   recovery   : AssignmentOption
 }
@@ -137,6 +145,50 @@ export interface ListDelegableAdminsResult {
   page      : number
   pageSize  : number
   totalPages: number
+}
+
+//* ─── Pending permission setup ──────────────────────────────────────────────
+
+export type PermissionSetupStatus = "PENDING" | "COMPLETED" | "CANCELLED"
+
+/** An invited account's initial permission setup — one per account, shared by everyone who may complete it. */
+export interface PermissionSetupState {
+  status    : PermissionSetupStatus
+  openedAt  : string
+  resolvedAt: string | null
+  resolvedBy: AdminUserRef | null
+}
+
+/** department: you are its normal audience · recovery: your recovery reaches it · oversight: within your reach, not yours to pick up first. */
+export type SetupLane = "department" | "recovery" | "oversight"
+
+export interface PendingSetup {
+  openedAt : string
+  lane     : SetupLane
+  mode     : AssignmentMode
+  /** Counted on your navigation. */
+  attention: boolean
+  target   : AssignmentTarget & { countryName: string | null }
+}
+
+export interface SetupCounts extends Record<SetupLane, number> {
+  total    : number
+  attention: number
+}
+
+export interface ListPendingSetupsResult {
+  setups    : PendingSetup[]
+  total     : number
+  page      : number
+  pageSize  : number
+  totalPages: number
+  /** Every setup you can see, by lane — not narrowed by the lane filter. */
+  counts    : SetupCounts
+}
+
+export interface PendingSetupSummary {
+  total    : number
+  attention: number
 }
 
 export type AdminUserStatus = "pending" | "invited" | "active" | "suspended" | "deactivated"

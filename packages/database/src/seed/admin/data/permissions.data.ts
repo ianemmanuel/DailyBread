@@ -393,6 +393,11 @@ export const PERMISSIONS = [
     description: "View admin user profiles, roles, permissions, and scope within assigned country",
   },
   {
+    key        : "admin_users:profiles:update",
+    module     : "admin_users",
+    description: "Edit an administrator's name and employee ID within your scope (never their email)",
+  },
+  {
     key        : "admin_users:accounts:create",
     module     : "admin_users",
     description: "Create a new admin user record (does not send invitation — separate step)",
