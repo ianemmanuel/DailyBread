@@ -1,4 +1,4 @@
-import { AdminUserStatus, type Prisma } from "@repo/db"
+import { AdminUserStatus, GeoStatus, type Prisma } from "@repo/db"
 import type { AdminScopeContext } from "@repo/types/backend"
 import { deriveScopeContext, NO_SCOPE } from "./single-scope"
 import { ROLE_SCOPE_RULES, isScopeAllowedForRole } from "./scope-rules"
@@ -24,7 +24,7 @@ import { ROLE_SCOPE_RULES, isScopeAllowedForRole } from "./scope-rules"
  * have no operational permissions; only the first has a valid scope.
  */
 
-export type ScopeInvalidReason = "NO_ROLE" | "MALFORMED_SCOPE" | "SCOPE_NOT_ALLOWED_FOR_ROLE"
+export type ScopeInvalidReason = "NO_ROLE" | "MALFORMED_SCOPE" | "SCOPE_NOT_ALLOWED_FOR_ROLE" | "SCOPE_CITY_INACTIVE"
 
 interface PermissionRow { permission: { key: string; isActive: boolean } }
 
@@ -37,7 +37,8 @@ export interface PermissionSubject {
     scopeType: "GLOBAL" | "COUNTRY" | "CITY"
     countryId: string | null
     cityId   : string | null
-    city?    : { countryId: string } | null
+    /** A CITY row's city: its OWN country and its CURRENT status. */
+    city?    : { countryId: string; status: string } | null
   }>
 }
 
@@ -50,8 +51,14 @@ export interface ResolvedAdminScope {
 
 /**
  * The admin's scope, validated: exactly one well-formed row (a CITY row's
- * country read from the city) whose tier the admin's role allows. Never falls
- * back to another scope.
+ * country read from the city) whose tier the admin's role allows, and — for a
+ * CITY scope — a city that is still ACTIVE. Never falls back to another scope.
+ *
+ * The city's status is checked HERE, on every read, not only when the scope
+ * is assigned (resolveRequestedScope already refuses an inactive city on
+ * write): a city switched off after the assignment must stop conferring
+ * authority in it (principle 10). Account and grants are kept, so
+ * reactivating the city, or re-scoping the admin, restores it.
  */
 export function resolveAdminScope(subject: Pick<PermissionSubject, "role" | "scopes">): ResolvedAdminScope {
   const { scope, valid } = deriveScopeContext(subject.scopes.map((r) => ({
@@ -64,6 +71,10 @@ export function resolveAdminScope(subject: Pick<PermissionSubject, "role" | "sco
   if (!subject.role) return { scope: NO_SCOPE, valid: false, invalidReason: "NO_ROLE" }
   if (!scope.tier || !isScopeAllowedForRole(subject.role.name, scope.tier)) {
     return { scope: NO_SCOPE, valid: false, invalidReason: "SCOPE_NOT_ALLOWED_FOR_ROLE" }
+  }
+  // Also fails closed when the status was never loaded.
+  if (scope.tier === "CITY" && subject.scopes[0]?.city?.status !== GeoStatus.ACTIVE) {
+    return { scope: NO_SCOPE, valid: false, invalidReason: "SCOPE_CITY_INACTIVE" }
   }
   return { scope, valid: true, invalidReason: null }
 }
@@ -92,7 +103,8 @@ export function effectivePermissionKeys(subject: PermissionSubject): string[] {
  * (recurring bug class #2).
  *
  * Covered in SQL: active status, an active grant of `key`, `key` in the
- * holder's CURRENT role pool, and a scope row of a tier the role allows.
+ * holder's CURRENT role pool, a scope row of a tier the role allows, and —
+ * for a CITY row — a city that is still ACTIVE.
  * Guaranteed by the database rather than repeated here: at most one scope row
  * per admin and its shape (20261006090000_admin_single_scope).
  */
@@ -103,7 +115,10 @@ export function effectivelyHoldsWhere(key: string): Prisma.AdminUserWhereInput {
     role       : { permissions: { some: { permission: { key, isActive: true } } } },
     OR         : Object.entries(ROLE_SCOPE_RULES).map(([name, rule]) => ({
       role  : { name },
-      scopes: { some: { scopeType: { in: rule.allowedScopes } } },
+      scopes: { some: {
+        scopeType: { in: rule.allowedScopes },
+        OR       : [{ cityId: null }, { city: { status: GeoStatus.ACTIVE } }],
+      } },
     })),
   }
 }

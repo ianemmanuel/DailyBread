@@ -3,7 +3,7 @@
 
 //* ─── Admin dashboard type exports ────────────────────────────────────────────
 // This is the ONLY file Next.js dashboard components should import from.
-//? Usage: import type { AdminSessionData } from "@repo/types/admin-dashboard"
+//? Usage: import type { AdminSessionData } from "@repo/types/admin-app"
 //! Never import from @repo/types/backend — that file depends on Express.
 
 //* API

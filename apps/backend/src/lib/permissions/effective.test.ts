@@ -11,7 +11,7 @@ import { ROLE_SCOPE_RULES } from "./scope-rules"
 const perm = (key: string, isActive = true) => ({ permission: { key, isActive } })
 const GLOBAL  = [{ scopeType: "GLOBAL" as const, countryId: null, cityId: null }]
 const KENYA   = [{ scopeType: "COUNTRY" as const, countryId: "ke", cityId: null }]
-const NAIROBI = [{ scopeType: "CITY" as const, countryId: "ke", cityId: "nbo", city: { countryId: "ke" } }]
+const NAIROBI = [{ scopeType: "CITY" as const, countryId: "ke", cityId: "nbo", city: { countryId: "ke", status: "ACTIVE" } }]
 
 function subject(over: Partial<PermissionSubject> = {}): PermissionSubject {
   return {
@@ -83,8 +83,20 @@ describe("resolveAdminScope — invalid scope is not the same as zero grants", (
     expect(resolveAdminScope(subject({ role: { name: "identity_admin", permissions: [] }, scopes: NAIROBI })))
       .toMatchObject({ valid: false, invalidReason: "SCOPE_NOT_ALLOWED_FOR_ROLE", scope: { isGlobal: false, cityIds: [] } })
   })
+  it("a CITY scope whose city is no longer ACTIVE is invalid — and gives no permissions", () => {
+    const inactive = [{ scopeType: "CITY" as const, countryId: "ke", cityId: "nbo", city: { countryId: "ke", status: "INACTIVE" } }]
+    expect(resolveAdminScope(subject({ scopes: inactive })))
+      .toMatchObject({ valid: false, invalidReason: "SCOPE_CITY_INACTIVE", scope: { isGlobal: false, countryIds: [], cityIds: [] } })
+    expect(effectivePermissionKeys(subject({ scopes: inactive }))).toEqual([])
+    // the same admin in an ACTIVE city is a working admin
+    expect(effectivePermissionKeys(subject({ scopes: NAIROBI }))).toEqual(["vendors:meals:read", "vendors:meals:moderate"])
+  })
+  it("a CITY scope whose city status was not loaded fails closed", () => {
+    const unknown = [{ scopeType: "CITY" as const, countryId: "ke", cityId: "nbo", city: { countryId: "ke" } as never }]
+    expect(resolveAdminScope(subject({ scopes: unknown })).invalidReason).toBe("SCOPE_CITY_INACTIVE")
+  })
   it("a CITY scope's country is the city's own", () => {
-    const tampered = [{ scopeType: "CITY" as const, countryId: "ug", cityId: "nbo", city: { countryId: "ke" } }]
+    const tampered = [{ scopeType: "CITY" as const, countryId: "ug", cityId: "nbo", city: { countryId: "ke", status: "ACTIVE" } }]
     expect(resolveAdminScope(subject({ scopes: tampered })).scope).toMatchObject({ tier: "CITY", countryIds: ["ke"], cityIds: ["nbo"] })
   })
 })
@@ -107,7 +119,8 @@ describe("effectivelyHoldsWhere — the same rule for queries that SELECT admins
 
   it("requires a scope row of a tier the holder's role allows — one branch per role rule, nothing else", () => {
     expect(where.OR).toEqual(Object.entries(ROLE_SCOPE_RULES).map(([name, rule]) => ({
-      role: { name }, scopes: { some: { scopeType: { in: rule.allowedScopes } } },
+      role: { name },
+      scopes: { some: { scopeType: { in: rule.allowedScopes }, OR: [{ cityId: null }, { city: { status: "ACTIVE" } }] } },
     })))
   })
 

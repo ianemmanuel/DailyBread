@@ -25,9 +25,13 @@ model AdminUser {
   status              AdminUserStatus         @default(pending)
   invitationExpiresAt DateTime?
   isActive            Boolean                 @default(false)
-  invitedById         String?
+  //* Who created the database record. Distinct from who sent the invitation:
+  //* an account may be created by one admin and invited by another, or never.
+  createdById         String?
   invitationSentCount Int                     @default(0)
   invitationSentAt    DateTime?
+  //* Who sent the LATEST invitation — paired with invitationSentAt, cleared with it.
+  invitationSentById  String?
   lastSeenAt          DateTime?
   deactivatedAt       DateTime?
   deactivationReason  String?
@@ -39,8 +43,10 @@ model AdminUser {
   unavailableReason   String?
 
   role                    AdminRole?            @relation(fields: [roleId], references: [id])
-  invitedBy               AdminUser?            @relation("AdminInvitedBy", fields: [invitedById], references: [id])
-  invitees                AdminUser[]           @relation("AdminInvitedBy")
+  createdBy               AdminUser?            @relation("AdminCreatedBy", fields: [createdById], references: [id])
+  createdAdmins           AdminUser[]           @relation("AdminCreatedBy")
+  invitationSentBy        AdminUser?            @relation("AdminInvitationSentBy", fields: [invitationSentById], references: [id])
+  invitationsSent         AdminUser[]           @relation("AdminInvitationSentBy")
   scopes                  AdminUserScope[]
   mealEscalationsCreated  MealEscalation[]      @relation("MealEscalationCreatedBy")
   mealEscalationsAssigned MealEscalation[]      @relation("MealEscalationAssignedTo")

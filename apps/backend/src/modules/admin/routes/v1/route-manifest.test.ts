@@ -4,8 +4,13 @@ import { ADMIN_V1_MOUNTS } from "./index"
 
 /*
  * ROUTE MANIFEST (RBAC Phase 2) — every /admin/v1 route, read off the REAL
- * routers as they are mounted, with the permission gate(s) it requires and
- * whether the identity-role guard sits in front of it.
+ * routers as they are mounted, with the permission gate(s) it requires.
+ *
+ * The walker reads ROUTE layers only, so anything else on a mounted router —
+ * a nested router (router.use("/x", sub)), or router-level middleware such as
+ * the old role-name guard — would be invisible to it. Every mounted router
+ * must therefore consist of route layers and nothing else; the first test
+ * fails on any other layer, so new routes cannot slip in unseen.
  *
  * What this proves: no admin route ships without a permission gate unless it
  * is a documented SELF-SCOPED exception, every gate names a real permission
@@ -19,29 +24,36 @@ import { ADMIN_V1_MOUNTS } from "./index"
  */
 
 type Gate = string           // "a|b" = any of a, b
-interface Entry { route: string; gates: Gate[]; identityRole: boolean }
+interface Entry { route: string; gates: Gate[] }
 
 interface Layer {
-  route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle?: { requiredPermissions?: string[] } }> }
-  handle?: { authorizationRule?: string }
+  name?  : string
+  route? : { path: string; methods: Record<string, boolean>; stack: Array<{ handle?: { requiredPermissions?: string[] } }> }
+}
+
+/** Every layer on a mounted router that is NOT a route (nested routers, router-level middleware). */
+function nonRouteLayers(): string[] {
+  const out: string[] = []
+  for (const [prefix, router] of ADMIN_V1_MOUNTS) {
+    for (const layer of (router as unknown as { stack: Layer[] }).stack) {
+      if (!layer.route) out.push(`${prefix} → ${layer.name ?? "anonymous"}`)
+    }
+  }
+  return out
 }
 
 function buildManifest(): Entry[] {
   const out: Entry[] = []
   for (const [prefix, router] of ADMIN_V1_MOUNTS) {
-    let identityRole = false
     for (const layer of (router as unknown as { stack: Layer[] }).stack) {
-      if (!layer.route) {
-        if (layer.handle?.authorizationRule === "identity-role") identityRole = true
-        continue
-      }
+      if (!layer.route) continue
       const gates = layer.route.stack
         .map((h) => h.handle?.requiredPermissions)
         .filter((p): p is string[] => Array.isArray(p))
         .map((p) => [...p].sort().join("|"))
       for (const method of Object.keys(layer.route.methods).filter((m) => layer.route!.methods[m])) {
         const path = layer.route.path === "/" ? "" : layer.route.path
-        out.push({ route: `${method.toUpperCase()} ${prefix}${path}`, gates, identityRole })
+        out.push({ route: `${method.toUpperCase()} ${prefix}${path}`, gates })
       }
     }
   }
@@ -62,6 +74,19 @@ const manifest = buildManifest()
 const byRoute = new Map(manifest.map((e) => [e.route, e]))
 
 describe("admin route manifest", () => {
+  it("every mounted router holds ROUTE layers only — no nested router or router-level middleware escapes the walk", () => {
+    expect(nonRouteLayers()).toEqual([])
+  })
+
+  it("the guard against unseen layers actually fires", async () => {
+    const { Router } = await import("express")
+    const probe = Router()
+    probe.use("/nested", Router().get("/x", (_req, res) => { res.end() }))
+    probe.use((_req, _res, next) => next())
+    const layers = (probe as unknown as { stack: Layer[] }).stack.filter((l) => !l.route)
+    expect(layers).toHaveLength(2)
+  })
+
   it("reads a non-trivial route table off the real routers", () => {
     expect(manifest.length).toBeGreaterThan(250)
     expect(new Set(manifest.map((e) => e.route)).size).toBe(manifest.length)
@@ -78,11 +103,18 @@ describe("admin route manifest", () => {
     expect(unknown).toEqual([])
   })
 
-  it("admin-user management sits behind the identity-role guard — except the grant route, which designated superiors use", () => {
+  it("admin-user management: no role-name guard — every route has its own admin_users / audit key; delegation and recovery are separate gates", () => {
     const users = manifest.filter((e) => /^\w+ \/(users|audit)/.test(e.route))
-    const unguarded = users.filter((e) => !e.identityRole).map((e) => e.route)
-    expect(unguarded).toEqual(["PUT /users/:id/permissions"])
-    expect(byRoute.get("PUT /users/:id/permissions")?.gates).toEqual([AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE])
+    for (const e of users) {
+      expect(e.gates.length, e.route).toBe(1)
+      expect(e.gates[0]!.split("|").every((k) => k.startsWith("admin_users:") || k.startsWith("audit_logs:")), e.route).toBe(true)
+    }
+    const M = AdminPermissions.ADMIN_USERS_PERMISSIONS_MANAGE
+    const R = AdminPermissions.ADMIN_USERS_PERMISSIONS_RECOVER
+    expect(byRoute.get("PUT /users/:id/permissions")?.gates).toEqual([M])
+    expect(byRoute.get("PUT /users/:id/permissions/recovery")?.gates).toEqual([R])
+    expect(byRoute.get("GET /users/delegable")?.gates).toEqual([[M, R].sort().join("|")])
+    expect(byRoute.get("GET /users/:id/permission-options")?.gates).toEqual([[M, R].sort().join("|")])
   })
 
   it("Meals: read, review, enforcement and reason authoring are separate gates (RBAC Meals C5)", () => {
@@ -124,7 +156,7 @@ describe("admin route manifest", () => {
   })
 
   it("matches the pinned route → permission manifest (update the snapshot only for a reviewed change)", () => {
-    expect(manifest.map((e) => `${e.route}  ${e.gates.join(" & ") || "(self-scoped)"}${e.identityRole ? "  +identity-role" : ""}`))
+    expect(manifest.map((e) => `${e.route}  ${e.gates.join(" & ") || "(self-scoped)"}`))
       .toMatchSnapshot()
   })
 })

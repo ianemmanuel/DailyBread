@@ -39,8 +39,14 @@ function clone<T>(v: T): T { return structuredClone(v) }
 function joinUser(u: Row): Row {
   const s = h.store
   const role = u.roleId ? s.roles.find((r) => r.id === u.roleId) : null
+  const ref = (id: string | null | undefined) => {
+    const r = id ? s.users.find((x) => x.id === id) : null
+    return r ? { id: r.id, firstName: r.firstName, lastName: r.lastName, email: r.email } : null
+  }
   return {
     ...clone(u),
+    createdBy       : ref(u.createdById),
+    invitationSentBy: ref(u.invitationSentById),
     role: role ? {
       ...clone(role),
       permissions: s.rolePerms.filter((rp) => rp.roleId === role.id)
@@ -49,8 +55,48 @@ function joinUser(u: Row): Row {
     permissions: s.grants.filter((g) => g.adminUserId === u.id)
       .map((g) => ({ ...clone(g), permission: clone(s.permissions.find((p) => p.id === g.permissionId)) })),
     scopes: s.scopes.filter((sc) => sc.adminUserId === u.id)
-      .map((sc) => ({ ...clone(sc), city: sc.cityId ? { countryId: s.cities.find((c) => c.id === sc.cityId)?.countryId ?? null } : null })),
+      .map((sc) => {
+        const city = sc.cityId ? s.cities.find((c) => c.id === sc.cityId) : null
+        return {
+          ...clone(sc),
+          city   : city ? { id: city.id, name: city.id, countryId: city.countryId, status: city.status } : null,
+          country: sc.countryId ? { id: sc.countryId, name: sc.countryId, code: sc.countryId } : null,
+        }
+      }),
   }
+}
+
+/** A small evaluator for the Prisma where-clauses the service builds for admin reads. */
+function matches(u: Row, where: any): boolean {
+  if (!where) return true
+  for (const [k, v] of Object.entries(where) as Array<[string, any]>) {
+    if (k === "AND") { if (!(v as any[]).every((w) => matches(u, w))) return false; continue }
+    if (k === "OR")  { if (!(v as any[]).some((w) => matches(u, w))) return false; continue }
+    if (k === "scopes") {
+      const rows = joinUser(u).scopes
+      if (!rows.some((r: Row) => matchesRow(r, v.some))) return false
+      continue
+    }
+    if (!matchesValue(u[k], v)) return false
+  }
+  return true
+}
+function matchesRow(r: Row, where: any): boolean {
+  for (const [k, v] of Object.entries(where) as Array<[string, any]>) {
+    if (k === "OR")  { if (!(v as any[]).some((w) => matchesRow(r, w))) return false; continue }
+    if (k === "city") { if (!r.city || !matchesRow(r.city, v)) return false; continue }
+    if (!matchesValue(r[k], v)) return false
+  }
+  return true
+}
+function matchesValue(actual: any, cond: any): boolean {
+  if (cond && typeof cond === "object" && !(cond instanceof Date)) {
+    if ("not" in cond && actual === cond.not) return false
+    if ("in" in cond && !cond.in.includes(actual)) return false
+    if ("contains" in cond && !String(actual ?? "").toLowerCase().includes(String(cond.contains).toLowerCase())) return false
+    return true
+  }
+  return actual === cond
 }
 
 function makeDb(): any {
@@ -61,6 +107,16 @@ function makeDb(): any {
         return u ? joinUser(u) : null
       },
       findFirst: async ({ where }: any) => h.store.users.find((x) => x.employeeId === where.employeeId) ?? null,
+      findMany : async ({ where, skip, take }: any) => {
+        const rows = h.store.users.filter((u) => matches(u, where)).map(joinUser)
+        return rows.slice(skip ?? 0, take ? (skip ?? 0) + take : undefined)
+      },
+      count    : async ({ where }: any) => h.store.users.filter((u) => matches(u, where)).length,
+      groupBy  : async ({ where }: any) => {
+        const counts = new Map<string, number>()
+        for (const u of h.store.users.filter((x) => matches(x, where))) counts.set(u.status, (counts.get(u.status) ?? 0) + 1)
+        return [...counts].map(([status, n]) => ({ status, _count: { _all: n } }))
+      },
       create: async ({ data }: any) => {
         const row = { id: `new-${++h.seq}`, externalAuthId: null, invitationSentCount: 0, updatedAt: new Date(), ...data }
         h.store.users.push(row)
@@ -75,9 +131,19 @@ function makeDb(): any {
         return clone(u)
       },
       updateMany: async ({ where, data }: any) => {
-        const u = h.store.users.find((x) => x.id === where.id && x.updatedAt.getTime() === where.updatedAt.getTime())
-        if (!u || h.loseVersionRace || h.loseVersionFor === where.id) return { count: 0 }
-        u.updatedAt = new Date(Math.max(data.updatedAt.getTime(), u.updatedAt.getTime() + 1))
+        if (where.updatedAt) {
+          const u = h.store.users.find((x) => x.id === where.id && x.updatedAt.getTime() === where.updatedAt.getTime())
+          if (!u || h.loseVersionRace || h.loseVersionFor === where.id) return { count: 0 }
+          u.updatedAt = new Date(Math.max(data.updatedAt.getTime(), u.updatedAt.getTime() + 1))
+          return { count: 1 }
+        }
+        // A status-conditional transition.
+        const u = h.store.users.find((x) => x.id === where.id && matchesValue(x.status, where.status))
+        if (!u) return { count: 0 }
+        for (const [k, v] of Object.entries(data)) {
+          u[k] = v && typeof v === "object" && "increment" in (v as Row) ? (u[k] ?? 0) + (v as Row).increment : v
+        }
+        u.updatedAt = new Date(u.updatedAt.getTime() + 1)
         return { count: 1 }
       },
     },
@@ -152,10 +218,12 @@ vi.mock("./admin.reviewerAvailability.service", () => ({ applyAvailabilityChange
 // The router imports the middleware barrel, whose token verifier needs real
 // Clerk config. Only requirePermission is used by the router — the real one.
 vi.mock("@/modules/admin/middleware", async () => ({
-  requirePermission: (await import("@/modules/admin/middleware/requirePermission")).requirePermission,
+  requirePermission   : (await import("@/modules/admin/middleware/requirePermission")).requirePermission,
+  requireAnyPermission: (await import("@/modules/admin/middleware/requirePermission")).requireAnyPermission,
 }))
 
 const svc = await import("./admin.user.service")
+const { ClerkAdminStateService } = await import("@/lib/clerk")
 const { handleUpdateRole, handleUpdateScopes, handleUpdatePermissions } = await import("../controllers/admin.user.controller")
 const { default: userRouter } = await import("../routes/v1/admin.user.routes")
 
@@ -165,6 +233,7 @@ const ROLE_NAMES = ["super_admin", "identity_admin", "operations_admin", "financ
 const roleId = (name: string) => `role-${name}`
 const permId = (key: string) => `perm-${key}`
 const MANAGE  = "admin_users:permissions:manage"
+const RECOVER = "admin_users:permissions:recover"
 const ID_POOL = ROLE_POOLS.identity_admin!
 const VO_POOL = ROLE_POOLS.vendor_ops!
 /** A vendor_ops lead's keys: the whole pool, management included. */
@@ -188,7 +257,7 @@ function seed(): void {
   h.failAudit       = false
   const s: Store = { roles: [], permissions: [], rolePerms: [], users: [], grants: [], scopes: [], countries: [], cities: [], audits: [] }
   for (const name of ROLE_NAMES) s.roles.push({ id: roleId(name), name, displayName: name })
-  for (const key of ALL_PERMISSION_KEYS) s.permissions.push({ id: permId(key), key, isActive: true })
+  for (const key of ALL_PERMISSION_KEYS) s.permissions.push({ id: permId(key), key, isActive: true, module: key.split(":")[0], description: "" })
   for (const [role, keys] of Object.entries(ROLE_POOLS)) {
     for (const key of keys) s.rolePerms.push({ roleId: roleId(role), permissionId: permId(key) })
   }
@@ -265,6 +334,9 @@ const create = (actorId: string, roleName: string, scopes?: unknown, extra: Row 
 const grant = (targetId: string, keys: unknown, actorId: string) =>
   svc.updateAdminUserPermissions({ adminUserId: targetId, permissionKeys: keys as string[] }, actorId)
 
+const recover = (targetId: string, keys: unknown, actorId: string) =>
+  svc.updateAdminUserPermissions({ adminUserId: targetId, permissionKeys: keys as string[] }, actorId, "recovery")
+
 const rescope = (targetId: string, scope: Row, actorId: string) =>
   svc.updateAdminUserScopes({ adminUserId: targetId, scopes: [scope] as never }, actorId)
 
@@ -334,9 +406,16 @@ describe("identity provisioning", () => {
     expect(scopeOf(c.id)).toEqual([SCOPE.KE])
   })
 
-  it("…an absent scope inherits the actor's own scope", async () => {
-    const user = await create("idKE", "vendor_ops", undefined)
-    expect(scopeOf(user.id)).toEqual([SCOPE.KE])
+  it("…the scope is always explicit: an absent or empty one is refused, never inherited from the creator", async () => {
+    await refusedWithoutWrites(() => create("idKE", "vendor_ops", undefined), "SCOPE_REQUIRED")
+    await refusedWithoutWrites(() => create("idG", "vendor_ops", []), "SCOPE_REQUIRED")
+    await refusedWithoutWrites(() => create("idG", "vendor_ops", null), "SCOPE_REQUIRED")
+  })
+
+  it("…a COUNTRY identity admin creates a peer COUNTRY identity admin in its own country (no same-role hierarchy)", async () => {
+    const peer = await create("idKE", "identity_admin", [SCOPE.KE])
+    expect(scopeOf(peer.id)).toEqual([SCOPE.KE])
+    expect(grantsOf(peer.id)).toEqual([])
   })
 
   it("3. a COUNTRY identity admin cannot provision GLOBAL or another country's admins", async () => {
@@ -444,16 +523,16 @@ describe("designated superior administrators", () => {
     expect(grantsOf("idKE3")).toEqual(["admin_users:profiles:read"])
   })
 
-  describe("same-level peers: protect the KEY, not the person", () => {
+  describe("same-level colleagues: permission OWNERSHIP decides, not rank", () => {
     const withoutBan = VO_LEAD.filter((k) => k !== "vendors:accounts:ban")
 
-    it("a peer lead removes and re-adds a shared ordinary permission on a fellow lead; both versions move, audit in the transaction", async () => {
+    it("a lead removes and re-adds a shared permission on a fellow lead; both versions move, audit in the transaction", async () => {
       const versions = () => [userOf("voLeadKE").updatedAt.getTime(), userOf("voLeadKE2").updatedAt.getTime()]
       const before = versions()
       await grant("voLeadKE2", withoutBan, "voLeadKE")
       expect(grantsOf("voLeadKE2")).not.toContain("vendors:accounts:ban")
       expect(grantsOf("voLeadKE2")).toContain(MANAGE)
-      expect(lastAudit().metadata).toEqual({ added: [], removed: ["vendors:accounts:ban"] })
+      expect(lastAudit().metadata).toEqual({ added: [], removed: ["vendors:accounts:ban"], mode: "delegation" })
       await grant("voLeadKE2", VO_LEAD, "voLeadKE")
       expect(grantsOf("voLeadKE2")).toContain("vendors:accounts:ban")
       const after = versions()
@@ -461,30 +540,27 @@ describe("designated superior administrators", () => {
       expect(after[1]).toBeGreaterThan(before[1]!)
     })
 
-    it("a peer can neither add nor remove a permission it does not hold", async () => {
+    it("a same-tier colleague grants and removes the management key it holds — no peer rule refuses it", async () => {
+      await grant("voKE", [MANAGE], "voLeadKE")
+      expect(grantsOf("voKE")).toEqual([MANAGE])
+      await grant("voLeadKE2", VO_PLAIN, "voLeadKE")
+      expect(grantsOf("voLeadKE2")).not.toContain(MANAGE)
+      await grant("idKE3", [MANAGE], "idKE")
+      expect(grantsOf("idKE3")).toEqual([MANAGE])
+      await grant("voG3", [MANAGE], "voG")
+      expect(grantsOf("voG3")).toEqual([MANAGE])
+    })
+
+    it("nobody adds OR removes a permission they do not hold themselves", async () => {
       revoke("voLeadKE", "vendors:accounts:ban")
       await refusedWithoutWrites(() => grant("voLeadKE2", withoutBan, "voLeadKE"), "PERMISSION_NOT_HELD")
       await refusedWithoutWrites(() => grant("voKE", ["vendors:accounts:ban"], "voLeadKE"), "PERMISSION_NOT_HELD")
+      // below the actor too: ownership, not rank
+      addAdmin("banNBO", "vendor_ops", SCOPE.NBO, ["vendors:accounts:ban"])
+      await refusedWithoutWrites(() => grant("banNBO", [], "voLeadKE"), "PERMISSION_NOT_HELD")
     })
 
-    it("a peer never removes a fellow lead's management permission, nor hands it sideways", async () => {
-      await refusedWithoutWrites(() => grant("voLeadKE2", VO_PLAIN, "voLeadKE"), "PEER_MANAGEMENT_KEY_PROTECTED")
-      await refusedWithoutWrites(() => grant("voKE", [MANAGE], "voLeadKE"), "PEER_MANAGEMENT_KEY_PROTECTED")
-      await refusedWithoutWrites(() => grant("idKE2", ID_POOL.filter((k) => k !== MANAGE), "idKE"), "PEER_MANAGEMENT_KEY_PROTECTED")
-      await refusedWithoutWrites(() => grant("idKE3", [MANAGE], "idKE"), "PEER_MANAGEMENT_KEY_PROTECTED")
-      await refusedWithoutWrites(() => grant("voG3", [MANAGE], "voG"), "PEER_MANAGEMENT_KEY_PROTECTED")
-    })
-
-    it("a superior strictly above grants and removes the management permission", async () => {
-      await grant("voKE", ["vendors:outlets:read", MANAGE], "voG")
-      expect(grantsOf("voKE")).toEqual([MANAGE, "vendors:outlets:read"].sort())
-      await grant("voLeadKE2", VO_PLAIN, "voG")
-      expect(grantsOf("voLeadKE2")).not.toContain(MANAGE)
-      await grant("idKE2", ID_POOL.filter((k) => k !== MANAGE), "idG")
-      expect(grantsOf("idKE2")).not.toContain(MANAGE)
-    })
-
-    it("a peer grant that fails inside its transaction leaves grants, versions and audit rows untouched", async () => {
+    it("a grant that fails inside its transaction leaves grants, versions and audit rows untouched", async () => {
       h.failAudit = true
       const before = JSON.stringify(h.store)
       await expect(grant("voLeadKE2", withoutBan, "voLeadKE")).rejects.toThrow("audit write failed")
@@ -492,7 +568,7 @@ describe("designated superior administrators", () => {
     })
   })
 
-  it("9. a COUNTRY superior cannot reach a GLOBAL admin, another country, or another role", async () => {
+  it("9. a COUNTRY lead cannot reach a GLOBAL admin, another country, or another role", async () => {
     await refusedWithoutWrites(() => grant("voG3", ["vendors:outlets:read"], "voLeadKE"), "SCOPE_FORBIDDEN")
     await refusedWithoutWrites(() => grant("voUG", ["vendors:outlets:read"], "voLeadKE"), "SCOPE_FORBIDDEN")
     await refusedWithoutWrites(() => grant("voKLA", ["vendors:outlets:read"], "voLeadKE"), "SCOPE_FORBIDDEN")
@@ -500,23 +576,15 @@ describe("designated superior administrators", () => {
     await refusedWithoutWrites(() => grant("idG", [], "idKE"), "SCOPE_FORBIDDEN")
   })
 
-  it("…and peer protection leaves no dead end: super_admin manages the GLOBAL leads, including revoking their management key", async () => {
-    // The highest same-role leads cannot strip each other's management key …
-    await refusedWithoutWrites(() => grant("voG2", VO_PLAIN, "voG"), "PEER_MANAGEMENT_KEY_PROTECTED")
-    addAdmin("idG2", "identity_admin", SCOPE.GLOBAL, ID_POOL)
-    await refusedWithoutWrites(() => grant("idG2", ID_POOL.filter((k) => k !== MANAGE), "idG"), "PEER_MANAGEMENT_KEY_PROTECTED")
-    // … but super_admin (pool coverage, different role → no peer rule) manages both, and can strip the key itself.
+  it("…super_admin still manages every department through pool coverage", async () => {
     await grant("voG2", VO_PLAIN, "super")
     expect(grantsOf("voG2")).not.toContain(MANAGE)
-    await grant("idG2", ID_POOL.filter((k) => k !== MANAGE), "super")
-    expect(grantsOf("idG2")).not.toContain(MANAGE)
-    // … and re-grant it: the authority is restorable, not lost.
     await grant("voG2", VO_LEAD, "super")
     expect(grantsOf("voG2")).toContain(MANAGE)
   })
 
-  it("…and a CITY admin is never a superior, even holding the key", async () => {
-    await refusedWithoutWrites(() => grant("voNBO", ["vendors:outlets:read"], "voLeadNBO"), "SUPERIOR_SCOPE_REQUIRED")
+  it("…and a CITY admin never assigns permissions, even holding the key", async () => {
+    await refusedWithoutWrites(() => grant("voNBO", ["vendors:outlets:read"], "voLeadNBO"), "GRANTOR_SCOPE_REQUIRED")
   })
 
   it("10. a GLOBAL superior manages GLOBAL, COUNTRY and CITY admins of its role — including a COUNTRY superior", async () => {
@@ -647,7 +715,7 @@ describe("scope changes reset individual grants", () => {
     await refusedWithoutWrites(() => rescope("voKE", { scopeType: "COUNTRY", countryId: "ug" }, "idKE"), "SCOPE_FORBIDDEN")
     await refusedWithoutWrites(() => rescope("voKE", { scopeType: "CITY", cityId: "ksm" }, "idKE"), "CITY_INACTIVE")
     await refusedWithoutWrites(() => rescope("mover", { scopeType: "CITY", cityId: "kla" }, "voLeadKE"), "FORBIDDEN")
-    await refusedWithoutWrites(() => svc.updateAdminUserScopes({ adminUserId: "voKE", scopes: [] }, "idKE"), "SINGLE_SCOPE_REQUIRED")
+    await refusedWithoutWrites(() => svc.updateAdminUserScopes({ adminUserId: "voKE", scopes: [] }, "idKE"), "SCOPE_REQUIRED")
   })
 
   it("naming the scope the target already holds is refused rather than wiping its grants", async () => {
@@ -726,7 +794,7 @@ describe("malformed input", () => {
   })
 
   it("13c. duplicate email and a nonexistent target", async () => {
-    await refusedWithoutWrites(() => svc.createAdminUser({ firstName: "A", lastName: "B", email: "VOKE@example.test", roleId: roleId("finance") }, "idG"), "DUPLICATE_EMAIL")
+    await refusedWithoutWrites(() => svc.createAdminUser({ firstName: "A", lastName: "B", email: "VOKE@example.test", roleId: roleId("finance"), scopes: [SCOPE.KE] as never }, "idG"), "DUPLICATE_EMAIL")
     await refusedWithoutWrites(() => grant("ghost", [], "super"), "USER_NOT_FOUND")
   })
 
@@ -740,13 +808,15 @@ describe("malformed input", () => {
 
 // ─── Lifecycle authority is not widened ──────────────────────────────────────
 
-describe("lifecycle authority (unchanged boundary)", () => {
-  it("identity peers at the same tier still cannot suspend, deactivate or re-role each other", async () => {
-    await refusedWithoutWrites(() => svc.suspendAdminUser("idKE2", "reason", "idKE"), "SUPERIOR_SCOPE_REQUIRED")
-    await refusedWithoutWrites(() => svc.deactivateAdminUser("idKE2", "reason", "idKE"), "SUPERIOR_SCOPE_REQUIRED")
-    await refusedWithoutWrites(() => svc.updateAdminUserRole({ adminUserId: "idKE3", roleId: roleId("finance") }, "idKE"), "SUPERIOR_SCOPE_REQUIRED")
-    await refusedWithoutWrites(() => svc.suspendAdminUser("idG", "reason", "idKE"), "SUPERIOR_SCOPE_REQUIRED")
+describe("lifecycle authority: the actor's key + scope containment", () => {
+  it("a same-country identity colleague may be suspended or re-roled — no peer rule; a broader or foreign target may not", async () => {
+    await svc.suspendAdminUser("idKE2", "reason", "idKE")
+    expect(userOf("idKE2").status).toBe("suspended")
+    await svc.updateAdminUserRole({ adminUserId: "idKE3", roleId: roleId("finance") }, "idKE")
+    expect(userOf("idKE3").roleId).toBe(roleId("finance"))
+    await refusedWithoutWrites(() => svc.suspendAdminUser("idG", "reason", "idKE"), "SCOPE_FORBIDDEN")
     await refusedWithoutWrites(() => svc.suspendAdminUser("voUG", "reason", "idKE"), "SCOPE_FORBIDDEN")
+    await refusedWithoutWrites(() => rescope("idKE2", { scopeType: "GLOBAL" }, "idKE"), "SCOPE_FORBIDDEN")
   })
 
   it("a designated superior gains no lifecycle, role or scope authority from the management key", async () => {
@@ -776,6 +846,344 @@ describe("super admin protection", () => {
       await refusedWithoutWrites(() => svc.deactivateAdminUser("super2", "reason", actor), "SUPER_ADMIN_PROTECTED")
       await refusedWithoutWrites(() => svc.sendAdminInvitation("super2", actor), "SUPER_ADMIN_PROTECTED")
     }
+  })
+})
+
+// ─── Recovery / bootstrap ────────────────────────────────────────────────────
+
+describe("recovery and bootstrap (admin_users:permissions:recover)", () => {
+  it("the recovery key is in the identity pool only (and super_admin's, which holds everything) — never automatically granted", () => {
+    const holders = Object.entries(ROLE_POOLS).filter(([, keys]) => keys.includes(RECOVER)).map(([role]) => role).sort()
+    expect(holders).toEqual(["identity_admin", "super_admin"])
+  })
+
+  it("BOOTSTRAP: a COUNTRY identity admin creates a department's first lead and gives it the whole pool it does not hold", async () => {
+    const lead = await create("idKE", "vendor_ops", [SCOPE.KE])
+    await recover(lead.id, VO_POOL, "idKE")
+    expect(grantsOf(lead.id)).toEqual([...VO_POOL].sort())
+    expect(lastAudit()).toMatchObject({ action: "admin_user.permissions_updated", entityId: lead.id, metadata: { mode: "recovery" } })
+    // The identity admin holds none of the operational keys it just assigned …
+    expect(grantsOf("idKE").filter((k) => k.startsWith("vendors:meals:") || k.startsWith("vendors:outlets:"))).toEqual([])
+    // … and once the lead is active it delegates by ordinary ownership.
+    userOf(lead.id).status = "active"
+    await grant("voNBO", ["vendors:meals:read"], lead.id)
+    expect(grantsOf("voNBO")).toEqual(["vendors:meals:read"])
+  })
+
+  it("…a GLOBAL identity admin does the same in any country, at any tier", async () => {
+    await recover("voUG", VO_POOL, "idG")
+    await recover("voKLA", ["vendors:meals:read"], "idG")
+    expect(grantsOf("voUG")).toEqual([...VO_POOL].sort())
+    expect(grantsOf("voKLA")).toEqual(["vendors:meals:read"])
+  })
+
+  it("RECOVERY: the only lead has gone — strip them, empower a colleague; the recovery key stays with the identity admin", async () => {
+    await svc.suspendAdminUser("voLeadKE", "left the company", "idKE")
+    await recover("voLeadKE", [], "idKE")
+    expect(grantsOf("voLeadKE")).toEqual([])
+    await recover("voPlainKE", VO_POOL, "idKE")
+    expect(grantsOf("voPlainKE")).toContain(MANAGE)
+    expect(grantsOf("idKE")).toContain(RECOVER)
+    // a selected subset is just as valid
+    await recover("voKE", ["vendors:meals:read", "vendors:meals:moderate"], "idKE")
+    expect(grantsOf("voKE")).toEqual(["vendors:meals:moderate", "vendors:meals:read"])
+  })
+
+  it("never outside the actor's scope, the target's pool, or for yourself", async () => {
+    await refusedWithoutWrites(() => recover("voUG", ["vendors:meals:read"], "idKE"), "SCOPE_FORBIDDEN")
+    await refusedWithoutWrites(() => recover("voG3", ["vendors:meals:read"], "idKE"), "SCOPE_FORBIDDEN")
+    await refusedWithoutWrites(() => recover("voKE", ["customers:accounts:suspend"], "idKE"), "PERMISSIONS_OUT_OF_POOL")
+    await refusedWithoutWrites(() => recover("idKE", ID_POOL, "idKE"), "SELF_ACTION_FORBIDDEN")
+  })
+
+  it("never a super_admin, and never a role that can itself hold the recovery key (no minting recoverers)", async () => {
+    await refusedWithoutWrites(() => recover("super2", [], "idG"), "SUPER_ADMIN_PROTECTED")
+    await refusedWithoutWrites(() => recover("idKE3", ID_POOL, "idKE"), "RECOVERY_ROLE_PROTECTED")
+    await refusedWithoutWrites(() => recover("idKE3", [RECOVER], "idG"), "RECOVERY_ROLE_PROTECTED")
+  })
+
+  it("is independently gated: an identity admin without the recovery grant cannot recover, even with the management key", async () => {
+    addAdmin("idKEmgr", "identity_admin", SCOPE.KE, ID_POOL.filter((k) => k !== RECOVER))
+    await refusedWithoutWrites(() => recover("voKE", ["vendors:meals:read"], "idKEmgr"), "FORBIDDEN")
+    // and ordinary delegation never crosses into another department
+    await refusedWithoutWrites(() => grant("voKE", ["vendors:meals:read"], "idKEmgr"), "ROLE_NOT_MANAGEABLE")
+  })
+
+  it("respects the target's status and the version locks like every other assignment", async () => {
+    userOf("voKE").status = "deactivated"
+    await refusedWithoutWrites(() => recover("voKE", ["vendors:meals:read"], "idKE"), "INVALID_STATUS")
+    h.loseVersionFor = "voNBO"
+    await refusedWithoutWrites(() => recover("voNBO", ["vendors:meals:read"], "idKE"), "CONCURRENT_MODIFICATION")
+  })
+
+  it("a role or scope change still clears what recovery granted", async () => {
+    await recover("voKE", VO_POOL, "idKE")
+    await rescope("voKE", { scopeType: "CITY", cityId: "nbo" }, "idKE")
+    expect(grantsOf("voKE")).toEqual([])
+  })
+})
+
+// ─── Geography: an inactive city confers nothing ─────────────────────────────
+
+describe("inactive city scope", () => {
+  it("a CITY admin whose city is switched off holds no effective permissions — refused as an actor", async () => {
+    addAdmin("idKEcity", "identity_admin", SCOPE.KE, ID_POOL)
+    h.store.cities.find((c) => c.id === "nbo")!.status = "INACTIVE"
+    // voLeadNBO's grants are untouched, but none is effective.
+    await refusedWithoutWrites(() => grant("voNBO", ["vendors:outlets:read"], "voLeadNBO"), "FORBIDDEN")
+    // It stays reachable as a TARGET, so it can be repaired (re-scoped into an active city).
+    await rescope("voLeadNBO", { scopeType: "CITY", cityId: "msa" }, "idKEcity")
+    expect(scopeOf("voLeadNBO")).toEqual([{ scopeType: "CITY", countryId: "ke", cityId: "msa" }])
+  })
+})
+
+// ─── Lifecycle integrity ─────────────────────────────────────────────────────
+
+describe("lifecycle integrity", () => {
+  it("a resend that races the activation webhook never sets an active account back to invited", async () => {
+    addAdmin("newbie", "vendor_ops", SCOPE.KE, [], "invited")
+    vi.mocked(ClerkAdminStateService.createInvitation).mockImplementationOnce(async () => {
+      userOf("newbie").status = "active" // the webhook lands while Clerk is answering
+      return {} as never
+    })
+    await expect(svc.sendAdminInvitation("newbie", "idKE")).rejects.toMatchObject({ code: "STATUS_CHANGED" })
+    expect(userOf("newbie").status).toBe("active")
+  })
+
+  it("an ordinary resend still moves pending → invited", async () => {
+    addAdmin("newbie", "vendor_ops", SCOPE.KE, [], "pending")
+    await svc.sendAdminInvitation("newbie", "idKE")
+    expect(userOf("newbie").status).toBe("invited")
+    expect(userOf("newbie").invitationSentCount).toBe(1)
+  })
+
+  it("a suspension decided against a status that changed meanwhile is refused, not applied", async () => {
+    userOf("voKE").externalAuthId = "clerk_voKE"
+    vi.mocked(ClerkAdminStateService.banUser).mockImplementationOnce(async () => {
+      userOf("voKE").status = "deactivated"
+      return {} as never
+    })
+    await expect(svc.suspendAdminUser("voKE", "reason", "idKE")).rejects.toMatchObject({ code: "STATUS_CHANGED" })
+    expect(userOf("voKE").status).toBe("deactivated")
+  })
+
+  it("suspension freezes grants and reinstatement restores them", async () => {
+    await svc.suspendAdminUser("voLeadKE", "leave", "idKE")
+    expect(grantsOf("voLeadKE")).toEqual([...VO_LEAD].sort())
+    await refusedWithoutWrites(() => grant("voNBO", ["vendors:outlets:read"], "voLeadKE"), "ACTOR_NOT_ACTIVE")
+    await svc.reinstateAdminUser("voLeadKE", "idKE")
+    await grant("voNBO", ["vendors:outlets:read"], "voLeadKE")
+    expect(grantsOf("voNBO")).toEqual(["vendors:outlets:read"])
+  })
+
+  it("REACTIVATION: deactivated → pending, no grants, no identity link, a new invitation required", async () => {
+    await svc.deactivateAdminUser("voLeadKE", "left", "idKE")
+    expect(grantsOf("voLeadKE")).toEqual([])
+    h.store.grants.push({ id: "late", adminUserId: "voLeadKE", permissionId: permId("vendors:meals:read"), grantedById: "seed" })
+    await svc.reactivateAdminUser("voLeadKE", "idKE")
+    expect(userOf("voLeadKE")).toMatchObject({ status: "pending", externalAuthId: null, deactivatedAt: null, invitationSentAt: null })
+    expect(grantsOf("voLeadKE")).toEqual([])
+    expect(scopeOf("voLeadKE")).toEqual([SCOPE.KE])
+    await svc.sendAdminInvitation("voLeadKE", "idKE")
+    expect(userOf("voLeadKE").status).toBe("invited")
+  })
+
+  it("…only from deactivated, only with the reinstate key, only inside your scope", async () => {
+    await refusedWithoutWrites(() => svc.reactivateAdminUser("voKE", "idKE"), "INVALID_STATUS")
+    userOf("voUG").status = "deactivated"
+    await refusedWithoutWrites(() => svc.reactivateAdminUser("voUG", "idKE"), "SCOPE_FORBIDDEN")
+    userOf("voNBO").status = "deactivated"
+    await refusedWithoutWrites(() => svc.reactivateAdminUser("voNBO", "voLeadKE"), "FORBIDDEN")
+    await refusedWithoutWrites(() => svc.reactivateAdminUser("super2", "idG"), "SUPER_ADMIN_PROTECTED")
+  })
+})
+
+// ─── Reads: one geographic rule, server-computed capabilities ────────────────
+
+describe("reads use the same eligibility rule as writes", () => {
+  const ids = (r: { users: Array<{ id: string }> }) => r.users.map((u) => u.id).sort()
+  const KE_SCOPE = { tier: "COUNTRY" as const, countryId: "ke", cityId: null }
+
+  it("a COUNTRY actor lists its country's COUNTRY and CITY admins — not GLOBAL, not another country", async () => {
+    const list = await svc.listAdminUsers({ pageSize: 100 }, KE_SCOPE)
+    expect(ids(list)).toContain("voNBO")
+    expect(ids(list)).toContain("idKE2")
+    for (const outside of ["voUG", "voKLA", "voG", "idG", "super"]) expect(ids(list)).not.toContain(outside)
+    // every listed admin is one the pure rule accepts, and vice versa
+    const all = await svc.listAdminUsers({ pageSize: 100 }, { tier: "GLOBAL", countryId: null, cityId: null })
+    expect(all.total).toBe(h.store.users.length)
+  })
+
+  it("…the country filter narrows INSIDE the actor's scope, never widening it (AND, not a second `scopes` key)", async () => {
+    const list = await svc.listAdminUsers({ countryId: "ug", pageSize: 100 }, KE_SCOPE)
+    expect(list.users).toEqual([])
+  })
+
+  it("an invalid actor scope lists nothing", async () => {
+    expect((await svc.listAdminUsers({}, null)).users).toEqual([])
+  })
+
+  it("detail: out of scope is a 404, in scope carries capabilities computed by the mutation checks", async () => {
+    await expect(svc.getAdminUser("voUG", "idKE")).rejects.toMatchObject({ code: "USER_NOT_FOUND" })
+    const vo = await svc.getAdminUser("voNBO", "idKE")
+    expect(vo.capabilities).toMatchObject({ suspend: true, reinstate: false, changeRole: true, changeScope: true, deactivate: true, delegation: false, recovery: true })
+    const self = await svc.getAdminUser("idKE", "idKE")
+    expect(self.capabilities).toMatchObject({ suspend: false, changeRole: false, recovery: false, delegation: false })
+    const colleague = await svc.getAdminUser("idKE2", "idKE")
+    expect(colleague.capabilities).toMatchObject({ suspend: true, delegation: true, recovery: false })
+  })
+
+  it("permission options: a lead sees its own department in its scope, movable = the keys it holds", async () => {
+    const opts = await svc.getPermissionOptions("voNBO", "voLeadKE")
+    expect(opts.delegation.allowed).toBe(true)
+    expect(opts.delegation.movable).toEqual([...VO_LEAD].filter((k) => VO_POOL.includes(k)).sort())
+    expect(opts.recovery.allowed).toBe(false)
+    await expect(svc.getPermissionOptions("finKE", "voLeadKE")).rejects.toMatchObject({ code: "USER_NOT_FOUND" })
+    await expect(svc.getPermissionOptions("voUG", "voLeadKE")).rejects.toMatchObject({ code: "USER_NOT_FOUND" })
+  })
+
+  it("permission options: an identity admin with the recovery key may move the WHOLE target pool under recovery", async () => {
+    const opts = await svc.getPermissionOptions("voKE", "idKE")
+    expect(opts.delegation).toMatchObject({ allowed: false, code: "ROLE_NOT_MANAGEABLE" })
+    expect(opts.recovery.allowed).toBe(true)
+    expect(opts.recovery.movable).toEqual([...VO_POOL].sort())
+  })
+
+  it("delegable list: exactly the admins the write would accept", async () => {
+    const lead = await svc.listDelegableAdmins({ pageSize: 100 }, "voLeadKE")
+    expect(ids(lead)).toEqual(["voKE", "voLeadKE2", "voLeadNBO", "voNBO", "voPlainKE"].sort())
+    for (const u of lead.users) expect(u.delegation).toBe(true)
+    const recovery = await svc.listDelegableAdmins({ mode: "recovery", pageSize: 100 }, "idKE")
+    expect(ids(recovery)).toEqual(["ccKE", "finKE", "voKE", "voLeadKE", "voLeadKE2", "voLeadNBO", "voNBO", "voPlainKE"].sort())
+  })
+})
+
+// ─── The directory list: scope, filters, counts ──────────────────────────────
+
+describe("directory list and status counts", () => {
+  const ids = (r: { users: Array<{ id: string }> }) => r.users.map((u) => u.id).sort()
+  const KE_SCOPE  = { tier: "COUNTRY" as const, countryId: "ke", cityId: null }
+  const UG_SCOPE  = { tier: "COUNTRY" as const, countryId: "ug", cityId: null }
+  const NBO_SCOPE = { tier: "CITY" as const, countryId: "ke", cityId: "nbo" }
+  const GLOBAL    = { tier: "GLOBAL" as const, countryId: null, cityId: null }
+
+  beforeEach(() => {
+    userOf("voKE").status  = "suspended"
+    userOf("voNBO").status = "pending"
+    userOf("finKE").status = "invited"
+    userOf("ccKE").status  = "deactivated"
+    userOf("voUG").status  = "suspended"
+    userOf("voKLA").status = "pending"
+  })
+
+  it("counts only the actor's country — another country's admins are never counted", async () => {
+    const { statusCounts, total } = await svc.listAdminUsers({ pageSize: 100 }, KE_SCOPE)
+    expect(statusCounts).toEqual({ total: 12, pending: 1, invited: 1, active: 8, suspended: 1, deactivated: 1 })
+    expect(total).toBe(12)
+    const ug = await svc.listAdminUsers({ pageSize: 100 }, UG_SCOPE)
+    expect(ids(ug)).toEqual(["idUG", "voKLA", "voUG"])
+    expect(ug.statusCounts).toEqual({ total: 3, pending: 1, invited: 0, active: 1, suspended: 1, deactivated: 0 })
+  })
+
+  it("a CITY actor sees and counts only its own city", async () => {
+    const nbo = await svc.listAdminUsers({ pageSize: 100 }, NBO_SCOPE)
+    expect(ids(nbo)).toEqual(["idNBO", "voLeadNBO", "voNBO"])
+    expect(nbo.statusCounts).toMatchObject({ total: 3, pending: 1, active: 2 })
+  })
+
+  it("GLOBAL counts everyone except the system account", async () => {
+    const all = await svc.listAdminUsers({ pageSize: 100 }, GLOBAL)
+    expect(all.statusCounts.total).toBe(h.store.users.length)
+  })
+
+  it("filters narrow the rows inside the scope and never change the counts", async () => {
+    const suspended = await svc.listAdminUsers({ status: "suspended", pageSize: 100 }, KE_SCOPE)
+    expect(ids(suspended)).toEqual(["voKE"])
+    expect(suspended.total).toBe(1)
+    expect(suspended.statusCounts.total).toBe(12)
+    const foreign = await svc.listAdminUsers({ countryId: "ug", status: "suspended", pageSize: 100 }, KE_SCOPE)
+    expect(foreign.users).toEqual([])
+    expect(foreign.statusCounts.suspended).toBe(1)
+    const searched = await svc.listAdminUsers({ search: "voUG", pageSize: 100 }, KE_SCOPE)
+    expect(searched.users).toEqual([])
+    const cityInCountry = await svc.listAdminUsers({ countryId: "ke", pageSize: 100 }, NBO_SCOPE)
+    expect(ids(cityInCountry)).toEqual(["idNBO", "voLeadNBO", "voNBO"])
+  })
+
+  it("an unknown status filter is refused, not passed to the database", async () => {
+    await expect(svc.listAdminUsers({ status: "everyone" }, KE_SCOPE)).rejects.toMatchObject({ code: "INVALID_STATUS_FILTER" })
+  })
+
+  it("malformed paging falls back to sane values", async () => {
+    const r = await svc.listAdminUsers({ page: Number.NaN, pageSize: 5000 }, KE_SCOPE)
+    expect(r).toMatchObject({ page: 1, pageSize: 100 })
+  })
+
+  it("an invalid actor scope fails closed: no rows and every count zero", async () => {
+    const r = await svc.listAdminUsers({ pageSize: 100 }, null)
+    expect(r.users).toEqual([])
+    expect(r.statusCounts).toEqual({ total: 0, pending: 0, invited: 0, active: 0, suspended: 0, deactivated: 0 })
+  })
+})
+
+// ─── Self-protection on lifecycle actions ────────────────────────────────────
+
+describe("no administrator suspends or deactivates themselves", () => {
+  it("self-suspension and self-deactivation are refused and write nothing", async () => {
+    vi.mocked(ClerkAdminStateService.banUser).mockClear()
+    vi.mocked(ClerkAdminStateService.deleteUser).mockClear()
+    await refusedWithoutWrites(() => svc.suspendAdminUser("idKE", "testing", "idKE"), "SELF_ACTION_FORBIDDEN")
+    await refusedWithoutWrites(() => svc.deactivateAdminUser("idKE", "testing", "idKE"), "SELF_ACTION_FORBIDDEN")
+    await refusedWithoutWrites(() => svc.suspendAdminUser("idG", "testing", "idG"), "SELF_ACTION_FORBIDDEN")
+    expect(ClerkAdminStateService.banUser).not.toHaveBeenCalled()
+    expect(ClerkAdminStateService.deleteUser).not.toHaveBeenCalled()
+  })
+
+  it("the same actor still suspends and deactivates an eligible colleague", async () => {
+    await svc.suspendAdminUser("idKE2", "on leave", "idKE")
+    expect(userOf("idKE2").status).toBe("suspended")
+    await svc.deactivateAdminUser("voKE", "left the company", "idKE")
+    expect(userOf("voKE").status).toBe("deactivated")
+  })
+
+  it("the detail read marks the actor's own record and offers no lifecycle action on it", async () => {
+    const self = await svc.getAdminUser("idKE", "idKE")
+    expect(self.isSelf).toBe(true)
+    expect(self.capabilities).toMatchObject({ suspend: false, deactivate: false, reinstate: false, manageAvailability: false })
+    expect((await svc.getAdminUser("idKE2", "idKE")).isSelf).toBe(false)
+  })
+})
+
+// ─── Created by vs invitation sent by ────────────────────────────────────────
+
+describe("account attribution", () => {
+  it("creation records the creator and NO invitation sender", async () => {
+    const user = await create("idKE", "vendor_ops", [SCOPE.KE])
+    expect(userOf(user.id)).toMatchObject({ createdById: "idKE" })
+    expect(userOf(user.id).invitationSentById ?? null).toBeNull()
+    const detail = await svc.getAdminUser(user.id, "idG")
+    expect(detail.createdBy).toMatchObject({ id: "idKE" })
+    expect(detail.invitationSentBy).toBeNull()
+  })
+
+  it("the invitation sender is whoever sent it — not the creator — and a resend updates it", async () => {
+    const user = await create("idKE", "vendor_ops", [SCOPE.KE])
+    await svc.sendAdminInvitation(user.id, "idKE2")
+    expect(userOf(user.id)).toMatchObject({ createdById: "idKE", invitationSentById: "idKE2", status: "invited" })
+    await svc.sendAdminInvitation(user.id, "idG")
+    expect(userOf(user.id)).toMatchObject({ createdById: "idKE", invitationSentById: "idG", invitationSentCount: 2 })
+    const detail = await svc.getAdminUser(user.id, "idKE")
+    expect(detail.createdBy?.id).toBe("idKE")
+    expect(detail.invitationSentBy?.id).toBe("idG")
+  })
+
+  it("reactivation clears the invitation sender together with the invitation", async () => {
+    const user = await create("idKE", "vendor_ops", [SCOPE.KE])
+    await svc.sendAdminInvitation(user.id, "idKE2")
+    userOf(user.id).status = "active"
+    await svc.deactivateAdminUser(user.id, "left", "idKE")
+    await svc.reactivateAdminUser(user.id, "idKE")
+    expect(userOf(user.id)).toMatchObject({ status: "pending", invitationSentAt: null, invitationSentById: null, createdById: "idKE" })
   })
 })
 
@@ -809,14 +1217,40 @@ describe("router boundary", () => {
     return { status: res.status, code: res.status >= 400 ? (await res.json() as { code: string }).code : "OK" }
   }
 
-  it("a designated vendor_ops superior reaches the grant endpoint, and only that one", async () => {
+  it("a vendor_ops lead reaches the shared delegation workflow — and nothing else, with no role-name guard involved", async () => {
+    expect(await call("GET", "/users/delegable", "voLeadKE")).toEqual({ status: 200, code: "OK" })
+    expect(await call("GET", "/users/voNBO/permission-options", "voLeadKE")).toEqual({ status: 200, code: "OK" })
     expect(await call("PUT", "/users/voNBO/permissions", "voLeadKE", { permissionKeys: ["vendors:outlets:read"] })).toEqual({ status: 200, code: "OK" })
     expect(grantsOf("voNBO")).toEqual(["vendors:outlets:read"])
-    expect(await call("GET", "/users/voNBO", "voLeadKE")).toEqual({ status: 403, code: "IDENTITY_ROLE_REQUIRED" })
-    expect(await call("PATCH", "/users/voNBO/scopes", "voLeadKE", { scopes: [SCOPE.MSA] })).toEqual({ status: 403, code: "IDENTITY_ROLE_REQUIRED" })
-    expect(await call("POST", "/users/voNBO/suspend", "voLeadKE", { reason: "x" })).toEqual({ status: 403, code: "IDENTITY_ROLE_REQUIRED" })
+    const before = JSON.stringify(h.store)
+    // No profiles:read, no provisioning or lifecycle keys, no recovery key: the key gates close them.
+    expect(await call("GET", "/users/voNBO", "voLeadKE")).toEqual({ status: 403, code: "FORBIDDEN" })
+    expect(await call("GET", "/users", "voLeadKE")).toEqual({ status: 403, code: "FORBIDDEN" })
+    expect(await call("PATCH", "/users/voNBO/scopes", "voLeadKE", { scopes: [SCOPE.MSA] })).toEqual({ status: 403, code: "FORBIDDEN" })
+    expect(await call("POST", "/users/voNBO/suspend", "voLeadKE", { reason: "x" })).toEqual({ status: 403, code: "FORBIDDEN" })
     expect(await call("POST", "/users", "voLeadKE", { firstName: "A", lastName: "B", email: "c@example.test", roleId: roleId("vendor_ops") }))
-      .toEqual({ status: 403, code: "IDENTITY_ROLE_REQUIRED" })
+      .toEqual({ status: 403, code: "FORBIDDEN" })
+    expect(await call("PUT", "/users/voNBO/permissions/recovery", "voLeadKE", { permissionKeys: VO_POOL })).toEqual({ status: 403, code: "FORBIDDEN" })
+    // Another department's admin, in its own country, is invisible to it.
+    expect(await call("GET", "/users/finKE/permission-options", "voLeadKE")).toEqual({ status: 404, code: "USER_NOT_FOUND" })
+    expect(JSON.stringify(h.store)).toBe(before)
+  })
+
+  it("an identity admin holding the recovery key bootstraps through the recovery route; the mode is the ROUTE's, never the body's", async () => {
+    expect(await call("PUT", "/users/voKE/permissions/recovery", "idKE", { permissionKeys: VO_POOL })).toEqual({ status: 200, code: "OK" })
+    expect(grantsOf("voKE")).toEqual([...VO_POOL].sort())
+    expect(await call("PUT", "/users/voNBO/permissions", "idKE", { permissionKeys: ["vendors:outlets:read"], mode: "recovery" }))
+      .toEqual({ status: 400, code: "UNSUPPORTED_FIELD" })
+    expect(await call("PUT", "/users/voNBO/permissions", "idKE", { permissionKeys: ["vendors:outlets:read"] }))
+      .toEqual({ status: 403, code: "ROLE_NOT_MANAGEABLE" })
+  })
+
+  it("a direct API call cannot suspend or deactivate yourself", async () => {
+    const before = JSON.stringify(h.store)
+    expect(await call("POST", "/users/idKE/suspend", "idKE", { reason: "testing" })).toEqual({ status: 403, code: "SELF_ACTION_FORBIDDEN" })
+    expect(await call("POST", "/users/idKE/deactivate", "idKE", { reason: "testing" })).toEqual({ status: 403, code: "SELF_ACTION_FORBIDDEN" })
+    expect(JSON.stringify(h.store)).toBe(before)
+    expect(await call("POST", "/users/idKE2/suspend", "idKE", { reason: "on leave" })).toEqual({ status: 200, code: "OK" })
   })
 
   it("without the management key the grant endpoint is closed at the route", async () => {

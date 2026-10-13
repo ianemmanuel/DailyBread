@@ -85,11 +85,16 @@ WHERE NOT gr.in_holder_pool OR NOT gr."isActive"
 UNION ALL
 
 -- ── 3. Grants the grantor could not make today ─────────────────────────────
--- Phase 1.1 (assertCanDelegatePermissions): the grantor must be the SAME role
--- as the grantee, or one whose pool covers it (in practice super_admin);
--- GLOBAL or COUNTRY; containing the grantee's scope (inclusive); not a
--- same-tier fellow superior of the grantee (one effectively holding
--- admin_users:permissions:manage); never themselves; and holding the key now.
+-- Ordinary delegation (assertCanAssignPermissions, mode "delegation"): the
+-- grantor must be the SAME role as the grantee, or one whose pool covers it
+-- (in practice super_admin); GLOBAL or COUNTRY; containing the grantee's scope
+-- (inclusive); never themselves; and holding the key now. Same-tier
+-- colleagues are NOT a violation (the peer rule was retired).
+-- RECOVERY (mode "recovery"): a grantor of another role who effectively holds
+-- admin_users:permissions:recover may assign keys it does not hold; such
+-- grants are not reported as "another role" or "no longer holds" (the
+-- grantee role / scope checks still apply). The audit row's metadata.mode
+-- says which authority was used.
 -- Super admins' own grants (CLI + syncSuperAdminPermissions) are the
 -- documented bootstrap and are skipped.
 -- NOT DETECTABLE HERE: a grant that predates the grantee's last SCOPE change
@@ -100,15 +105,13 @@ SELECT 'grantor', grantee.email, grantee.role_name, grantee.tier, grantee.countr
          WHEN gr."grantedById" = gr."adminUserId" THEN 'self-granted'
          WHEN grantor.role_name IS DISTINCT FROM 'super_admin'
           AND grantor.role_name IS DISTINCT FROM grantee.role_name
+          AND NOT EXISTS (SELECT 1 FROM grants rc WHERE rc."adminUserId" = gr."grantedById"
+                        AND rc.key = 'admin_users:permissions:recover' AND rc.in_holder_pool AND rc."isActive")
            THEN 'granted by another role (' || COALESCE(grantor.role_name, 'unknown grantor') || ')'
          WHEN grantor.role_name IS DISTINCT FROM 'super_admin'
           AND (grantor.scope_rows <> 1 OR grantee.scope_rows <> 1 OR grantor.tier = 'CITY'
                OR (grantor.tier = 'COUNTRY' AND (grantee.tier = 'GLOBAL' OR grantor.country_id IS DISTINCT FROM grantee.country_id)))
            THEN 'grantee outside the grantor''s scope (or grantor is CITY)'
-         WHEN grantor.role_name = grantee.role_name AND grantor.tier = grantee.tier
-          AND EXISTS (SELECT 1 FROM grants m WHERE m."adminUserId" = grantee.id
-                        AND m.key = 'admin_users:permissions:manage' AND m.in_holder_pool AND m."isActive")
-           THEN 'granted by a same-tier fellow superior'
          ELSE 'grantor no longer holds this permission'
        END,
        gr.key, grantor.email
@@ -118,23 +121,24 @@ LEFT JOIN scoped grantor ON grantor.id = gr."grantedById"
 WHERE grantee.role_name IS DISTINCT FROM 'super_admin'
   AND (
        gr."grantedById" = gr."adminUserId"
-    OR (grantor.role_name IS DISTINCT FROM 'super_admin' AND grantor.role_name IS DISTINCT FROM grantee.role_name)
+    OR (grantor.role_name IS DISTINCT FROM 'super_admin' AND grantor.role_name IS DISTINCT FROM grantee.role_name
+        AND NOT EXISTS (SELECT 1 FROM grants rc WHERE rc."adminUserId" = gr."grantedById"
+                        AND rc.key = 'admin_users:permissions:recover' AND rc.in_holder_pool AND rc."isActive"))
     OR (grantor.role_name IS DISTINCT FROM 'super_admin'
         AND (grantor.scope_rows <> 1 OR grantee.scope_rows <> 1 OR grantor.tier = 'CITY'
              OR (grantor.tier = 'COUNTRY' AND (grantee.tier = 'GLOBAL' OR grantor.country_id IS DISTINCT FROM grantee.country_id))))
-    OR (grantor.role_name = grantee.role_name AND grantor.tier = grantee.tier
-        AND EXISTS (SELECT 1 FROM grants m WHERE m."adminUserId" = grantee.id
-                      AND m.key = 'admin_users:permissions:manage' AND m.in_holder_pool AND m."isActive"))
-    OR NOT EXISTS (
+    OR (NOT EXISTS (
          SELECT 1 FROM grants own
          WHERE own."adminUserId" = gr."grantedById" AND own.key = gr.key AND own.in_holder_pool AND own."isActive"
        )
+        AND NOT EXISTS (SELECT 1 FROM grants rc WHERE rc."adminUserId" = gr."grantedById"
+                          AND rc.key = 'admin_users:permissions:recover' AND rc.in_holder_pool AND rc."isActive"))
   )
 
 UNION ALL
 
 -- ── 4. Accounts provisioned outside the provisioner's scope ────────────────
--- invitedById is the creating actor. Phase 1 requires the provisioner to be
+-- createdById is the creating actor. Phase 1 requires the provisioner to be
 -- GLOBAL or COUNTRY and to contain the new account's scope (inclusive).
 SELECT 'provisioner', target.email, target.role_name, target.tier, target.country_id, target.city_id,
        CASE
@@ -144,7 +148,7 @@ SELECT 'provisioner', target.email, target.role_name, target.tier, target.countr
        NULL, prov.email
 FROM "AdminUser" u
 JOIN scoped target ON target.id = u.id
-JOIN scoped prov   ON prov.id = u."invitedById"
+JOIN scoped prov   ON prov.id = u."createdById"
 WHERE prov.role_name IS DISTINCT FROM 'super_admin'
   AND (
        prov.scope_rows <> 1

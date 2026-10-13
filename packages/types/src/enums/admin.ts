@@ -227,6 +227,9 @@ export const AdminPermissions = {
   ADMIN_USERS_ACCOUNTS_CREATE    : "admin_users:accounts:create",
   ADMIN_USERS_INVITATIONS_SEND   : "admin_users:invitations:send",
   ADMIN_USERS_PERMISSIONS_MANAGE : "admin_users:permissions:manage",
+  /** Recovery / bootstrap: assign any key of another department's role pool,
+   *  held or not, within scope. Distinct from ordinary delegation (MANAGE). */
+  ADMIN_USERS_PERMISSIONS_RECOVER: "admin_users:permissions:recover",
   ADMIN_USERS_ACCOUNTS_SUSPEND   : "admin_users:accounts:suspend",
   ADMIN_USERS_ACCOUNTS_REINSTATE : "admin_users:accounts:reinstate",
   ADMIN_USERS_ACCOUNTS_DEACTIVATE: "admin_users:accounts:deactivate",

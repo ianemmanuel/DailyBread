@@ -27,7 +27,7 @@
    in-session vendor tool has little use for a dark theme) — the
    RootLayout ThemeProvider is forced to "light" (see app/layout.tsx), so
    base.css's .dark block never activates here. Dark mode stays available
-   to other apps (e.g. admin-dashboard) that opt into it themselves — it's
+   to other apps (e.g. the ERP) that opt into it themselves — it's
    an app-level decision, not something this shared package enforces. */
 :root {
   --background:         oklch(0.975 0.008 70);

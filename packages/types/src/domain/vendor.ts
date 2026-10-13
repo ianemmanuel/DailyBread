@@ -1044,7 +1044,7 @@ export interface PayoutVerificationRequirement {
 }
 
 //* Available OUTBOUND CountryPaymentMethod rows a vendor can choose from —
-//* GET /vendor/v1/payouts/methods. Slimmer than admin-dashboard's own
+//* GET /vendor/v1/payouts/methods. Slimmer than the ERP's own
 //* CountryPaymentMethodConfig (types/payment-method.types.ts) — no
 //* ourAccountDetails/verificationConfig, which are platform-internal.
 export interface AvailablePayoutMethod {

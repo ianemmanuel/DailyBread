@@ -8,12 +8,11 @@ import {
 } from "../../controllers/admin.reviewerAvailability.controller"
 
 /*
- * Deliberately NOT mounted under /admin/v1/users — that router applies
- * requireIdentityAccess, which hard-blocks vendor_ops "regardless of
- * individual permission grants." A privileged vendor_ops admin must be
- * able to reach handleSetReviewerAvailability via an individually
- * granted vendors:reviewers:manage_availability permission, which
- * requireIdentityAccess would make impossible.
+ * A separate router from /admin/v1/users: reviewer availability is a
+ * vendor_ops concern gated by vendors:reviewers:manage_availability (scoped
+ * to country/city in its service), not an identity-lifecycle action. (It was
+ * first split out because /users sat behind a role-name guard; that guard is
+ * gone, but the two remain different capabilities.)
  */
 const reviewerRouter: Router = Router()
 

@@ -172,7 +172,7 @@ async function resendExistingInvitation(existing: {
         role           : existing.role?.name ?? "super_admin",
         roleDisplayName: existing.role?.displayName ?? "Super Admin",
         displayName,
-        inviteMessage: `You've been invited to join DailyBread Admin as ${existing.role?.displayName ?? "Super Admin"}.`,
+        inviteMessage: `You've been invited to join the DailyBread ERP as ${existing.role?.displayName ?? "Super Admin"}.`,
       },
       notify: true,
     })
@@ -182,6 +182,7 @@ async function resendExistingInvitation(existing: {
       data : {
         status              : AdminUserStatus.invited,
         invitationSentAt    : new Date(),
+        invitationSentById  : null,
         invitationSentCount : { increment: 1 },
       },
     })
@@ -285,8 +286,8 @@ async function main() {
         roleId  : superAdminRole.id,
         status  : AdminUserStatus.pending,
         isActive: false,
-        // Self-bootstrapped — no inviter exists yet
-        invitedById: null,
+        // Self-bootstrapped — no creating admin exists
+        createdById: null,
         scopes: {
           create: { scopeType: "GLOBAL", countryId: null, cityId: null },
         },
@@ -349,7 +350,7 @@ async function main() {
         roleDisplayName : "Super Admin",
         displayName,
         // Used by the Clerk invitation email template
-        inviteMessage: "You've been invited to join DailyBread Admin as Super Admin.",
+        inviteMessage: "You've been invited to join the DailyBread ERP as Super Admin.",
       },
       notify: true,
     })
