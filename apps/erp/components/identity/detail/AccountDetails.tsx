@@ -3,10 +3,7 @@ import { adminName, formatDate, scopeLabel } from "@/lib/identity/format"
 import type { AdminUserDetail } from "@/types"
 
 interface Props {
-  user         : AdminUserDetail
-  /** Inline controls rendered beside the role and scope values when the viewer may change them. */
-  roleControl? : ReactNode
-  scopeControl?: ReactNode
+  user: AdminUserDetail
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -39,15 +36,15 @@ function invitation(user: AdminUserDetail): { sent: ReactNode; by: ReactNode | n
   }
 }
 
-export function AccountDetails({ user, roleControl, scopeControl }: Props) {
+export function AccountDetails({ user }: Props) {
   const invite = invitation(user)
 
   return (
     <section aria-labelledby="account-details" className="overflow-hidden rounded-xl border border-border bg-card">
       <h2 id="account-details" className="border-b border-border px-4 py-2.5 text-sm font-semibold text-foreground">Account</h2>
       <dl className="-mb-px grid divide-y divide-border/60 md:grid-cols-2 md:divide-y-0 md:[&>div]:border-b md:[&>div]:border-border/60">
-        <Row label="Role">{user.role?.displayName ?? muted("No role")}{roleControl}</Row>
-        <Row label="Scope">{scopeLabel(user.scopes)}{scopeControl}</Row>
+        <Row label="Role">{user.role?.displayName ?? muted("No role")}</Row>
+        <Row label="Scope">{scopeLabel(user.scopes)}</Row>
         <Row label="Employee ID">{user.employeeId ? <span className="font-mono text-xs">{user.employeeId}</span> : muted("—")}</Row>
         <Row label="Last active">{formatDate(user.lastSeenAt) ?? muted("Never")}</Row>
         <Row label="Created">{formatDate(user.createdAt)}</Row>

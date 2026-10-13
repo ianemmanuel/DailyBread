@@ -4,6 +4,7 @@ import Link from "next/link"
 import { UserPlus } from "lucide-react"
 import { adminFetch } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
+import { getScopeTier } from "@/lib/auth/scope-tier"
 import { Button } from "@/components/ui/button"
 import { TableFilterBar, type FilterStatusOption, type FilterSelectOption } from "@/components/shared/TableFilterBar"
 import { AdminUsersTable } from "@/components/identity/AdminUsersTable"
@@ -52,7 +53,9 @@ export default async function IdentityManagePage({ searchParams }: PageProps) {
     adminFetch<CountryListResult>(`/admin/v1/countries?status=ACTIVE&pageSize=500`, { next: { revalidate: 300, tags: ["countries"] } }).catch(() => null),
   ])
   const countryOptions: FilterSelectOption[] = (countriesResult?.countries ?? []).map((c) => ({ value: c.id, label: c.name }))
-  const showCountryFilter = countryOptions.length > 1
+  // Only a globally scoped viewer sees more than one country, so only they get the country filter and column.
+  const isGlobalViewer    = getScopeTier(session) === "GLOBAL"
+  const showCountryFilter = isGlobalViewer && countryOptions.length > 1
 
   return (
     <div className="page-content animate-slide-up">
@@ -89,7 +92,7 @@ export default async function IdentityManagePage({ searchParams }: PageProps) {
         search={search}
         status={status}
         country={country}
-        showCountryColumn={showCountryFilter && (!country || country === "all")}
+        showCountryColumn={isGlobalViewer && (!country || country === "all")}
       />
     </div>
   )

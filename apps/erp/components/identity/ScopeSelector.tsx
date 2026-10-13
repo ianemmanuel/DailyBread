@@ -19,7 +19,7 @@ interface Props {
   actorCountries: string[]
   value    : ScopeEntry[]
   onChange : (scopes: ScopeEntry[]) => void
-  // Both call sites (CreateUserForm's card, UpdateScopesForm's AlertDialog)
+  // Both call sites (CreateUserForm's card, the edit page's AssignmentForm)
   // already render their own "Geographic Scope" heading + explainer copy —
   // showing it a second time here just padded the component's height with
   // nothing new. Default true only for any other/future caller that embeds
@@ -44,7 +44,7 @@ interface Props {
  *     within their own countries
  *
  * Countries and cities are fetched via /api/countries and /api/countries/:id/cities.
- * Used both during creation (CreateUserForm) and editing (UpdateScopesForm).
+ * Used both during creation (CreateUserForm) and editing (AssignmentForm).
  */
 export function ScopeSelector({ isGlobalActor, actorCountries, value, onChange, showHeader = true, allowedTiers }: Props) {
   // A tier is offered only if the role may hold it AND the actor may assign

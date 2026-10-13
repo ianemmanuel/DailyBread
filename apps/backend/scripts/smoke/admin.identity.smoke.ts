@@ -7,6 +7,8 @@
  *      written; a colleague can still be suspended
  *   3. attribution: createdBy is the creator, invitationSentBy is null until
  *      an invitation is recorded, and the detail read returns both relations
+ *   4. editing: profile fields (never the email) with a version check, and
+ *      role + scope applied together in one transaction
  *
  * Builds its own throwaway countries, cities and admins; sweeps strays first
  * and cleans up after itself. Sends no Clerk calls (no account has an
@@ -17,6 +19,7 @@
 import { prisma, Prisma } from "@repo/db"
 import {
   createAdminUser, deactivateAdminUser, getAdminUser, listAdminUsers, suspendAdminUser,
+  updateAdminUserAssignment, updateAdminUserProfile,
 } from "@/modules/admin/services/admin.user.service"
 
 const MARKER = "zz-smoke-identity"
@@ -44,7 +47,7 @@ async function sweep() {
 
 const IDENTITY_KEYS = [
   "admin_users:profiles:read", "admin_users:accounts:create", "admin_users:accounts:suspend",
-  "admin_users:accounts:deactivate",
+  "admin_users:accounts:deactivate", "admin_users:profiles:update", "admin_users:roles:assign",
 ]
 
 async function main() {
@@ -132,6 +135,27 @@ async function main() {
     check("invitationSentBy resolves the recorded sender, independent of the creator",
       invited.invitationSentBy?.id === idA2.id && invited.createdBy?.id === idA.id, invited)
     check("isSelf is true on your own record", (await getAdminUser(idA.id, idA.id)).isSelf === true)
+
+    console.log("\n  ── 4. editing an account\n")
+    const editable = await prisma.adminUser.findUniqueOrThrow({ where: { email: `${MARKER}-vo-a1@example.test` } })
+    await updateAdminUserProfile({
+      adminUserId: editable.id, firstName: "Edited", middleName: "M", lastName: "Name", employeeId: `${MARKER}-emp`,
+      expectedUpdatedAt: editable.updatedAt.toISOString(),
+    }, idA.id)
+    const edited = await prisma.adminUser.findUniqueOrThrow({ where: { id: editable.id } })
+    check("profile fields are written; the email is untouched",
+      edited.firstName === "Edited" && edited.middleName === "M" && edited.employeeId === `${MARKER}-emp` && edited.email === editable.email, edited)
+    check("a form loaded before that edit is refused",
+      await refusal(updateAdminUserProfile({ adminUserId: editable.id, lastName: "Stale", expectedUpdatedAt: editable.updatedAt.toISOString() }, idA.id)) === "ACCOUNT_CHANGED")
+    const audit = await prisma.auditLog.findFirst({ where: { entityId: editable.id, action: "admin_user.profile_updated" } })
+    check("the edit is audited with before and after", !!audit, audit)
+
+    await updateAdminUserAssignment({ adminUserId: editable.id, roleId: identityRole.id, scopes: [{ scopeType: "COUNTRY", countryId: countryA.id }] }, idA.id)
+    const moved = await prisma.adminUser.findUniqueOrThrow({ where: { id: editable.id }, include: { role: true, scopes: true } })
+    check("role and scope change together (city vendor_ops → country identity admin)",
+      moved.role?.name === "identity_admin" && moved.scopes.length === 1 && moved.scopes[0]!.scopeType === "COUNTRY" && moved.scopes[0]!.countryId === countryA.id, moved.scopes)
+    check("…refused outside the actor's country",
+      await refusal(updateAdminUserAssignment({ adminUserId: editable.id, roleId: vendorOps.id, scopes: [{ scopeType: "COUNTRY", countryId: countryB.id }] }, idA.id)) === "SCOPE_FORBIDDEN")
   } finally {
     await sweep()
   }

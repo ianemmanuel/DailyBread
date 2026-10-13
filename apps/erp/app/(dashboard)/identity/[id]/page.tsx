@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
-import { Info } from "lucide-react"
+import Link from "next/link"
+import { Info, PencilLine } from "lucide-react"
 import { adminFetch, ApiCallError } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { AdminPermissions } from "@repo/types/admin-app"
@@ -10,9 +11,8 @@ import { AccountDetails } from "@/components/identity/detail/AccountDetails"
 import { PermissionsPanel } from "@/components/identity/detail/PermissionsPanel"
 import { AccountActions } from "@/components/identity/lifecycle/AccountActions"
 import { SetAvailabilityForm } from "@/components/identity/SetAvailabilityForm"
-import { UpdateRoleForm } from "@/components/identity/UpdateRoleForm"
-import { UpdateScopesForm } from "@/components/identity/UpdateScopesForm"
-import type { AdminRole, AdminUserDetail, PermissionOptions } from "@/types"
+import { Button } from "@/components/ui/button"
+import type { AdminUserDetail, PermissionOptions } from "@/types"
 
 export const metadata: Metadata = { title: "Administrator" }
 
@@ -56,18 +56,9 @@ export default async function AdminUserDetailPage({ params }: Props) {
   const user = await loadUser(id)
   const can  = user.capabilities
 
-  const [options, allRoles] = await Promise.all([
-    can.delegation || can.recovery
-      ? adminFetch<PermissionOptions>(`/admin/v1/users/${encodeURIComponent(id)}/permission-options`, { cache: "no-store" }).catch(() => "unavailable" as const)
-      : null,
-    can.changeRole || can.changeScope
-      ? adminFetch<AdminRole[]>("/admin/v1/users/meta/roles", { next: { revalidate: 3600 } }).catch(() => [])
-      : [],
-  ])
-
-  // Offered roles are the ones the backend accepts at the target's CURRENT scope.
-  const tier  = user.scopes?.[0]?.scopeType
-  const roles = allRoles.filter((r) => r.assignable !== false && (!tier || (r.allowedScopes ?? []).includes(tier)))
+  const options = can.delegation || can.recovery
+    ? await adminFetch<PermissionOptions>(`/admin/v1/users/${encodeURIComponent(id)}/permission-options`, { cache: "no-store" }).catch(() => "unavailable" as const)
+    : null
   const name  = [user.firstName, user.lastName].join(" ")
   const message = notice(user)
 
@@ -88,6 +79,14 @@ export default async function AdminUserDetailPage({ params }: Props) {
                 unavailableReason={user.unavailableReason}
               />
             )}
+            {(can.editProfile || can.changeRole) && (
+              <Button asChild size="lg" className="group px-4 shadow-sm hover:-translate-y-px hover:bg-primary/90 hover:shadow-md">
+                <Link href={`/identity/${encodeURIComponent(id)}/update`}>
+                  <PencilLine className="transition-transform duration-200 group-hover:-rotate-12" />
+                  Edit account
+                </Link>
+              </Button>
+            )}
             <AccountActions userId={id} targetName={name} status={user.status} capabilities={can} />
           </>
         }
@@ -100,21 +99,7 @@ export default async function AdminUserDetailPage({ params }: Props) {
         </p>
       )}
 
-      <AccountDetails
-        user={user}
-        roleControl={can.changeRole && (
-          <UpdateRoleForm userId={id} roles={roles} currentRoleId={user.roleId} currentRoleName={user.role?.displayName ?? "—"} />
-        )}
-        scopeControl={can.changeScope && (
-          <UpdateScopesForm
-            userId={id}
-            currentScopes={user.scopes}
-            isGlobalActor={session.scope.isGlobal}
-            actorCountries={session.scope.countryIds}
-            allowedTiers={allRoles.find((r) => r.id === user.roleId)?.allowedScopes}
-          />
-        )}
-      />
+      <AccountDetails user={user} />
 
       <PermissionsPanel user={user} options={options} />
     </div>

@@ -42,19 +42,21 @@ model AdminUser {
   unavailableUntil    DateTime?
   unavailableReason   String?
 
-  role                    AdminRole?            @relation(fields: [roleId], references: [id])
-  createdBy               AdminUser?            @relation("AdminCreatedBy", fields: [createdById], references: [id])
-  createdAdmins           AdminUser[]           @relation("AdminCreatedBy")
-  invitationSentBy        AdminUser?            @relation("AdminInvitationSentBy", fields: [invitationSentById], references: [id])
-  invitationsSent         AdminUser[]           @relation("AdminInvitationSentBy")
-  scopes                  AdminUserScope[]
-  mealEscalationsCreated  MealEscalation[]      @relation("MealEscalationCreatedBy")
-  mealEscalationsAssigned MealEscalation[]      @relation("MealEscalationAssignedTo")
-  mealEscalationsResolved MealEscalation[]      @relation("MealEscalationResolvedBy")
-  permissions             AdminUserPermission[] @relation("UserPermissions")
-  granted                 AdminUserPermission[] @relation("PermissionGrantedBy")
-  auditLogs               AuditLog[]
-  notifications           AdminNotification[]
+  role                     AdminRole?             @relation(fields: [roleId], references: [id])
+  createdBy                AdminUser?             @relation("AdminCreatedBy", fields: [createdById], references: [id])
+  createdAdmins            AdminUser[]            @relation("AdminCreatedBy")
+  invitationSentBy         AdminUser?             @relation("AdminInvitationSentBy", fields: [invitationSentById], references: [id])
+  invitationsSent          AdminUser[]            @relation("AdminInvitationSentBy")
+  scopes                   AdminUserScope[]
+  mealEscalationsCreated   MealEscalation[]       @relation("MealEscalationCreatedBy")
+  mealEscalationsAssigned  MealEscalation[]       @relation("MealEscalationAssignedTo")
+  mealEscalationsResolved  MealEscalation[]       @relation("MealEscalationResolvedBy")
+  permissions              AdminUserPermission[]  @relation("UserPermissions")
+  granted                  AdminUserPermission[]  @relation("PermissionGrantedBy")
+  auditLogs                AuditLog[]
+  notifications            AdminNotification[]
+  permissionSetup          AdminPermissionSetup?  @relation("PermissionSetupSubject")
+  permissionSetupsResolved AdminPermissionSetup[] @relation("PermissionSetupResolvedBy")
 
   @@index([externalAuthId])
   @@index([roleId])
@@ -66,6 +68,33 @@ model AdminUser {
 enum AdminReviewAvailability {
   AVAILABLE
   UNAVAILABLE
+}
+
+//* An invited administrator's INITIAL permission setup — one row per account,
+//* shared by everyone who may complete it. Who may see or complete it is never
+//* stored: it is derived from live roles, scopes and effective permissions on
+//* every read (admin/lib/delegation/setup-audience.ts). Opened when an
+//* invitation is actually sent to an account with no grants; completed by the
+//* first non-empty grant; reopened when a role or scope change clears grants;
+//* cancelled on deactivation; deleted on reactivation (a new cycle).
+model AdminPermissionSetup {
+  adminUserId  String                     @id
+  status       AdminPermissionSetupStatus @default(PENDING)
+  openedAt     DateTime                   @default(now())
+  resolvedAt   DateTime?
+  resolvedById String?
+  updatedAt    DateTime                   @updatedAt
+
+  adminUser  AdminUser  @relation("PermissionSetupSubject", fields: [adminUserId], references: [id], onDelete: Cascade)
+  resolvedBy AdminUser? @relation("PermissionSetupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([status, openedAt])
+}
+
+enum AdminPermissionSetupStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
 }
 
 //* Admin-facing in-app notification center — the AdminUser counterpart to

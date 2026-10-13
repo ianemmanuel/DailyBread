@@ -29,11 +29,20 @@ import { SYSTEM_USER_ID } from "@/constants/system"
 import { env } from "@/env"
 import { AdminPermissions } from "@repo/types/enums"
 import { applyAvailabilityChange, type SetAvailabilityInput } from "./admin.reviewerAvailability.service"
+import {
+  cancelPermissionSetup,
+  completePermissionSetup,
+  openPermissionSetup,
+  reopenPermissionSetup,
+  resetPermissionSetup,
+} from "./admin.permissionSetup.lifecycle"
 import type {
   AdminScopeContext,
   AuditLogInput,
   CreateAdminUserRequest,
   UpdateAdminUserPermissionsRequest,
+  UpdateAdminUserAssignmentRequest,
+  UpdateAdminUserProfileRequest,
   UpdateAdminUserRoleRequest,
   UpdateAdminUserScopesRequest,
 } from "@repo/types/backend"
@@ -70,7 +79,7 @@ export function formatDisplayName(user: {
  * current role pool is not counted (lib/delegation/delegation-policy.ts).
  */
 
-type Db = Prisma.TransactionClient
+export type Db = Prisma.TransactionClient
 
 const SUBJECT_INCLUDE = {
   role       : { include: { permissions: { include: { permission: true } } } },
@@ -85,7 +94,7 @@ function loadSubject(db: Db, id: string): Promise<Subject | null> {
 }
 
 /** The one scope a stored set of rows resolves to — a CITY row's country read from the city. */
-function scopeOfRows(rows: Subject["scopes"]): ResolvedScope | null {
+export function scopeOfRows(rows: Subject["scopes"]): ResolvedScope | null {
   const { scope, valid } = deriveScopeContext(rows.map((r) => ({
     scopeType    : r.scopeType,
     countryId    : r.countryId,
@@ -96,7 +105,7 @@ function scopeOfRows(rows: Subject["scopes"]): ResolvedScope | null {
 }
 
 /** A role's CURRENT pool — active keys only (the shared definition). */
-function poolOf(role: Subject["role"]): Set<string> {
+export function poolOf(role: Subject["role"]): Set<string> {
   return rolePoolKeys(role)
 }
 
@@ -111,7 +120,7 @@ function effectiveKeysOf(user: Subject): Set<string> {
  * GLOBAL admin can repair the assignment. Its EFFECTIVE keys do apply the full
  * rule — such a target holds none.
  */
-function targetOf(user: Subject): TargetSubject {
+export function targetOf(user: Subject): TargetSubject {
   return { id: user.id, roleName: user.role?.name ?? null, scope: scopeOfRows(user.scopes), permissions: effectiveKeysOf(user) }
 }
 
@@ -136,7 +145,7 @@ async function loadActorRow(db: Db, actorId: string): Promise<{ actor: ActorAuth
   }
 }
 
-async function loadActor(db: Db, actorId: string): Promise<ActorAuthority> {
+export async function loadActor(db: Db, actorId: string): Promise<ActorAuthority> {
   return (await loadActorRow(db, actorId)).actor
 }
 
@@ -360,8 +369,11 @@ export async function sendAdminInvitation(adminUserId: string, actorId: string) 
       },
     })
   } catch (err) {
-    serviceLog.error({ err, adminUserId }, "Clerk invitation failed")
-    throw new ApiError(502, `Failed to send Clerk invitation: ${(err as Error).message}`, "CLERK_ERROR")
+    // Clerk's own reason is in `errors`; its `message` is only the HTTP status text.
+    const clerkErrors = (err as { errors?: Array<{ code?: string; longMessage?: string; message?: string }> }).errors
+    const reason = clerkErrors?.[0]?.longMessage ?? clerkErrors?.[0]?.message ?? (err as Error).message
+    serviceLog.error({ err, clerkErrors, adminUserId }, "Clerk invitation failed")
+    throw new ApiError(502, `The invitation could not be sent: ${reason}`, "CLERK_ERROR")
   }
 
   const invitationExpiresAt = new Date(Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
@@ -369,20 +381,25 @@ export async function sendAdminInvitation(adminUserId: string, actorId: string) 
   // CONDITIONAL on the account still awaiting activation: a resend racing the
   // Clerk webhook that just activated the account must not set it back to
   // `invited` (the old unconditional update could).
-  const written = await prisma.adminUser.updateMany({
-    where: { id: adminUserId, status: { in: [AdminUserStatus.pending, AdminUserStatus.invited] } },
-    data : {
-      status              : AdminUserStatus.invited,
-      invitationSentAt    : new Date(),
-      invitationSentById  : actorId,
-      invitationExpiresAt,
-      invitationSentCount : { increment: 1 },
-    },
+  // The pending permission setup opens with the status change, and only once
+  // Clerk has accepted the invitation: a failed send leaves no task behind.
+  await prisma.$transaction(async (tx) => {
+    const written = await tx.adminUser.updateMany({
+      where: { id: adminUserId, status: { in: [AdminUserStatus.pending, AdminUserStatus.invited] } },
+      data : {
+        status              : AdminUserStatus.invited,
+        invitationSentAt    : new Date(),
+        invitationSentById  : actorId,
+        invitationExpiresAt,
+        invitationSentCount : { increment: 1 },
+      },
+    })
+    if (written.count !== 1) {
+      serviceLog.warn({ adminUserId, actorId }, "Invitation sent, but the account changed status meanwhile — status left as it is")
+      throw new ApiError(409, "This administrator's account changed while the invitation was being sent — reload to see its current status", "STATUS_CHANGED")
+    }
+    await openPermissionSetup(tx, adminUserId)
   })
-  if (written.count !== 1) {
-    serviceLog.warn({ adminUserId, actorId }, "Invitation sent, but the account changed status meanwhile — status left as it is")
-    throw new ApiError(409, "This administrator's account changed while the invitation was being sent — reload to see its current status", "STATUS_CHANGED")
-  }
 
   serviceLog.info({ adminUserId, actorId }, "Invitation sent")
 
@@ -414,12 +431,31 @@ export async function sendAdminInvitation(adminUserId: string, actorId: string) 
 // audit row either way; the row's metadata names the mode (the only audit
 // change made for recovery — see the audit session notes).
 
+/** The grants the editor was opened with: a baseline, so a stale save cannot overwrite a newer one. */
+function parseExpectedGrants(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length > 500 || raw.some((k) => typeof k !== "string")) {
+    throw new ApiError(400, "expectedGrants must be an array of permission keys", "INVALID_EXPECTED_GRANTS")
+  }
+  return raw as string[]
+}
+
+async function assertGrantsUnchanged(db: Db, adminUserId: string, expected: string[], current: string[]): Promise<void> {
+  const currentSet = new Set(current)
+  if (expected.length === currentSet.size && expected.every((k) => currentSet.has(k))) return
+  const setup = await db.adminPermissionSetup.findUnique({ where: { adminUserId }, select: { status: true } })
+  if (setup?.status === "COMPLETED" && expected.length === 0) {
+    throw new ApiError(409, "Someone else has already set up this administrator's permissions — reload to see them", "PERMISSION_SETUP_COMPLETED")
+  }
+  throw new ApiError(409, "This administrator's permissions changed after you opened them — reload and try again", "PERMISSIONS_CHANGED")
+}
+
 export async function updateAdminUserPermissions(input: UpdateAdminUserPermissionsRequest, actorId: string, mode: AssignmentMode = "delegation") {
   const { adminUserId } = input
   if (!Array.isArray(input.permissionKeys)) {
     throw new ApiError(400, "permissionKeys must be an array of permission keys", "INVALID_PERMISSION_KEYS")
   }
   const permissionKeys = parsePermissionKeys(input.permissionKeys)
+  const expectedGrants = input.expectedGrants === undefined ? null : parseExpectedGrants(input.expectedGrants)
 
   const result = await prisma.$transaction(async (tx) => {
     const { actor, row: actorRow } = await loadActorRow(tx, actorId)
@@ -439,6 +475,7 @@ export async function updateAdminUserPermissions(input: UpdateAdminUserPermissio
     if (target.status === AdminUserStatus.deactivated) {
       throw new ApiError(400, "Cannot grant permissions to a deactivated administrator", "INVALID_STATUS")
     }
+    if (expectedGrants) await assertGrantsUnchanged(tx, adminUserId, expectedGrants, currentKeys)
 
     const permissions = permissionKeys.length
       ? await tx.adminPermission.findMany({ where: { key: { in: permissionKeys } }, select: { id: true, key: true, isActive: true } })
@@ -461,6 +498,7 @@ export async function updateAdminUserPermissions(input: UpdateAdminUserPermissio
       select: { permission: { select: { key: true } } },
     })
     const after = written.map((w) => w.permission.key)
+    if (after.length > 0) await completePermissionSetup(tx, adminUserId, actorId)
 
     await auditInTx(tx, {
       adminUserId: actorId,
@@ -516,6 +554,7 @@ export async function updateAdminUserRole(input: UpdateAdminUserRoleRequest, act
     await lockVersions(tx, [actorRow, target])
     await tx.adminUser.update({ where: { id: adminUserId }, data: { roleId: newRole.id } })
     await tx.adminUserPermission.deleteMany({ where: { adminUserId } })
+    await reopenPermissionSetup(tx, adminUserId)
 
     const changes = {
       before: { roleId: target.roleId, roleName: target.role?.name ?? null, permissions: target.permissions.map((g) => g.permission.key) },
@@ -576,6 +615,7 @@ export async function updateAdminUserScopes(input: UpdateAdminUserScopesRequest,
     await tx.adminUserScope.deleteMany({ where: { adminUserId } })
     await tx.adminUserScope.create({ data: scopeRowData(adminUserId, scope) })
     await tx.adminUserPermission.deleteMany({ where: { adminUserId } })
+    await reopenPermissionSetup(tx, adminUserId)
 
     const changes = {
       before: {
@@ -602,6 +642,157 @@ export async function updateAdminUserScopes(input: UpdateAdminUserScopesRequest,
     permissionsCleaned: result.before.permissions.length,
     note              : "All permission grants were cleared. Permissions for the new scope are assigned separately.",
   }
+}
+
+//* ─── Edit: profile, and role + scope together ───────────────────────────────
+//
+// PROVISIONING, the same authority as create: the actor is GLOBAL or COUNTRY,
+// the target sits inside their scope, never themselves, never a super_admin.
+// The email is never editable — it is the identity Clerk invited; a wrong one
+// means deactivating the account and creating a new one. Both edits carry the
+// account version the form was loaded from, so a stale form cannot overwrite
+// a colleague's newer change.
+
+const NAME_MAX        = 100
+const EMPLOYEE_ID_MAX = 50
+
+/** The account version a form was loaded from; absent = no check (API callers). */
+function assertVersion(target: { updatedAt: Date }, expected: unknown): void {
+  if (expected === undefined) return
+  if (typeof expected !== "string" || Number.isNaN(Date.parse(expected))) {
+    throw new ApiError(400, "expectedUpdatedAt must be an ISO timestamp", "INVALID_EXPECTED_VERSION")
+  }
+  if (new Date(expected).getTime() !== target.updatedAt.getTime()) {
+    throw new ApiError(409, "This account was changed by someone else after you opened it — reload to see the latest", "ACCOUNT_CHANGED")
+  }
+}
+
+/** undefined = leave untouched; a required field may not be blank; an optional one blank = cleared. */
+function textField(raw: unknown, label: string, max: number, required: boolean): string | null | undefined {
+  if (raw === undefined) return undefined
+  if (raw !== null && typeof raw !== "string") throw new ApiError(400, `${label} must be text`, "INVALID_FIELD")
+  const value = (raw ?? "").trim()
+  if (!value) {
+    if (required) throw new ApiError(400, `${label} is required`, "INVALID_FIELD")
+    return null
+  }
+  if (value.length > max) throw new ApiError(400, `${label} must be at most ${max} characters`, "INVALID_FIELD")
+  return value
+}
+
+type ProfileField = "firstName" | "middleName" | "lastName" | "employeeId"
+
+export async function updateAdminUserProfile(input: UpdateAdminUserProfileRequest, actorId: string) {
+  const { adminUserId } = input
+  const requested: Partial<Record<ProfileField, string | null>> = {}
+  const fields: Array<[ProfileField, string, number, boolean]> = [
+    ["firstName", "First name", NAME_MAX, true],
+    ["middleName", "Middle name", NAME_MAX, false],
+    ["lastName", "Last name", NAME_MAX, true],
+    ["employeeId", "Employee ID", EMPLOYEE_ID_MAX, false],
+  ]
+  for (const [key, label, max, required] of fields) {
+    const value = textField(input[key], label, max, required)
+    if (value !== undefined) requested[key] = value
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const { actor, row: actorRow } = await loadActorRow(tx, actorId)
+    assertCanProvision(actor, AdminPermissions.ADMIN_USERS_PROFILES_UPDATE)
+    const target = await loadSubject(tx, adminUserId)
+    if (!target) throw new ApiError(404, "Admin user not found", "USER_NOT_FOUND")
+    assertCanManageTarget(actor, targetOf(target))
+    if (target.status === AdminUserStatus.deactivated) {
+      throw new ApiError(400, "A deactivated account cannot be edited — reactivate it first", "INVALID_STATUS")
+    }
+    assertVersion(target, input.expectedUpdatedAt)
+
+    const changed = (Object.keys(requested) as ProfileField[]).filter((k) => (target[k] ?? null) !== requested[k])
+    if (changed.length === 0) throw new ApiError(400, "Nothing has changed", "NO_CHANGE")
+    const employeeId = requested.employeeId
+    if (changed.includes("employeeId") && employeeId) {
+      const taken = await tx.adminUser.findFirst({ where: { employeeId, id: { not: adminUserId } }, select: { id: true } })
+      if (taken) throw new ApiError(409, "Another administrator already has this employee ID", "DUPLICATE_EMPLOYEE_ID")
+    }
+
+    const before = Object.fromEntries(changed.map((k) => [k, target[k] ?? null]))
+    const after  = Object.fromEntries(changed.map((k) => [k, requested[k] ?? null]))
+    await lockVersions(tx, [actorRow, target])
+    await tx.adminUser.update({ where: { id: adminUserId }, data: after })
+    await auditInTx(tx, {
+      adminUserId: actorId,
+      action     : "admin_user.profile_updated",
+      entityType : "AdminUser",
+      entityId   : adminUserId,
+      changes    : { before, after },
+    })
+    return changed
+  })
+
+  serviceLog.info({ adminUserId, actorId, fields: result }, "Profile updated")
+  return { success: true, updated: result }
+}
+
+/*
+ * Role and scope as ONE decision. Each is validated against the other (a
+ * role's allowed tiers), so two separate requests fail or succeed depending
+ * on their order — a city colleague cannot become an identity admin role-first
+ * — and leave a half-applied state in between. Here the PAIR is validated,
+ * then applied in one transaction: grants are cleared once, the pending setup
+ * reopens, one audit row records both.
+ */
+export async function updateAdminUserAssignment(input: UpdateAdminUserAssignmentRequest, actorId: string) {
+  const { adminUserId, roleId, scopes } = input
+  if (typeof roleId !== "string" || !roleId) throw new ApiError(400, "roleId is required", "MISSING_FIELDS")
+
+  const result = await prisma.$transaction(async (tx) => {
+    const { actor, row: actorRow } = await loadActorRow(tx, actorId)
+    const actorScope = assertCanProvision(actor, AdminPermissions.ADMIN_USERS_ROLES_ASSIGN)
+    const target = await loadSubject(tx, adminUserId)
+    if (!target) throw new ApiError(404, "Admin user not found", "USER_NOT_FOUND")
+    const subject = targetOf(target)
+    assertCanManageTarget(actor, subject)
+    if (target.status === AdminUserStatus.deactivated) {
+      throw new ApiError(400, "A deactivated account cannot be edited — reactivate it first", "INVALID_STATUS")
+    }
+    assertVersion(target, input.expectedUpdatedAt)
+
+    const role = await tx.adminRole.findUnique({ where: { id: roleId } })
+    if (!role) throw new ApiError(404, "Role not found", "ROLE_NOT_FOUND")
+    const scope = await resolveRequestedScope(tx, scopes)
+    assertProvisioningScope(actorScope, scope)
+    assertAssignableRoleAndScope(role.name, scope)
+
+    const roleChanged  = role.id !== target.roleId
+    const scopeChanged = !subject.scope || !sameScope(subject.scope, scope)
+    if (!roleChanged && !scopeChanged) throw new ApiError(400, "The role and scope are unchanged", "NO_CHANGE")
+
+    await lockVersions(tx, [actorRow, target])
+    if (roleChanged) await tx.adminUser.update({ where: { id: adminUserId }, data: { roleId: role.id } })
+    if (scopeChanged) {
+      await tx.adminUserScope.deleteMany({ where: { adminUserId } })
+      await tx.adminUserScope.create({ data: scopeRowData(adminUserId, scope) })
+    }
+    await tx.adminUserPermission.deleteMany({ where: { adminUserId } })
+    await reopenPermissionSetup(tx, adminUserId)
+
+    const cleared = target.permissions.map((g) => g.permission.key)
+    await auditInTx(tx, {
+      adminUserId: actorId,
+      action     : "admin_user.assignment_updated",
+      entityType : "AdminUser",
+      entityId   : adminUserId,
+      changes    : {
+        before: { roleId: target.roleId, roleName: target.role?.name ?? null, scope: scopeForAudit(subject.scope), permissions: cleared },
+        after : { roleId: role.id, roleName: role.name, scope: scopeForAudit(scope), permissions: [] as string[] },
+      },
+      metadata   : { roleChanged, scopeChanged, note: "All permission grants cleared. Re-grant for the new role and scope." },
+    })
+    return { permissionsCleared: cleared.length, roleChanged, scopeChanged }
+  })
+
+  serviceLog.info({ adminUserId, actorId, ...result }, "Role and scope updated — permissions cleared")
+  return { success: true, ...result }
 }
 
 // ─── Suspend, Reinstate, Reactivate, Deactivate ──────────────────────────────
@@ -685,6 +876,7 @@ export async function reactivateAdminUser(adminUserId: string, actorId: string) 
       invitationExpiresAt: null,
     })
     await tx.adminUserPermission.deleteMany({ where: { adminUserId } })
+    await resetPermissionSetup(tx, adminUserId)
     return { roleName: target.role?.name ?? null }
   })
   serviceLog.info({ adminUserId, actorId }, "Admin user reactivated — pending a new invitation")
@@ -712,6 +904,7 @@ export async function deactivateAdminUser(adminUserId: string, reason: string, a
     // A deactivated admin retains their DB record (offboarding, not deletion)
     // but must hold no live permission grants.
     await tx.adminUserPermission.deleteMany({ where: { adminUserId } })
+    await cancelPermissionSetup(tx, adminUserId, actorId)
   })
   serviceLog.warn({ adminUserId, actorId, reason }, "Admin user deactivated")
   auditService.log({
@@ -764,6 +957,7 @@ export function adminsInScopeWhere(scope: ResolvedScope | null): Prisma.AdminUse
 }
 
 const ADMIN_REF_SELECT = { id: true, firstName: true, lastName: true, email: true } as const
+const SETUP_SELECT     = { status: true, openedAt: true, resolvedAt: true, resolvedBy: { select: ADMIN_REF_SELECT } } as const
 
 const DETAIL_INCLUDE = {
   role       : { include: { permissions: { include: { permission: true } } } },
@@ -774,6 +968,7 @@ const DETAIL_INCLUDE = {
   } },
   createdBy       : { select: ADMIN_REF_SELECT },
   invitationSentBy: { select: ADMIN_REF_SELECT },
+  permissionSetup : { select: SETUP_SELECT },
 } satisfies Prisma.AdminUserInclude
 
 /**
@@ -788,6 +983,7 @@ function capabilitiesFor(actor: ActorAuthority, user: Subject) {
   const pool = poolOf(user.role)
   return {
     invite            : can(AdminPermissions.ADMIN_USERS_INVITATIONS_SEND) && (s === AdminUserStatus.pending || s === AdminUserStatus.invited),
+    editProfile       : can(AdminPermissions.ADMIN_USERS_PROFILES_UPDATE) && s !== AdminUserStatus.deactivated,
     changeRole        : can(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN) && s !== AdminUserStatus.deactivated,
     changeScope       : can(AdminPermissions.ADMIN_USERS_ROLES_ASSIGN) && s !== AdminUserStatus.deactivated,
     suspend           : can(AdminPermissions.ADMIN_USERS_ACCOUNTS_SUSPEND) && s === AdminUserStatus.active,
@@ -879,7 +1075,7 @@ export async function listAdminUsers(filters: ListAdminUsersFilters, actorScope:
   const scopesInclude = { include: { country: { select: { id: true, name: true, code: true } }, city: { select: { id: true, name: true } } } } as const
 
   const [users, total, statusCounts] = await Promise.all([
-    prisma.adminUser.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: "desc" }, include: { role: true, scopes: scopesInclude } }),
+    prisma.adminUser.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: "desc" }, include: { role: true, scopes: scopesInclude, permissionSetup: { select: { status: true } } } }),
     prisma.adminUser.count({ where }),
     countAdminsByStatus(scopeWhere),
   ])
@@ -933,14 +1129,15 @@ export async function getManageableAdminUserIds(actorScopeContext: AdminScopeCon
 // exactly the administrators they may assign to — never the rest of the
 // directory, and a target they cannot assign to is a 404 like a missing one.
 
-const OPTIONS_INCLUDE = {
+export const OPTIONS_INCLUDE = {
   ...SUBJECT_INCLUDE,
-  scopes: { include: { city: { select: { countryId: true, status: true, name: true } }, country: { select: { name: true } } } },
+  scopes         : { include: { city: { select: { countryId: true, status: true, name: true } }, country: { select: { name: true } } } },
+  permissionSetup: { select: SETUP_SELECT },
 } satisfies Prisma.AdminUserInclude
 
 type OptionsUser = Prisma.AdminUserGetPayload<{ include: typeof OPTIONS_INCLUDE }>
 
-function summaryOf(user: OptionsUser) {
+export function summaryOf(user: OptionsUser) {
   return {
     id         : user.id,
     firstName  : user.firstName,
@@ -994,6 +1191,7 @@ export async function getPermissionOptions(adminUserId: string, actorId: string)
     grants,
     /** Grant rows outside the current pool: confer nothing, dropped on the next save. */
     staleGrants: grants.filter((k) => !poolKeys.has(k)),
+    setup      : user.permissionSetup,
     delegation: options.delegation,
     recovery  : options.recovery,
   }

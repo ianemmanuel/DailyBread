@@ -25,6 +25,7 @@ function optionsWith(overrides: Partial<PermissionOptions> = {}): PermissionOpti
     pool       : POOL,
     grants     : ["vendors:meals:read"],
     staleGrants: [],
+    setup      : null,
     delegation : { allowed: true, code: null, message: null, movable: ["vendors:meals:read", "vendors:meals:moderate"] },
     recovery   : { allowed: false, code: "FORBIDDEN", message: null, movable: [] },
     ...overrides,
@@ -46,7 +47,7 @@ describe("PermissionEditor", () => {
     expect(box("vendors:meals:read")?.getAttribute("aria-checked")).toBe("true")
     expect(box("vendors:meals:moderate")?.disabled).toBe(false)
     expect(box("vendors:outlets:read")?.disabled).toBe(true)
-    expect(button("Save permissions")?.disabled).toBe(true)
+    expect(button("Review changes")?.disabled).toBe(true)
   })
 
   it("search narrows the list by key, module or description", async () => {
@@ -63,7 +64,8 @@ describe("PermissionEditor", () => {
     const onSaved = vi.fn()
     render(<PermissionEditor options={optionsWith()} onSaved={onSaved} />)
     await click(box("vendors:meals:moderate"))
-    await click(button("Save permissions"))
+    await click(button("Review changes"))
+    await click(button("Confirm and save"))
     const [url, init] = fetchSpy.mock.calls[0]!
     expect(url).toBe("/api/identity/users/t-1/permissions")
     expect(JSON.parse(init.body).permissionKeys.sort()).toEqual(["vendors:meals:moderate", "vendors:meals:read"])
@@ -76,9 +78,65 @@ describe("PermissionEditor", () => {
     const onSaved = vi.fn()
     render(<PermissionEditor options={optionsWith()} onSaved={onSaved} />)
     await click(box("vendors:meals:moderate"))
-    await click(button("Save permissions"))
+    await click(button("Review changes"))
+    await click(button("Confirm and save"))
     expect(document.querySelector("[role=alert]")?.textContent).toBe("You can only grant or remove permissions you hold yourself")
     expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it("sends the grants it started from, so the backend can refuse a stale save", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(200, { data: { updated: 2 } }))
+    render(<PermissionEditor options={optionsWith()} />)
+    await click(box("vendors:meals:moderate"))
+    await click(button("Review changes"))
+    await click(button("Confirm and save"))
+    expect(JSON.parse(fetchSpy.mock.calls[0]![1].body).expectedGrants).toEqual(["vendors:meals:read"])
+  })
+
+  it("a setup someone else completed: says so, keeps the selection and offers the latest state", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(409, {
+      code: "PERMISSION_SETUP_COMPLETED", message: "Someone else has already set up this administrator's permissions — reload to see them",
+    }))
+    const onSaved = vi.fn()
+    render(<PermissionEditor options={optionsWith({ grants: [] })} onSaved={onSaved} />)
+    await click(box("vendors:meals:moderate"))
+    await click(button("Review changes"))
+    await click(button("Confirm and save"))
+    expect(document.querySelector("[role=alert]")?.textContent).toContain("Someone else has already set up")
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
+    await click(button("Load latest"))
+    expect(refresh).toHaveBeenCalled()
+    await click(button("Back"))
+    expect(box("vendors:meals:moderate")?.getAttribute("aria-checked")).toBe("true")
+  })
+
+  it("an ordinary refusal offers no reload", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(403, { code: "PERMISSION_NOT_HELD", message: "Not yours to grant" }))
+    render(<PermissionEditor options={optionsWith()} />)
+    await click(box("vendors:meals:moderate"))
+    await click(button("Review changes"))
+    await click(button("Confirm and save"))
+    expect(button("Load latest")).toBeNull()
+  })
+
+  it("review spells out every change, with its description, before anything is sent", async () => {
+    render(<PermissionEditor options={optionsWith({ staleGrants: ["old:thing:read"], grants: ["vendors:meals:read", "old:thing:read"] })} />)
+    await click(box("vendors:meals:moderate"))
+    await click(box("vendors:meals:read"))
+    await click(button("Review changes"))
+    const added   = document.querySelector("[aria-label='Permissions to add']")!
+    const removed = document.querySelector("[aria-label='Permissions to remove']")!
+    expect(added.textContent).toContain("Adding 1 permission")
+    expect(added.textContent).toContain("Meals · Moderate")
+    expect(added.textContent).toContain("Moderate meals")
+    expect(added.textContent).toContain("vendors:meals:moderate")
+    expect(removed.textContent).toContain("Removing 2 permissions")
+    expect(removed.textContent).toContain("Read meals")
+    expect(removed.textContent).toContain("No longer part of this role")
+    expect(fetchSpy).not.toHaveBeenCalled()
+    await click(button("Back"))
+    expect(box("vendors:meals:moderate")?.getAttribute("aria-checked")).toBe("true")
   })
 
   it("cancel discards the selection without saving", async () => {
@@ -98,9 +156,9 @@ describe("PermissionEditor", () => {
       recovery  : { allowed: true, code: null, message: null, movable: POOL.map((p) => p.key) },
     })} />)
     await click(box("vendors:outlets:read"))
-    await click(button("Review recovery…"))
+    await click(button("Review changes"))
     expect(fetchSpy).not.toHaveBeenCalled()
-    await click(button("Apply recovery"))
+    await click(button("Confirm and assign"))
     expect(fetchSpy.mock.calls[0]![0]).toBe("/api/identity/users/t-1/permissions/recovery")
   })
 

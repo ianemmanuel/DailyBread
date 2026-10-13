@@ -18,6 +18,8 @@ import {
 import { navSections } from "@/utils/constants/nav-items"
 import { useAdminSession } from "@/providers/admin-session-provider"
 import { getScopeTier } from "@/lib/auth/scope-tier"
+import { useNavIndicators } from "@/providers/nav-indicators-provider"
+import { NavCount } from "./NavCount"
 
 interface SidebarNavProps {
   collapsed?: boolean
@@ -28,6 +30,7 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
   const pathname = usePathname()
   const session  = useAdminSession()
   const tier     = getScopeTier(session)
+  const indicators = useNavIndicators()
 
   const visibleSections = navSections
     .map((section) => ({
@@ -77,7 +80,7 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
           : href === "/identity"
             ? pathname === "/identity" ||
               (pathname.startsWith("/identity/") &&
-                !/^\/identity\/(new|audit|permissions)(\/|$)/.test(pathname))
+                !/^\/identity\/(new|audit|permissions|setup)(\/|$)/.test(pathname))
             // "/vendor-categories" is both the Vendor Categories "Home"
             // link and a prefix of "/vendor-categories/adoption" and
             // "/vendor-categories/revenue", which have their own nav
@@ -123,7 +126,14 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
     "/vendors/profiles"  : session.hasFlaggedProfiles,
     "/meals/dishes"     : session.hasFlaggedMeals,
   }
-  const showDot = (href: string) => !!dotFlags[href]
+  // Counts, unlike the dots, are work assigned to this viewer — rendered as a number.
+  const counts: Record<string, { count: number; label: string } | undefined> = {
+    "/identity/setup": indicators.pendingPermissionSetups
+      ? { count: indicators.pendingPermissionSetups, label: "Pending permission assignments" }
+      : undefined,
+  }
+  const showDot = (href: string) => !!dotFlags[href] && !counts[href]
+  const hasSignal = (href: string) => !!dotFlags[href] || !!counts[href]
 
   const isCollapsed = collapsed && !isMobile
 
@@ -138,7 +148,7 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
           // section.items — which is already filtered to what this admin
           // has permission to see (visibleSections above) — so a section
           // never glows because of a page the viewer can't open anyway.
-          const sectionHasNotification = section.items.some((item) => showDot(item.href))
+          const sectionHasNotification = section.items.some((item) => hasSignal(item.href))
 
           return (
             <div key={section.title}>
@@ -209,6 +219,7 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
                                     <span className="relative inline-flex h-2 w-2 rounded-full bg-destructive" />
                                   </span>
                                 )}
+                                {counts[item.href] && <NavCount {...counts[item.href]!} />}
                                 {item.badge && (
                                   <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary">
                                     {item.badge}
@@ -291,6 +302,7 @@ export function SidebarNav({ collapsed = false, isMobile = false }: SidebarNavPr
                                   <span className="relative inline-flex h-2 w-2 rounded-full bg-destructive" />
                                 </span>
                               )}
+                              {counts[item.href] && <NavCount {...counts[item.href]!} />}
                               {item.badge && (
                                 <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary">
                                   {item.badge}

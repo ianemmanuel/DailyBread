@@ -8,6 +8,8 @@ import {
   updateAdminUserPermissions,
   updateAdminUserRole,
   updateAdminUserScopes,
+  updateAdminUserProfile,
+  updateAdminUserAssignment,
   suspendAdminUser,
   reinstateAdminUser,
   reactivateAdminUser,
@@ -22,6 +24,7 @@ import {
   listDelegableAdmins,
 } from "../services/admin.user.service"
 import { parseAvailabilityInput } from "./admin.reviewerAvailability.controller"
+import { getPermissionSetupSummary, listPermissionSetups } from "../services/admin.permissionSetup.service"
 
 /*
  * Mutations pass ONLY the actor's id: the service re-reads the actor's role,
@@ -113,8 +116,8 @@ function permissionsHandler(mode: "delegation" | "recovery"): RequestHandler {
       const { adminUser } = req as unknown as AdminRequest
       const { id }        = req.params as { id: string }
       refuseFields(req.body, ["roleId", "scopes", "mode"])
-      const { permissionKeys } = req.body ?? {}
-      const result = await updateAdminUserPermissions({ adminUserId: id, permissionKeys }, adminUser.id, mode)
+      const { permissionKeys, expectedGrants } = req.body ?? {}
+      const result = await updateAdminUserPermissions({ adminUserId: id, permissionKeys, expectedGrants }, adminUser.id, mode)
       return sendSuccess(res, result, mode === "recovery" ? "Permissions recovered" : "Permissions updated")
     } catch (err) { next(err) }
   }
@@ -148,6 +151,29 @@ export const handleListDelegableAdmins: RequestHandler = async (req, res, next) 
   } catch (err) { next(err) }
 }
 
+export const handleListPermissionSetups: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser } = req as unknown as AdminRequest
+    const { lane, page, pageSize } = req.query
+    const result = await listPermissionSetups(
+      {
+        lane    : typeof lane === "string" ? lane : undefined,
+        page    : typeof page === "string" ? parseInt(page, 10) : undefined,
+        pageSize: typeof pageSize === "string" ? parseInt(pageSize, 10) : undefined,
+      },
+      adminUser.id,
+    )
+    return sendSuccess(res, result, "Pending permission setups fetched")
+  } catch (err) { next(err) }
+}
+
+export const handleGetPermissionSetupSummary: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser } = req as unknown as AdminRequest
+    return sendSuccess(res, await getPermissionSetupSummary(adminUser.id), "Pending permission setup summary fetched")
+  } catch (err) { next(err) }
+}
+
 export const handleUpdateRole: RequestHandler = async (req, res, next) => {
   try {
     const { adminUser } = req as unknown as AdminRequest
@@ -171,6 +197,31 @@ export const handleUpdateScopes: RequestHandler = async (req, res, next) => {
     }
     const result = await updateAdminUserScopes({ adminUserId: id, scopes }, adminUser.id)
     return sendSuccess(res, result, "Scopes updated")
+  } catch (err) { next(err) }
+}
+
+export const handleUpdateProfile: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser } = req as unknown as AdminRequest
+    const { id } = req.params as { id: string }
+    if (req.body?.email !== undefined) {
+      throw new ApiError(400, "An email address cannot be changed. Deactivate this account and create a new one with the correct address.", "EMAIL_NOT_EDITABLE")
+    }
+    refuseFields(req.body, ["roleId", "scopes", "permissionKeys", "status"])
+    const { firstName, middleName, lastName, employeeId, expectedUpdatedAt } = req.body ?? {}
+    const result = await updateAdminUserProfile({ adminUserId: id, firstName, middleName, lastName, employeeId, expectedUpdatedAt }, adminUser.id)
+    return sendSuccess(res, result, "Profile updated")
+  } catch (err) { next(err) }
+}
+
+export const handleUpdateAssignment: RequestHandler = async (req, res, next) => {
+  try {
+    const { adminUser } = req as unknown as AdminRequest
+    const { id } = req.params as { id: string }
+    refuseFields(req.body, ["permissionKeys", "email", "firstName", "lastName", "middleName", "employeeId"])
+    const { roleId, scopes, expectedUpdatedAt } = req.body ?? {}
+    const result = await updateAdminUserAssignment({ adminUserId: id, roleId, scopes, expectedUpdatedAt }, adminUser.id)
+    return sendSuccess(res, result, "Role and scope updated")
   } catch (err) { next(err) }
 }
 

@@ -22,3 +22,17 @@ export function scopeLabel(scopes: AdminUserScope[] | undefined): string {
 export function detailHref(userId: string): string {
   return `/identity/${userId}`
 }
+
+/** "vendors:meals:moderate" → "Meals · Moderate": the readable name of a permission key. */
+export function permissionTitle(key: string): string {
+  return key.split(":").slice(1)
+    .map((part) => part.replace(/_/g, " "))
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" · ")
+}
+
+/** "admin_users" → "Admin users". */
+export function moduleLabel(module: string): string {
+  const words = module.replace(/_/g, " ")
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { KeyRound, LifeBuoy } from "lucide-react"
+import { KeyRound, ShieldPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
@@ -12,9 +12,10 @@ import { PermissionEditor } from "./PermissionEditor"
 /** Rendered only when the server offered delegation or recovery for this target. */
 export function ManagePermissionsDialog({ options }: { options: PermissionOptions }) {
   const [open, setOpen] = useState(false)
-  // A fresh editor per opening, so a cancelled or saved session leaves nothing behind.
+  // A fresh editor per opening, and whenever the server's grants change (a
+  // reload after a stale save), so nothing from an older state lingers.
   const [session, setSession] = useState(0)
-  const recoveryOnly = !options.delegation.allowed && options.recovery.allowed
+  const firstGrant = options.grants.length === 0
   const { target } = options
 
   function onOpenChange(next: boolean) {
@@ -25,9 +26,9 @@ export function ManagePermissionsDialog({ options }: { options: PermissionOption
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm" variant={recoveryOnly ? "warning" : "outline"}>
-          {recoveryOnly ? <LifeBuoy /> : <KeyRound />}
-          {recoveryOnly ? "Recover permissions" : "Manage permissions"}
+        <Button variant="solid-info" className="group">
+          {firstGrant ? <ShieldPlus className="transition-transform duration-200 group-hover:scale-110" /> : <KeyRound className="transition-transform duration-200 group-hover:-rotate-12" />}
+          {firstGrant ? "Assign permissions" : "Manage permissions"}
         </Button>
       </DialogTrigger>
       <DialogContent className="flex max-h-[90dvh] flex-col sm:max-w-3xl">
@@ -39,7 +40,7 @@ export function ManagePermissionsDialog({ options }: { options: PermissionOption
           </DialogDescription>
         </DialogHeader>
         <PermissionEditor
-          key={session}
+          key={`${session}:${options.grants.join(",")}`}
           options={options}
           scrollClassName="max-h-[50dvh]"
           onSaved={() => setOpen(false)}

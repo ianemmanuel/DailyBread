@@ -155,6 +155,27 @@ export interface CreateAdminUserRequest {
 export interface UpdateAdminUserPermissionsRequest {
   adminUserId : string
   permissionKeys : string[]   // replaces all existing grants; empty array = revoke all
+  /** The grants the editor started from; a mismatch is refused (409) instead of overwriting a newer save. */
+  expectedGrants?: string[]
+}
+
+/** Identity fields only. Email is never editable: a wrong address means deactivating and creating a new account. */
+export interface UpdateAdminUserProfileRequest {
+  adminUserId       : string
+  firstName?        : unknown
+  middleName?       : unknown
+  lastName?         : unknown
+  employeeId?       : unknown
+  /** The account version the form was loaded from; a newer one is refused (409). */
+  expectedUpdatedAt?: unknown
+}
+
+/** Role and scope together, validated as a pair and applied in one transaction. */
+export interface UpdateAdminUserAssignmentRequest {
+  adminUserId       : string
+  roleId            : unknown
+  scopes            : unknown
+  expectedUpdatedAt?: unknown
 }
 
 export interface SuspendAdminUserRequest {

@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { KeyRound, LifeBuoy, Users } from "lucide-react"
+import { KeyRound, ShieldPlus, Users } from "lucide-react"
 import { adminFetch } from "@/lib/api"
 import { getAdminSession } from "@/lib/auth/session"
 import { AdminPermissions } from "@repo/types/admin-app"
@@ -55,7 +55,7 @@ export default async function PermissionsPage({ searchParams }: Props) {
           <p className="mt-0.5 text-sm text-muted-foreground">
             {canDelegate && "Grant or remove the permissions you hold for colleagues in your department and scope."}
             {canDelegate && canRecover && " "}
-            {canRecover && "Recovery lets you set up or restore another department's permissions, held or not."}
+            {canRecover && "You can also set up other departments' permissions, including ones you don't hold."}
           </p>
         </div>
       </div>
@@ -71,7 +71,7 @@ export default async function PermissionsPage({ searchParams }: Props) {
             defaultValue: mode,
             options     : [
               { value: "delegation", label: "Ordinary delegation" },
-              { value: "recovery",   label: "Recovery" },
+              { value: "recovery",   label: "Other departments" },
             ],
           }]}
         />
@@ -111,7 +111,7 @@ export default async function PermissionsPage({ searchParams }: Props) {
                   {u.delegation && <span className="badge-neutral">Delegation</span>}
                   {u.recovery && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
-                      <LifeBuoy className="h-3 w-3" /> Recovery
+                      <ShieldPlus className="h-3 w-3" /> Other department
                     </span>
                   )}
                   <Link

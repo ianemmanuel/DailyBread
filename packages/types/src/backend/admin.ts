@@ -27,6 +27,8 @@ export type {
   UpdateAdminUserRoleRequest,
   ScopeEntry,
   UpdateAdminUserScopesRequest,
+  UpdateAdminUserProfileRequest,
+  UpdateAdminUserAssignmentRequest,
   AdminUserListItem,
   AdminUserDetail,
   SessionRole,
